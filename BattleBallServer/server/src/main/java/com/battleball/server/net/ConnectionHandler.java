@@ -1,0 +1,317 @@
+package com.battleball.server.net;
+
+import com.battleball.proto.DisconnectNotice;
+import com.battleball.proto.DisconnectReason;
+import com.battleball.proto.Envelope;
+import com.battleball.proto.ErrorCode;
+import com.battleball.proto.ErrorMessage;
+import com.battleball.proto.Hello;
+import com.battleball.proto.HelloAck;
+import com.battleball.proto.LoginRequest;
+import com.battleball.proto.Pong;
+import com.battleball.proto.RegisterRequest;
+import com.battleball.server.ServerConfig;
+import com.battleball.server.auth.AuthService;
+import com.battleball.server.game.PlayerActions;
+import com.battleball.server.game.match.MatchManager;
+import com.battleball.server.session.SessionRegistry;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.timeout.IdleState;
+import io.netty.handler.timeout.IdleStateEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.net.InetSocketAddress;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * One instance per connection. Connection lifecycle of docs/protocol/BattleBall.md section 2:
+ * CONNECTED -Hello-> HANDSHAKED -Login-> AUTHENTICATED -> CLOSED. The state is only touched on this channel's event-loop thread;
+ * slow work (bcrypt, SQL) runs on the DB executor and its answer is posted back to the event loop.
+ */
+public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelope> {
+    private static final Logger LOG = LoggerFactory.getLogger(ConnectionHandler.class);
+    private static final int MAX_VIOLATIONS = 3;
+
+    enum State { CONNECTED, HANDSHAKED, AUTHENTICATED, CLOSED }
+
+    private final ServerConfig config;
+    private final AuthService auth;
+    private final SessionRegistry sessions;
+    private final ExecutorService dbExecutor;
+    private final ConnectionLimiter limiter;
+    private final PlayerActions actions;
+    private final MatchManager matches;
+    private final SerialExecutor serial;
+
+    private State state = State.CONNECTED;
+    private boolean counted;
+    private boolean busy;          // a register/login is being processed: one at a time per connection
+    private int violations;
+    private long accountId;
+    private String ip = "?";
+    private ScheduledFuture<?> helloTimer;
+
+    public ConnectionHandler(ServerConfig config, AuthService auth, SessionRegistry sessions, ExecutorService dbExecutor, ConnectionLimiter limiter,
+                             PlayerActions actions, MatchManager matches) {
+        this.config = config;
+        this.auth = auth;
+        this.sessions = sessions;
+        this.dbExecutor = dbExecutor;
+        this.limiter = limiter;
+        this.actions = actions;
+        this.matches = matches;
+        this.serial = new SerialExecutor(dbExecutor);
+    }
+
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) {
+        if (ctx.channel().remoteAddress() instanceof InetSocketAddress a) {
+            ip = a.getAddress().getHostAddress();
+        }
+        if (!limiter.tryAcquire()) {
+            sendAndClose(ctx, DisconnectReason.SERVER_FULL, "server full");
+            return;
+        }
+        counted = true;
+        helloTimer = ctx.executor().schedule(() -> {
+            if (state == State.CONNECTED) {
+                sendAndClose(ctx, DisconnectReason.TIMEOUT, "no Hello");
+            }
+        }, config.helloTimeoutMs(), TimeUnit.MILLISECONDS);
+        ctx.fireChannelActive();
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) {
+        state = State.CLOSED;
+        if (helloTimer != null) {
+            helloTimer.cancel(false);
+        }
+        if (accountId != 0) {
+            sessions.unregister(accountId, ctx.channel());
+            matches.onDisconnect(accountId, ctx.channel());     // a running match pauses and waits for the player to come back
+        }
+        if (counted) {
+            limiter.release();
+            counted = false;
+        }
+        ctx.fireChannelInactive();
+    }
+
+    @Override
+    protected void channelRead0(ChannelHandlerContext ctx, Envelope msg) {
+        int rid = msg.getRequestId();
+        switch (msg.getPayloadCase()) {
+            case HELLO -> onHello(ctx, rid, msg.getHello());
+            case PING -> ctx.writeAndFlush(Envelope.newBuilder().setRequestId(rid).setPong(
+                    Pong.newBuilder().setClientTimeMs(msg.getPing().getClientTimeMs()).setServerTimeMs(System.currentTimeMillis())).build());
+            case REGISTER_REQUEST -> onRegister(ctx, rid, msg.getRegisterRequest());
+            case LOGIN_REQUEST -> onLogin(ctx, rid, msg.getLoginRequest());
+            case LOGOUT_REQUEST -> ctx.close();
+            case CHANGE_PASSWORD_REQUEST -> {
+                if (state != State.AUTHENTICATED) {
+                    violation(ctx, rid, ErrorCode.INVALID_STATE, "log in first");
+                } else {
+                    long account = accountId;
+                    submit(ctx, () -> {
+                        var result = auth.changePassword(account, "password change", msg.getChangePasswordRequest());
+                        ctx.executor().execute(() -> ctx.writeAndFlush(Envelope.newBuilder().setRequestId(rid).setChangePasswordResult(result).build()));
+                    });
+                }
+            }
+            case START_MATCH_REQUEST -> {
+                if (state != State.AUTHENTICATED) {
+                    violation(ctx, rid, ErrorCode.INVALID_STATE, "log in first");
+                } else {
+                    long account = accountId;
+                    serial.execute(() -> matches.start(account, rid, msg.getStartMatchRequest(), ctx.channel()));
+                }
+            }
+            case START_TRAINING_REQUEST -> {
+                if (state != State.AUTHENTICATED) {
+                    violation(ctx, rid, ErrorCode.INVALID_STATE, "log in first");
+                } else {
+                    long account = accountId;
+                    serial.execute(() -> matches.startTraining(account, rid, msg.getStartTrainingRequest(), ctx.channel()));
+                }
+            }
+            case PLAYER_STATE_REPORT -> {
+                if (state == State.AUTHENTICATED) {
+                    matches.report(accountId, msg.getPlayerStateReport());
+                }
+            }
+            case USE_SKILL_REQUEST -> {
+                if (state == State.AUTHENTICATED) {
+                    matches.useSkill(accountId, msg.getUseSkillRequest());
+                }
+            }
+            case REVIVE_REQUEST -> {
+                if (state == State.AUTHENTICATED) {
+                    matches.revive(accountId);
+                }
+            }
+            case LEAVE_MATCH_REQUEST -> {
+                if (state == State.AUTHENTICATED) {
+                    matches.leave(accountId);
+                }
+            }
+            case RESUME_MATCH_REQUEST -> {
+                if (state != State.HANDSHAKED || busy) {
+                    violation(ctx, rid, ErrorCode.INVALID_STATE, "resume not allowed now");
+                } else {
+                    long account = matches.resume(rid, msg.getResumeMatchRequest().getMatchToken(), ctx.channel());
+                    if (account != 0) {
+                        state = State.AUTHENTICATED;
+                        accountId = account;
+                        Channel previous = sessions.register(accountId, ctx.channel());
+                        if (previous != null && previous != ctx.channel()) {
+                            kick(previous);
+                        }
+                    }
+                }
+            }
+            default -> {
+                if (PlayerActions.handles(msg.getPayloadCase()) && state == State.AUTHENTICATED) {
+                    long account = accountId;
+                    serial.execute(() -> {
+                        for (Envelope reply : actions.handle(account, msg)) {
+                            ctx.executor().execute(() -> ctx.writeAndFlush(reply));
+                        }
+                    });
+                } else {
+                    violation(ctx, rid, ErrorCode.INVALID_STATE, "message not allowed here: " + msg.getPayloadCase());
+                }
+            }
+        }
+    }
+
+    private void onHello(ChannelHandlerContext ctx, int rid, Hello hello) {
+        if (state != State.CONNECTED) {
+            violation(ctx, rid, ErrorCode.INVALID_STATE, "Hello already received");
+            return;
+        }
+        if (hello.getProtocolVersion() != ServerConfig.PROTOCOL_VERSION) {
+            ctx.writeAndFlush(error(rid, ErrorCode.PROTOCOL_VERSION_UNSUPPORTED, "server speaks protocol " + ServerConfig.PROTOCOL_VERSION))
+                    .addListener(ChannelFutureListener.CLOSE);
+            return;
+        }
+        state = State.HANDSHAKED;
+        ctx.writeAndFlush(Envelope.newBuilder().setRequestId(rid).setHelloAck(HelloAck.newBuilder()
+                .setProtocolVersion(ServerConfig.PROTOCOL_VERSION)
+                .setServerTimeMs(System.currentTimeMillis())
+                .setHeartbeatIntervalMs(config.heartbeatIntervalMs())
+                .setTickRateHz(config.tickRateHz())
+                .setServerName(config.serverName())
+                .setAssetBaseUrl(config.assetBaseUrl())
+                .setAssetVersion(AssetInfo.version(config.assetManifest()))).build());
+    }
+
+    private void onRegister(ChannelHandlerContext ctx, int rid, RegisterRequest req) {
+        if (state != State.HANDSHAKED || busy) {
+            violation(ctx, rid, ErrorCode.INVALID_STATE, "register not allowed now");
+            return;
+        }
+        busy = true;
+        submit(ctx, () -> {
+            var result = auth.register(ip, req);
+            ctx.executor().execute(() -> {
+                busy = false;
+                ctx.writeAndFlush(Envelope.newBuilder().setRequestId(rid).setRegisterResult(result).build());
+            });
+        });
+    }
+
+    private void onLogin(ChannelHandlerContext ctx, int rid, LoginRequest req) {
+        if (state != State.HANDSHAKED || busy) {
+            violation(ctx, rid, ErrorCode.INVALID_STATE, "login not allowed now");
+            return;
+        }
+        busy = true;
+        submit(ctx, () -> {
+            AuthService.LoginOutcome outcome = auth.login(ip, req);
+            ctx.executor().execute(() -> {
+                busy = false;
+                if (state == State.CLOSED) {
+                    return;
+                }
+                if (outcome.ok()) {
+                    state = State.AUTHENTICATED;
+                    accountId = outcome.accountId();
+                    Channel previous = sessions.register(accountId, ctx.channel());
+                    if (previous != null && previous != ctx.channel()) {
+                        kick(previous);
+                    }
+                }
+                ctx.writeAndFlush(Envelope.newBuilder().setRequestId(rid).setLoginResult(outcome.result()).build());
+                if (outcome.ok()) {
+                    long account = outcome.accountId();
+                    serial.execute(() -> {
+                        try {
+                            Envelope snapshot = actions.snapshotEnvelope(account, 0);
+                            ctx.executor().execute(() -> ctx.writeAndFlush(snapshot));
+                        } catch (java.sql.SQLException e) {
+                            LOG.error("cannot load the player data of {}", account, e);
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    private void submit(ChannelHandlerContext ctx, Runnable work) {
+        try {
+            dbExecutor.execute(work);
+        } catch (RejectedExecutionException e) {
+            busy = false;
+            sendAndClose(ctx, DisconnectReason.SERVER_SHUTDOWN, "server stopping");
+        }
+    }
+
+    /** Sent to the older connection of an account that logged in again: LOGGED_IN_ELSEWHERE (CONFIRMED rule). */
+    private static void kick(Channel old) {
+        old.eventLoop().execute(() -> old.writeAndFlush(Envelope.newBuilder().setDisconnectNotice(DisconnectNotice.newBuilder()
+                .setReason(DisconnectReason.LOGGED_IN_ELSEWHERE).setMessage("logged in elsewhere")).build()).addListener(ChannelFutureListener.CLOSE));
+    }
+
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        if (evt instanceof IdleStateEvent e && e.state() == IdleState.READER_IDLE) {
+            sendAndClose(ctx, DisconnectReason.TIMEOUT, "idle");
+            return;
+        }
+        super.userEventTriggered(ctx, evt);
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        LOG.debug("connection {} error: {}", ip, cause.toString());
+        sendAndClose(ctx, DisconnectReason.PROTOCOL_VIOLATION, "bad frame");
+    }
+
+    private void violation(ChannelHandlerContext ctx, int rid, ErrorCode code, String message) {
+        ctx.writeAndFlush(error(rid, code, message));
+        if (++violations >= MAX_VIOLATIONS) {
+            sendAndClose(ctx, DisconnectReason.PROTOCOL_VIOLATION, "too many invalid messages");
+        }
+    }
+
+    private static Envelope error(int rid, ErrorCode code, String message) {
+        return Envelope.newBuilder().setRequestId(rid).setError(ErrorMessage.newBuilder().setCode(code).setMessage(message)).build();
+    }
+
+    private void sendAndClose(ChannelHandlerContext ctx, DisconnectReason reason, String message) {
+        if (state == State.CLOSED || !ctx.channel().isActive()) {
+            ctx.close();
+            return;
+        }
+        ctx.writeAndFlush(Envelope.newBuilder().setDisconnectNotice(DisconnectNotice.newBuilder().setReason(reason).setMessage(message)).build())
+                .addListener(ChannelFutureListener.CLOSE);
+    }
+}

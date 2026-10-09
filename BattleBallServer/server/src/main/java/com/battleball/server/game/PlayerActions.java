@@ -1,0 +1,158 @@
+package com.battleball.server.game;
+
+import com.battleball.proto.ActionError;
+import com.battleball.proto.ActionResult;
+import com.battleball.proto.Envelope;
+import com.battleball.server.data.Json;
+import com.battleball.server.data.StaticData;
+import com.battleball.server.data.StaticDataStore;
+import com.battleball.server.db.Database;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Maps an authenticated player's request message to the economy service and builds the reply messages.
+ * Runs on the DB executor (it blocks). Each action returns an ActionResult for the request and, when it worked, a fresh PlayerDataSnapshot event.
+ */
+public final class PlayerActions {
+    private static final Logger LOG = LoggerFactory.getLogger(PlayerActions.class);
+
+    private final Database db;
+    private final StaticDataStore data;
+    private final EconomyService economy;
+    private final MailService mail;
+
+    public PlayerActions(Database db, StaticDataStore data, EconomyService economy) {
+        this.db = db;
+        this.data = data;
+        this.economy = economy;
+        this.mail = new MailService(db, data);
+    }
+
+    public static boolean handles(Envelope.PayloadCase c) {
+        return switch (c) {
+            case PLAYER_DATA_REQUEST, INVENTORY_REQUEST, BUY_SKIN_REQUEST, EQUIP_SKIN_REQUEST, UPGRADE_SKILL_REQUEST, BUY_MATERIAL_REQUEST,
+                 ASSEMBLE_ITEM_REQUEST, EQUIP_ITEM_REQUEST, UNEQUIP_ITEM_REQUEST, SELL_ITEMS_REQUEST, UPGRADE_ITEM_REQUEST, BUY_SUPPORT_REQUEST,
+                 EQUIP_SUPPORT_REQUEST, UNEQUIP_SUPPORT_REQUEST, CRAFT_REQUEST, BUY_POTARA_SHARDS_REQUEST, ASSEMBLE_POTARA_REQUEST,
+                 MAIL_LIST_REQUEST, MAIL_ACTION_REQUEST, NOTICE_LIST_REQUEST, DISCARD_SKIN_REQUEST, EQUIP_AURA_REQUEST -> true;
+            default -> false;
+        };
+    }
+
+    /** The replies for one request, in order. */
+    public List<Envelope> handle(long accountId, Envelope req) {
+        int rid = req.getRequestId();
+        List<Envelope> out = new ArrayList<>();
+        try {
+            ActionResult r;
+            switch (req.getPayloadCase()) {
+                case PLAYER_DATA_REQUEST -> {
+                    out.add(snapshotEnvelope(accountId, rid));
+                    return out;
+                }
+                case INVENTORY_REQUEST -> {
+                    var q = req.getInventoryRequest();
+                    out.add(Envelope.newBuilder().setRequestId(rid).setInventoryPage(economy.inventory(accountId, q.getCharacterId(), q.getAfterItemId(), q.getPageSize())).build());
+                    return out;
+                }
+                case MAIL_LIST_REQUEST -> {
+                    out.add(Envelope.newBuilder().setRequestId(rid).setMailList(mail.list(accountId)).build());
+                    return out;
+                }
+                case NOTICE_LIST_REQUEST -> {
+                    out.add(Envelope.newBuilder().setRequestId(rid).setNoticeList(mail.notices()).build());
+                    return out;
+                }
+                case MAIL_ACTION_REQUEST -> {
+                    var q = req.getMailActionRequest();
+                    r = switch (q.getAction()) {
+                        case MAIL_READ -> mail.read(accountId, q.getMailId());
+                        case MAIL_CLAIM -> mail.claim(accountId, q.getMailId());
+                        case MAIL_DELETE -> mail.delete(accountId, q.getMailId());
+                        case MAIL_CLAIM_ALL -> mail.claimAll(accountId);
+                        default -> ActionResult.newBuilder().setOk(false).setError(ActionError.INVALID_ARGUMENT).setMessage("unknown mail action").build();
+                    };
+                    out.add(Envelope.newBuilder().setRequestId(rid).setActionResult(r).build());
+                    if (r.getOk()) {
+                        out.add(Envelope.newBuilder().setMailList(mail.list(accountId)).build());
+                        out.add(snapshotEnvelope(accountId, 0));
+                    }
+                    return out;
+                }
+                case BUY_SKIN_REQUEST -> r = economy.buySkin(accountId, req.getBuySkinRequest().getCharacterId(), req.getBuySkinRequest().getCostumeId());
+                case EQUIP_SKIN_REQUEST -> r = economy.equipSkin(accountId, req.getEquipSkinRequest().getCharacterId(), req.getEquipSkinRequest().getCostumeId(), req.getEquipSkinRequest().getFusion());
+                case EQUIP_AURA_REQUEST -> {
+                    long any = anyCharacter(accountId);
+                    r = any == 0 ? ActionResult.newBuilder().setOk(false).setError(ActionError.NOT_FOUND).setMessage("no character").build()
+                            : economy.equipAura(accountId, any, req.getEquipAuraRequest().getAuraId());
+                }
+                case DISCARD_SKIN_REQUEST -> {
+                    long any = anyCharacter(accountId);
+                    r = any == 0 ? ActionResult.newBuilder().setOk(false).setError(ActionError.NOT_FOUND).setMessage("no character").build()
+                            : economy.discardSkin(accountId, any, req.getDiscardSkinRequest().getCostumeId());
+                }
+                case UPGRADE_SKILL_REQUEST -> r = economy.upgradeSkill(accountId, req.getUpgradeSkillRequest().getCharacterId(), req.getUpgradeSkillRequest().getSkillId());
+                case BUY_MATERIAL_REQUEST -> {
+                    var q = req.getBuyMaterialRequest();
+                    r = economy.buyMaterial(accountId, q.getCharacterId(), q.getTemplateId(), q.getQuantity());
+                }
+                case ASSEMBLE_ITEM_REQUEST -> r = economy.assembleItem(accountId, req.getAssembleItemRequest().getCharacterId(), req.getAssembleItemRequest().getItemTemplateId());
+                case EQUIP_ITEM_REQUEST -> r = economy.equipItem(accountId, req.getEquipItemRequest().getCharacterId(), req.getEquipItemRequest().getItemId());
+                case UNEQUIP_ITEM_REQUEST -> r = economy.unequipItem(accountId, req.getUnequipItemRequest().getCharacterId(), req.getUnequipItemRequest().getSlot());
+                case SELL_ITEMS_REQUEST -> {
+                    var q = req.getSellItemsRequest();
+                    r = economy.sellItems(accountId, q.getCharacterId(), q.getItemIdsList(), q.getDestroy());
+                }
+                case UPGRADE_ITEM_REQUEST -> r = economy.upgradeItem(accountId, req.getUpgradeItemRequest().getCharacterId(), req.getUpgradeItemRequest().getItemId());
+                case BUY_SUPPORT_REQUEST -> r = economy.buySupport(accountId, req.getBuySupportRequest().getCharacterId(), req.getBuySupportRequest().getSupportId());
+                case EQUIP_SUPPORT_REQUEST -> r = economy.equipSupport(accountId, req.getEquipSupportRequest().getCharacterId(), req.getEquipSupportRequest().getInstanceId());
+                case UNEQUIP_SUPPORT_REQUEST -> r = economy.unequipSupport(accountId, req.getUnequipSupportRequest().getCharacterId(), req.getUnequipSupportRequest().getSlot());
+                case CRAFT_REQUEST -> {
+                    var q = req.getCraftRequest();
+                    r = economy.craft(accountId, q.getCharacterId(), q.getRecipeId(), q.getInputInstanceId(), q.getUseBoost());
+                }
+                case BUY_POTARA_SHARDS_REQUEST -> r = economy.buyPotaraShards(accountId, req.getBuyPotaraShardsRequest().getCharacterId(), req.getBuyPotaraShardsRequest().getQuantity());
+                case ASSEMBLE_POTARA_REQUEST -> {
+                    long any = anyCharacter(accountId);
+                    r = any == 0 ? ActionResult.newBuilder().setOk(false).setError(ActionError.NOT_FOUND).setMessage("no character").build() : economy.assemblePotara(accountId, any);
+                }
+                default -> r = ActionResult.newBuilder().setOk(false).setError(ActionError.INVALID_ARGUMENT).build();
+            }
+            out.add(Envelope.newBuilder().setRequestId(rid).setActionResult(r).build());
+            if (r.getOk()) {
+                out.add(snapshotEnvelope(accountId, 0));
+            }
+        } catch (SQLException | RuntimeException e) {
+            LOG.error("player action failed", e);
+            out.clear();
+            out.add(Envelope.newBuilder().setRequestId(rid).setActionResult(ActionResult.newBuilder().setOk(false).setError(ActionError.ACTION_INTERNAL).setMessage("server error")).build());
+        }
+        return out;
+    }
+
+    public Envelope snapshotEnvelope(long accountId, int rid) throws SQLException {
+        StaticData d = data.get();
+        try (Connection c = db.connection()) {
+            PlayerRepository.PlayerData p = PlayerRepository.load(c, accountId);
+            int cap = (int) Json.num(d.balanceObj("potara"), "daily_cap", 20);
+            return Envelope.newBuilder().setRequestId(rid).setPlayerDataSnapshot(
+                    PlayerRepository.toProto(d, p, cap).toBuilder().setUnreadMail(MailService.unread(c, accountId))).build();
+        }
+    }
+
+    private long anyCharacter(long accountId) throws SQLException {
+        try (Connection c = db.connection(); PreparedStatement ps = c.prepareStatement("SELECT MIN(character_id) FROM game_character WHERE account_id = ?")) {
+            ps.setLong(1, accountId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : 0;
+            }
+        }
+    }
+}

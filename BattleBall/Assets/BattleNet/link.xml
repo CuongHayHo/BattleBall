@@ -1,0 +1,7 @@
+<linker>
+  <!-- IL2CPP stripping must keep the protobuf runtime and the generated messages (they are reached by reflection). -->
+  <assembly fullname="Google.Protobuf" preserve="all"/>
+  <assembly fullname="Assembly-CSharp">
+    <namespace fullname="BattleBall.Proto" preserve="all"/>
+  </assembly>
+</linker>

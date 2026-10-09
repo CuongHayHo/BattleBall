@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chọn loại boss rơi vật phẩm</title>
+<style>
+:root{--bg:#f6f7f9;--fg:#1c2330;--muted:#66708a;--card:#fff;--line:#d9dde6;--accent:#2f6fed;--on:#e7f0ff;--warn:#a65f00;--ok:#17653a}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--fg:#e6e9f0;--muted:#98a2b8;--card:#1b2030;--line:#2e3650;--accent:#6c9bff;--on:#1f2c4d;--warn:#e0a24a;--ok:#7bd69e}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:14px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+h1{font-size:1.25rem;margin:0 0 4px}
+h2{font-size:1rem;margin:18px 0 6px}
+.muted{color:var(--muted)}
+main{padding:12px 16px 40px;max-width:1500px;margin:0 auto}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+table{border-collapse:separate;border-spacing:0;min-width:100%}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);vertical-align:top;text-align:left}
+thead th{position:sticky;top:0;background:var(--card);z-index:2;font-weight:600;min-width:132px}
+th.item,td.item{position:sticky;left:0;background:var(--card);z-index:1;min-width:210px;max-width:230px}
+thead th.item{z-index:3}
+tr.group td{background:var(--bg);color:var(--muted);font-weight:600;position:static}
+td.cell.on{background:var(--on)}
+.bossname{font-weight:600}
+.bossinfo{font-weight:400;font-size:.85em;color:var(--muted)}
+.cell label{display:flex;gap:6px;align-items:center;cursor:pointer}
+.fields{display:none;margin-top:5px;gap:4px;flex-wrap:wrap;align-items:center}
+.cell.on .fields{display:flex}
+.fields input{width:62px;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:2px 5px}
+.fields .q{width:56px}
+.exp{font-size:.85em;color:var(--warn);width:100%}
+button{font:inherit;color:#fff;background:var(--accent);border:0;border-radius:6px;padding:6px 14px;cursor:pointer;margin:2px 4px 2px 0}
+button.alt{background:var(--card);color:var(--accent);border:1px solid var(--accent)}
+textarea{width:100%;min-height:150px;font:12px/1.4 ui-monospace,Consolas,monospace;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px}
+.note{padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);margin:8px 0}
+input.notes{width:100%;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:4px 6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Chọn loại boss rơi vật phẩm</h1>
+  <div class="muted">Bước chuẩn bị cho bảng rơi đồ. Đánh dấu ô (vật phẩm × loại boss) nếu boss đó được rơi vật phẩm; nhập tỉ lệ rơi (%) và số lượng mỗi lần rơi. Các số đã điền là <b>đề xuất của tôi</b>, sửa thoải mái.</div>
+</header>
+<main>
+  <div class="note">
+    <b>Ba nguyên liệu ghép sách tuyệt kỹ</b> (đã chốt: sách chỉ có được bằng cách ghép, nguyên liệu rơi với tỉ lệ thấp): cần <b>10 cuốn sách cũ + 1 kìm bấm giấy</b> cho mỗi lần thử ghép (20% thành công), <b>10 kìm bấm giấy</b> để nâng sách 1 lên sách 2 (10% thành công), <b>1 con dấu</b> để ghép chắc chắn thành công. Dòng màu cam trong mỗi ô là số lần hạ boss loại đó trung bình để đủ số lượng cần cho <b>một lần thử</b>.<br>
+    <span class="muted">Chưa biết mỗi trận có bao nhiêu boss thuộc từng loại (phụ thuộc thiết kế vùng và phó bản, chưa làm), nên chưa tính được "bao nhiêu trận để có một cuốn sách". Các nhóm dưới "Vật phẩm khác" là tuỳ chọn, để trống thì quyết định sau.</span>
+  </div>
+  <div class="scroll"><table id="grid"></table></div>
+
+  <h2>Ghi chú của bạn</h2>
+  <input class="notes" id="notes" type="text" placeholder="Ví dụ: raid boss không rơi con dấu; mob thường không rơi gì...">
+
+  <h2>Kết quả để gửi lại</h2>
+  <div>
+    <button id="btnJson">Tạo JSON</button>
+    <button id="btnCsv" class="alt">Tạo CSV</button>
+    <button id="btnCopy" class="alt">Sao chép</button>
+    <button id="btnSave" class="alt">Tải về</button>
+    <button id="btnReset" class="alt">Đặt lại đề xuất</button>
+    <button id="btnClear" class="alt">Bỏ chọn hết</button>
+    <span id="status" class="muted"></span>
+  </div>
+  <p class="muted">Bấm "Tạo JSON" hoặc "Tạo CSV", rồi sao chép nội dung ô dưới và dán vào cuộc trò chuyện (hoặc "Tải về" rồi cho tôi đường dẫn file).</p>
+  <textarea id="out" readonly placeholder="Kết quả hiện ở đây"></textarea>
+</main>
+<script>
+"use strict";
+var BOSSES = [
+  {key:"mob",       name:"Mob thường",              info:"hạ 0,4 s · ATK 3–5%"},
+  {key:"elite",     name:"Mob elite",               info:"hạ 2 s · ATK 8–10%"},
+  {key:"boss_early",name:"Boss vùng sớm",           info:"hạ 45 s · HP 6,0 tr"},
+  {key:"boss_mid",  name:"Boss vùng giữa",          info:"hạ 75 s · HP 19,3 tr"},
+  {key:"boss_late", name:"Boss vùng cuối",          info:"hạ 120 s · HP 49,5 tr"},
+  {key:"miniboss",  name:"Mini-boss cuối tầng phó bản", info:"hạ 40 s · HP 10,5 tr"},
+  {key:"dungeon_final",name:"Boss cuối phó bản",    info:"hạ 150 s · HP 56,9 tr"},
+  {key:"raid",      name:"Raid boss",               info:"hạ 360 s · HP 124,7 tr"}
+];
+// need = amount for one try (used for the expected-kills hint); def = proposed defaults {boss:[rate%, min, max]}
+var ITEMS = [
+  {group:"Nguyên liệu ghép sách tuyệt kỹ (đã chốt: tỉ lệ thấp)"},
+  {id:301, name:"Cuốn sách cũ", need:10, def:{elite:[1,1,1], boss_early:[4,1,2], boss_mid:[5,1,2], boss_late:[6,1,3], miniboss:[5,1,2], dungeon_final:[10,2,4], raid:[12,3,5]}},
+  {id:302, name:"Kìm bấm giấy", need:1,  def:{boss_early:[2,1,1], boss_mid:[3,1,1], boss_late:[4,1,1], miniboss:[3,1,1], dungeon_final:[8,1,2], raid:[10,1,3]}, note:"1 cái để ghép, 10 cái để nâng cấp sách"},
+  {id:303, name:"Con dấu", need:1,  def:{dungeon_final:[2,1,1], raid:[5,1,1]}, note:"ghép chắc chắn thành công, tỉ lệ rất thấp"},
+  {group:"Vật phẩm khác (tuỳ chọn, để trống thì quyết định sau)"},
+  {id:101, name:"Mảnh đồ (mỗi loại Áo/Quần/Găng/Giày/Nhẫn)", need:10, def:{}, note:"GDD: mảnh đồ rơi từ boss; cần 10 mảnh ghép một món"},
+  {id:201, name:"Đá nâng cấp", need:1, def:{}, note:"GDD: rương thưởng phó bản có đá nâng cấp"},
+  {id:202, name:"Đá chỉ số", need:1, def:{}, note:"GDD: rương thưởng phó bản có đá chỉ số"},
+  {id:203, name:"Đá pha lê (siêu hiếm)", need:1, def:{}, note:"GDD: siêu hiếm; cũng đổi được bằng 500 đá quý"},
+  {id:1820, name:"Mảnh vỡ bông tai cấp 3", need:100, def:{}, note:"GDD: từ boss của một phó bản nhất định; ngừng rơi khi đã có bông tai"}
+];
+var STORE = "bb_drop_picker_v1";
+var state = {};
+var notes = "";
+
+function emptyState(){ var s={}; ITEMS.forEach(function(it){ if(it.id){ s[it.id]={}; BOSSES.forEach(function(b){ s[it.id][b.key]={on:false,rate:"",min:"1",max:"1"}; }); } }); return s; }
+function defaults(){ var s=emptyState(); ITEMS.forEach(function(it){ if(!it.id) return; Object.keys(it.def||{}).forEach(function(k){ var d=it.def[k]; s[it.id][k]={on:true,rate:String(d[0]),min:String(d[1]),max:String(d[2])}; }); }); return s; }
+function load(){ try{ var raw=localStorage.getItem(STORE); if(raw){ var o=JSON.parse(raw); if(o&&o.state){ state=o.state; notes=o.notes||""; return; } } }catch(e){} state=defaults(); }
+function save(){ try{ localStorage.setItem(STORE, JSON.stringify({state:state,notes:notes})); }catch(e){} }
+
+function num(v){ var x=parseFloat(String(v).replace(",",".")); return isFinite(x)?x:0; }
+function expText(it,c){
+  var rate=num(c.rate), lo=num(c.min), hi=Math.max(num(c.max),lo);
+  if(!c.on||rate<=0||hi<=0) return "";
+  var avg=(lo+hi)/2, kills=it.need/((rate/100)*avg);
+  return "≈ "+(kills<10?kills.toFixed(1):Math.round(kills))+" lần hạ / "+it.need+" cái";
+}
+
+function build(){
+  var t=document.getElementById("grid"); t.textContent="";
+  var thead=t.createTHead().insertRow();
+  var th=document.createElement("th"); th.className="item"; th.textContent="Vật phẩm"; thead.appendChild(th);
+  BOSSES.forEach(function(b){ var h=document.createElement("th"); var n=document.createElement("div"); n.className="bossname"; n.textContent=b.name; var i=document.createElement("div"); i.className="bossinfo"; i.textContent=b.info; h.appendChild(n); h.appendChild(i); thead.appendChild(h); });
+  var tb=t.createTBody();
+  ITEMS.forEach(function(it){
+    var r=tb.insertRow();
+    if(!it.id){ r.className="group"; var c=r.insertCell(); c.colSpan=BOSSES.length+1; c.textContent=it.group; return; }
+    var tdn=r.insertCell(); tdn.className="item";
+    var nm=document.createElement("div"); nm.className="bossname"; nm.textContent=it.name+" (#"+it.id+")"; tdn.appendChild(nm);
+    if(it.note){ var no=document.createElement("div"); no.className="bossinfo"; no.textContent=it.note; tdn.appendChild(no); }
+    BOSSES.forEach(function(b){
+      var c=state[it.id][b.key];
+      var td=r.insertCell(); td.className="cell"+(c.on?" on":"");
+      var lab=document.createElement("label"); var cb=document.createElement("input"); cb.type="checkbox"; cb.checked=c.on; lab.appendChild(cb); lab.appendChild(document.createTextNode("rơi")); td.appendChild(lab);
+      var f=document.createElement("div"); f.className="fields";
+      var rate=document.createElement("input"); rate.type="text"; rate.value=c.rate; rate.placeholder="% rơi"; rate.title="Tỉ lệ rơi (%) mỗi lần hạ";
+      var mn=document.createElement("input"); mn.type="text"; mn.className="q"; mn.value=c.min; mn.title="Số lượng tối thiểu mỗi lần rơi";
+      var mx=document.createElement("input"); mx.type="text"; mx.className="q"; mx.value=c.max; mx.title="Số lượng tối đa mỗi lần rơi";
+      var ex=document.createElement("div"); ex.className="exp"; ex.textContent=expText(it,c);
+      f.appendChild(rate); f.appendChild(document.createTextNode("%")); f.appendChild(mn); f.appendChild(document.createTextNode("–")); f.appendChild(mx); f.appendChild(ex); td.appendChild(f);
+      function upd(){ c.on=cb.checked; c.rate=rate.value; c.min=mn.value; c.max=mx.value; td.className="cell"+(c.on?" on":""); ex.textContent=expText(it,c); save(); }
+      cb.addEventListener("change",upd); rate.addEventListener("input",upd); mn.addEventListener("input",upd); mx.addEventListener("input",upd);
+    });
+  });
+}
+
+function rows(){
+  var out=[];
+  ITEMS.forEach(function(it){ if(!it.id) return; BOSSES.forEach(function(b){ var c=state[it.id][b.key]; if(!c.on) return; out.push({item_id:it.id,item:it.name,boss_type:b.key,boss:b.name,drop_rate_pct:num(c.rate),qty_min:num(c.min),qty_max:Math.max(num(c.max),num(c.min))}); }); });
+  return out;
+}
+function setOut(text,msg){ document.getElementById("out").value=text; document.getElementById("status").textContent=msg||""; }
+document.getElementById("btnJson").onclick=function(){ var r=rows(); setOut(JSON.stringify({version:1,notes:notes,drops:r},null,1), r.length+" dòng"); };
+document.getElementById("btnCsv").onclick=function(){ var r=rows(); var lines=["item_id,item,boss_type,boss,drop_rate_pct,qty_min,qty_max"]; r.forEach(function(x){ lines.push([x.item_id,'"'+x.item+'"',x.boss_type,'"'+x.boss+'"',x.drop_rate_pct,x.qty_min,x.qty_max].join(",")); }); if(notes){ lines.push('# ghi chú: '+notes.replace(/\n/g," ")); } setOut(lines.join("\n"), r.length+" dòng"); };
+document.getElementById("btnCopy").onclick=function(){ var ta=document.getElementById("out"); if(!ta.value){ document.getElementById("status").textContent="Hãy bấm Tạo JSON hoặc Tạo CSV trước."; return; } ta.select(); var ok=false; try{ ok=document.execCommand("copy"); }catch(e){} if(!ok&&navigator.clipboard){ navigator.clipboard.writeText(ta.value).then(function(){ document.getElementById("status").textContent="Đã sao chép."; }); return; } document.getElementById("status").textContent=ok?"Đã sao chép.":"Chọn toàn bộ ô và nhấn Ctrl+C."; };
+document.getElementById("btnSave").onclick=function(){ var ta=document.getElementById("out"); if(!ta.value){ document.getElementById("status").textContent="Hãy bấm Tạo JSON hoặc Tạo CSV trước."; return; } var isJson=ta.value.charAt(0)==="{"; var blob=new Blob([ta.value],{type:"text/plain;charset=utf-8"}); var a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="drop_choice"+(isJson?".json":".csv"); document.body.appendChild(a); a.click(); a.remove(); document.getElementById("status").textContent="Đã tải về (thư mục Tải xuống)."; };
+document.getElementById("btnReset").onclick=function(){ state=defaults(); save(); build(); setOut("", "Đã đặt lại về đề xuất."); };
+document.getElementById("btnClear").onclick=function(){ state=emptyState(); save(); build(); setOut("", "Đã bỏ chọn hết."); };
+document.getElementById("notes").addEventListener("input",function(e){ notes=e.target.value; save(); });
+load(); document.getElementById("notes").value=notes; build();
+</script>
+</body>
+</html>

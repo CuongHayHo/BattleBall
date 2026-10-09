@@ -1,0 +1,683 @@
+// BattleBall client <-> server contract. SINGLE SOURCE of every message: Java (server) and C# (Unity client) are generated from this file.
+// Design: docs/protocol/BattleBall.md. Frames on the wire: u32 little-endian length + one serialized Envelope (see section 11 of that document).
+// Status: first slice (connection, register, login, heartbeat). Messages for squad, shop, match and rewards are added later.
+syntax = "proto3";
+
+package battleball;
+
+option java_package = "com.battleball.proto";
+option java_multiple_files = true;
+option csharp_namespace = "BattleBall.Proto";
+
+// The message id is the field number inside `payload` (no hand-written opcode table).
+message Envelope {
+  uint32 request_id = 1;            // 0 = event pushed by the server; otherwise the request id the response answers
+  oneof payload {
+    Hello hello = 10;
+    HelloAck hello_ack = 11;
+    RegisterRequest register_request = 12;
+    RegisterResult register_result = 13;
+    LoginRequest login_request = 14;
+    LoginResult login_result = 15;
+    Ping ping = 16;
+    Pong pong = 17;
+    LogoutRequest logout_request = 18;
+    DisconnectNotice disconnect_notice = 19;
+    ErrorMessage error = 20;
+    // ---- player data and economy (all need an authenticated connection) ----
+    PlayerDataRequest player_data_request = 21;
+    PlayerDataSnapshot player_data_snapshot = 22;
+    InventoryRequest inventory_request = 23;
+    InventoryPage inventory_page = 24;
+    ActionResult action_result = 25;
+    BuySkinRequest buy_skin_request = 26;
+    EquipSkinRequest equip_skin_request = 27;
+    UpgradeSkillRequest upgrade_skill_request = 28;
+    BuyMaterialRequest buy_material_request = 29;
+    AssembleItemRequest assemble_item_request = 30;
+    EquipItemRequest equip_item_request = 31;
+    UnequipItemRequest unequip_item_request = 32;
+    SellItemsRequest sell_items_request = 33;
+    UpgradeItemRequest upgrade_item_request = 34;
+    BuySupportRequest buy_support_request = 35;
+    EquipSupportRequest equip_support_request = 36;
+    UnequipSupportRequest unequip_support_request = 37;
+    CraftRequest craft_request = 38;
+    BuyPotaraShardsRequest buy_potara_shards_request = 39;
+    AssemblePotaraRequest assemble_potara_request = 40;
+    // ---- mailbox, notices, account (decision 2026-10-08) ----
+    MailListRequest mail_list_request = 41;
+    MailList mail_list = 42;
+    MailActionRequest mail_action_request = 43;     // answered by ActionResult; on success the server also pushes a fresh MailList and PlayerDataSnapshot
+    NoticeListRequest notice_list_request = 44;
+    NoticeList notice_list = 45;
+    ChangePasswordRequest change_password_request = 46;
+    ChangePasswordResult change_password_result = 47;
+    EquipAuraRequest equip_aura_request = 49;       // wears an aura (0 = takes it off); answered by ActionResult, then a fresh PlayerDataSnapshot
+    DiscardSkinRequest discard_skin_request = 48;   // throws a skin away for good; answered by ActionResult (DISABLED while a character wears it)
+    // ---- matches ----
+    StartMatchRequest start_match_request = 50;
+    MatchStarted match_started = 51;
+    MatchFrame match_frame = 52;
+    PlayerStateReport player_state_report = 53;
+    UseSkillRequest use_skill_request = 54;
+    ReviveRequest revive_request = 55;
+    LeaveMatchRequest leave_match_request = 56;
+    MatchEnded match_ended = 57;
+    ResumeMatchRequest resume_match_request = 58;
+    MatchResumed match_resumed = 59;
+    // ---- training in the starter village (decision 2026-10-08): a match without bosses, rewards or records, answered by MatchStarted (training = true)
+    StartTrainingRequest start_training_request = 60;
+  }
+}
+
+// ---- connection --------------------------------------------------------------------------------------------------
+message Hello {
+  uint32 protocol_version = 1;
+  string client_version = 2;
+  string platform = 3;              // optional, e.g. "android", "editor"
+}
+
+message HelloAck {
+  uint32 protocol_version = 1;
+  uint64 server_time_ms = 2;        // Unix time in milliseconds
+  uint32 heartbeat_interval_ms = 3; // the client should send Ping at this interval
+  uint32 tick_rate_hz = 4;          // information only (match simulation = 20 Hz)
+  string asset_base_url = 5;        // where the client downloads game assets (HTTP file server; empty = the server publishes none); ends with '/'
+  string server_name = 7;           // display name of this server for the client (for example on the start menu); empty = the client keeps its own default
+  string asset_version = 6;         // version of the asset manifest published there; the client downloads when it differs from the installed one
+}
+
+message Ping { uint64 client_time_ms = 1; }
+message Pong { uint64 client_time_ms = 1; uint64 server_time_ms = 2; }
+
+enum DisconnectReason {
+  DISCONNECT_REASON_UNSPECIFIED = 0;
+  SERVER_SHUTDOWN = 1;
+  KICKED = 2;
+  LOGGED_IN_ELSEWHERE = 3;
+  TIMEOUT = 4;
+  PROTOCOL_VIOLATION = 5;
+  SERVER_FULL = 6;
+}
+
+message DisconnectNotice {
+  DisconnectReason reason = 1;
+  string message = 2;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  PROTOCOL_VERSION_UNSUPPORTED = 1;
+  INVALID_STATE = 2;                // the request is not allowed in the current connection state
+  MALFORMED = 3;                    // missing or invalid fields
+  INTERNAL = 4;
+}
+
+message ErrorMessage {
+  ErrorCode code = 1;
+  string message = 2;
+}
+
+// ---- account -----------------------------------------------------------------------------------------------------
+message RegisterRequest {
+  string username = 1;              // 4..20 characters a-z 0-9 _
+  string password = 2;              // 8..64 bytes; only ever sent over TLS
+}
+
+enum RegisterError {
+  REGISTER_ERROR_NONE = 0;
+  USERNAME_INVALID = 1;
+  PASSWORD_INVALID = 2;
+  USERNAME_TAKEN = 3;
+  REGISTER_RATE_LIMITED = 4;
+  REGISTER_INTERNAL = 5;
+}
+
+message RegisterResult {
+  bool ok = 1;
+  RegisterError error = 2;
+}
+
+message LoginRequest {
+  string username = 1;              // required with a password; ignored with a refresh token (the token identifies the account)
+  oneof credential {
+    string password = 2;
+    string refresh_token = 3;       // long-lived token (sliding 30 days) from an earlier password login
+  }
+  string device_info = 4;           // stored with a new refresh token
+}
+
+enum LoginError {
+  LOGIN_ERROR_NONE = 0;
+  AUTH_FAILED = 1;                  // wrong username or password (the two are never told apart)
+  AUTH_RATE_LIMITED = 2;
+  ACCOUNT_BANNED = 3;
+  TOKEN_EXPIRED = 4;
+  TOKEN_REVOKED = 5;
+  LOGIN_INTERNAL = 6;
+}
+
+message LoginResult {
+  bool ok = 1;
+  LoginError error = 2;
+  uint64 account_id = 3;
+  string session_id = 4;
+  string refresh_token = 5;         // only after a password login
+  string username = 6;
+}
+
+message LogoutRequest {}
+
+// ---- player data -------------------------------------------------------------------------------------------------
+message StatLine {
+  string stat_key = 1;              // a stat_type key, for example ATK_PCT
+  double value = 2;
+  string source = 3;                // BASE, UPGRADE_STONE, STAT_STONE, CRYSTAL_STONE, GEN, BOOK
+  string text = 4;                  // the line ready to show ("Sức đánh +100%"); only filled where the client shows it (the lines of a skin)
+}
+
+message CharacterStats {            // final numbers computed by the server (the client only displays them)
+  uint64 hp_max = 1;
+  uint64 ki_max = 2;
+  uint64 atk = 3;
+  uint64 armor = 4;
+  double crit_rate_pct = 5;
+  double crit_dmg_pct = 6;
+  double dodge_pct = 7;
+  double hp_regen_pct_per_sec = 8;
+  double ki_regen_pct_per_sec = 9;
+}
+
+message ItemInfo {                  // one gear piece (item_instance)
+  uint64 item_id = 1;
+  uint32 template_id = 2;
+  string slot = 3;                  // ARMOR, PANTS, GLOVES, BOOTS, RING
+  double upgrade_percent = 4;       // 0..75 in steps of 5
+  repeated StatLine lines = 5;
+  bool equipped = 6;
+}
+
+message SkillState {
+  uint32 skill_id = 1;
+  uint32 level = 2;
+}
+
+message EquipSlotInfo {
+  string slot = 1;                  // ARMOR, PANTS, GLOVES, BOOTS, RING, SKIN, SUPPORT_1..4
+  uint64 item_id = 2;               // gear slots
+  uint32 costume_id = 3;            // SKIN slot
+  uint64 support_instance_id = 4;   // SUPPORT_n slots
+}
+
+message SupportInstance {
+  uint64 instance_id = 1;
+  uint32 support_id = 2;
+  uint32 charge_points = 3;         // training armor points (matches left of the +ATK bonus)
+  repeated StatLine lines = 4;      // skill book lines
+}
+
+message MaterialAmount {
+  uint32 template_id = 1;
+  uint64 quantity = 2;
+}
+
+message CharacterInfo {
+  uint64 character_id = 1;
+  string race = 2;                  // EARTH, NAMEC, XAYDA
+  uint32 level = 3;
+  uint64 exp = 4;
+  reserved 5, 6, 10, 11, 12, 13;    // gold, gems, materials, owned skins, support items and bag count moved to PlayerDataSnapshot (shared by the account, V026)
+  repeated SkillState skills = 7;
+  repeated EquipSlotInfo equipment = 8;
+  repeated ItemInfo equipped_items = 9;
+  CharacterStats stats = 14;
+  repeated uint32 first_clears = 15; // dungeon ids already cleared once
+  repeated StatLine bonuses = 17;   // totals of every enabled stat bonus of the character (gear, skin, supports; source TOTAL), for the summary lines of the menu
+  uint64 exp_to_next = 16;          // exp needed to reach the next level (exp above is the progress inside the current level); 0 at the maximum level
+  uint32 default_costume_id = 18;   // the costume this race wears when it has no skin of its own to show
+  CharacterStats fusion_stats = 19;  // the stats of this character when it is the main one of a fusion (the fusion skin counts); the client adds the partner's stats
+  repeated StatLine fusion_bonuses = 20;   // bonus totals when it is the main one of a fusion
+  repeated SkillCooldown cooldowns = 21;   // skills still cooling down (real server time, kept when the player logs out), left_ms from the moment of this snapshot
+}
+
+message SkillCooldown {
+  uint32 skill_id = 1;
+  uint32 left_ms = 2;
+}
+
+message PotaraInfo {
+  bool owned = 1;
+  uint32 fragments = 2;
+  uint32 bought_today = 3;
+  uint32 daily_cap = 4;
+  uint32 item_id = 5;               // Nro item id of the earring (1819), shown as the first slot of the bag
+  uint32 icon_id = 6;               // Nro icon id of the earring picture
+  uint32 shards_needed = 7;         // fragments that make the earring (100)
+  uint32 shard_item_id = 9;         // Nro item id of the fragment (1820)
+  uint32 shard_icon_id = 10;        // Nro icon id of the fragment picture
+  uint32 min_fusion_level = 8;      // both characters of a fusion need at least this level (50)
+}
+
+// A skin the account owns, with what the client needs to describe it (name, who may wear it, its stat bonuses).
+message SkinInfo {
+  uint32 costume_id = 1;
+  string name = 2;
+  uint32 gender_id = 3;             // 0 Trai Dat, 1 Namec, 2 Xayda, 3 every race
+  string kind = 4;                  // SkinKind key, for example SHOP, FUSION_FORM, COMPONENT
+  string fusion_race = 5;           // td, nm, xd (a fusion skin is made for the main character of that race) or empty
+  bool fusion_main_only = 6;        // true: only the main character of a fusion may wear it
+  repeated StatLine stats = 7;      // bonus lines of the skin (stat_key, value; source SKIN)
+}
+
+// The three characters share one inventory (gold, gems, materials, skins, gear in the bag, support items): decision 2026-10-08, migration V026.
+message PlayerDataSnapshot {
+  uint64 account_id = 1;
+  string username = 2;
+  repeated CharacterInfo characters = 3;
+  PotaraInfo potara = 4;
+  map<string, uint32> static_versions = 5;   // the client reloads shop and skill tables when one changes
+  uint64 gold = 6;
+  uint64 gems = 7;
+  repeated MaterialAmount materials = 8;
+  repeated SkinInfo skins = 9;
+  repeated SupportInstance supports = 10;
+  uint32 bag_count = 11;            // pieces of gear in the bag (limit 2,000)
+  uint32 unread_mail = 12;          // mails not read yet or with a gift not taken yet (the badge of the menu)
+  repeated AuraInfo auras = 13;     // every enabled aura with the level that unlocks it (the client works out which ones are unlocked from the levels of the characters)
+  uint32 equipped_aura_id = 14;     // the aura the account wears, shared by the three characters; 0 = none
+  repeated SkillCatalogEntry skill_catalog = 15;   // every enabled skill with its levels (the Kỹ năng tab: learn and raise with gold, UpgradeSkillRequest)
+}
+
+message SkillCatalogEntry {
+  uint32 skill_id = 1;              // the Nro skill template id (0..26)
+  string race = 2;                  // EARTH, NAMEC, XAYDA or COMMON
+  string name = 3;
+  uint32 icon_id = 4;               // Nro icon
+  uint32 slot = 5;                  // the button of the skill bar
+  uint32 max_level = 6;
+  string description = 7;           // the Nro dam_info line ("#" stands for the value of the level)
+  repeated SkillLevelInfo levels = 8;
+}
+
+message SkillLevelInfo {
+  uint32 level = 1;
+  uint64 gold_cost = 2;             // gold to reach this level (level 1 = learning it)
+  double damage_pct_atk = 3;        // 0 when the skill does not hit by % of attack
+  uint32 cooldown_ms = 4;
+  double ki_cost_pct = 5;           // % of the maximum Ki
+  uint32 range_px = 6;              // Nro px: how close to the target (centre to centre, a dummy's radius included) the skill is worth using; 0 = no target needed
+}
+
+// An aura (owner decision 2026-10-08): an achievement unlocked when the highest character of the account reaches unlock_level; a visual effect only.
+message AuraLayer { uint32 layer = 1; uint32 frames = 2; }   // layer 0 is drawn behind the character, 1 in front of it; frames = equal parts of the picture, one on top of the other
+message AuraInfo { uint32 aura_id = 1; string name = 2; uint32 unlock_level = 3; repeated AuraLayer layers = 4; }
+message EquipAuraRequest { uint32 aura_id = 1; }              // 0 = take the aura off
+
+message PlayerDataRequest {}
+
+// ---- mailbox (gifts from the admin), notices, password ---------------------------------------------------------------------
+message MailAttachment {
+  string kind = 1;                  // GOLD, GEMS, SKIN, MATERIAL, ITEM, EARRING
+  uint32 ref_id = 2;                // costume id, material template or gear template; 0 for gold, gems and the earring
+  uint64 quantity = 3;
+  string name = 4;                  // display name from the server tables (empty for gold and gems)
+  uint32 icon_id = 5;               // Nro icon id when the kind has a picture (0 = the client uses its own icon: gold, gems)
+}
+
+message MailInfo {
+  uint64 mail_id = 1;
+  string title = 2;
+  string body = 3;
+  uint64 sent_at_ms = 4;
+  bool read = 5;
+  bool claimed = 6;                 // the gift was taken (a mail without a gift counts as taken)
+  repeated MailAttachment attachments = 7;
+}
+
+message MailListRequest {}
+message MailList { repeated MailInfo mails = 1; }       // newest first, at most 100
+
+enum MailAction {
+  MAIL_ACTION_UNSPECIFIED = 0;
+  MAIL_READ = 1;                    // mark as read
+  MAIL_CLAIM = 2;                   // take the gift (all attachments or nothing)
+  MAIL_DELETE = 3;                  // only a mail without a gift or with the gift already taken
+  MAIL_CLAIM_ALL = 4;               // take the gifts of every mail that still has one (mail_id ignored)
+}
+
+message MailActionRequest { uint64 mail_id = 1; MailAction action = 2; }
+
+message NoticeInfo {
+  uint64 notice_id = 1;
+  string title = 2;
+  string body = 3;
+  uint64 created_at_ms = 4;
+}
+
+message NoticeListRequest {}
+message NoticeList { repeated NoticeInfo notices = 1; }  // newest first, enabled and not expired, at most 50
+
+message ChangePasswordRequest {
+  string old_password = 1;
+  string new_password = 2;          // 8..64 bytes; only ever sent over TLS
+}
+
+enum ChangePasswordError {
+  CHANGE_PASSWORD_NONE = 0;
+  WRONG_OLD_PASSWORD = 1;
+  NEW_PASSWORD_INVALID = 2;
+  CHANGE_PASSWORD_RATE_LIMITED = 3;
+  CHANGE_PASSWORD_INTERNAL = 4;
+}
+
+message ChangePasswordResult {
+  bool ok = 1;
+  ChangePasswordError error = 2;
+  string refresh_token = 3;         // on success every old token is revoked and this one replaces the client's saved token
+}
+
+message InventoryRequest {
+  uint64 character_id = 1;
+  uint64 after_item_id = 2;         // paging: items with a larger id, in id order; 0 = from the start
+  uint32 page_size = 3;             // 0 = server default
+}
+
+message InventoryPage {
+  uint64 character_id = 1;
+  repeated ItemInfo items = 2;
+  bool has_more = 3;
+  uint32 total = 4;
+}
+
+// ---- actions: every one is answered by ActionResult; on success the server also pushes a fresh PlayerDataSnapshot -----
+enum ActionError {
+  ACTION_OK = 0;
+  NOT_FOUND = 1;
+  INVALID_ARGUMENT = 2;
+  NOT_ENOUGH_GOLD = 3;
+  NOT_ENOUGH_GEMS = 4;
+  NOT_ENOUGH_MATERIAL = 5;
+  RACE_LOCKED = 6;
+  ALREADY_OWNED = 7;
+  NOT_OWNED = 8;
+  BAG_FULL = 9;
+  LEVEL_TOO_LOW = 10;
+  WRONG_SLOT = 11;
+  DAILY_LIMIT = 12;
+  DISABLED = 13;
+  MAXED = 14;
+  ACTION_INTERNAL = 15;
+}
+
+message ActionResult {
+  bool ok = 1;
+  ActionError error = 2;
+  string message = 3;
+  bool success = 4;                 // a chance-based action (craft, upgrade) was made and worked; false when it was tried and failed
+  uint64 new_id = 5;                // id of a created item or instance
+}
+
+message BuySkinRequest { uint64 character_id = 1; uint32 costume_id = 2; }
+message EquipSkinRequest { uint64 character_id = 1; uint32 costume_id = 2; bool fusion = 3; }   // fusion = true: a fusion skin goes on the fusion form of this character (the main one), not on the character; costume_id 0 = take off the skin of that slot
+message DiscardSkinRequest { uint32 costume_id = 1; }
+message UpgradeSkillRequest { uint64 character_id = 1; uint32 skill_id = 2; }   // learn (level 0 -> 1) or raise by one level, gold only
+message BuyMaterialRequest { uint64 character_id = 1; uint32 template_id = 2; uint32 quantity = 3; }
+message AssembleItemRequest { uint64 character_id = 1; uint32 item_template_id = 2; }   // uses the fragments of that item
+message EquipItemRequest { uint64 character_id = 1; uint64 item_id = 2; }
+message UnequipItemRequest { uint64 character_id = 1; string slot = 2; }
+message SellItemsRequest { uint64 character_id = 1; repeated uint64 item_ids = 2; bool destroy = 3; }   // destroy = true: no gold
+message UpgradeItemRequest { uint64 character_id = 1; uint64 item_id = 2; }              // one upgrade stone: +5% of the base stat (max 75%)
+message BuySupportRequest { uint64 character_id = 1; uint32 support_id = 2; }            // gems
+message EquipSupportRequest { uint64 character_id = 1; uint64 instance_id = 2; }
+message UnequipSupportRequest { uint64 character_id = 1; string slot = 2; }
+message CraftRequest { uint64 character_id = 1; uint32 recipe_id = 2; uint64 input_instance_id = 3; bool use_boost = 4; }
+message BuyPotaraShardsRequest { uint64 character_id = 1; uint32 quantity = 2; }         // paid with this character's gold; the shards belong to the account
+message AssemblePotaraRequest {}
+
+// ---- matches (the server simulates at 20 Hz; the client reports its own position and asks to use skills) --------------
+enum EntityKind {
+  ENTITY_KIND_UNSPECIFIED = 0;
+  PLAYER_CHARACTER = 1;             // the character the player controls
+  ALLY_AI = 2;                      // a squad member the server controls
+  BOSS = 3;
+  MINION = 4;                       // small mobs that swarm during a fight
+  PET = 5;                          // a summoned egg (Namek) or similar
+  TRAINING_DUMMY = 6;               // a training dummy of the village: never fights back, refills its HP when it runs out
+}
+
+message StartMatchRequest {
+  uint32 dungeon_id = 1;
+  uint64 controlled_character_id = 2;   // the character the player moves; the other two are AI
+  uint64 fusion_partner_id = 3;         // 0 = no fusion; otherwise the secondary of a Potara fusion (both level 50 or more, earring owned)
+}
+
+message Arena {
+  float width = 1;
+  float height = 2;
+}
+
+message EntitySpawn {
+  uint32 entity_id = 1;
+  EntityKind kind = 2;
+  string name = 3;
+  string race = 4;
+  uint64 character_id = 5;          // characters only
+  uint32 boss_id = 6;               // bosses and minions
+  uint32 part_head = 7;             // how to draw it (part ids), -1 = none; players use their equipped skin instead
+  uint32 part_body = 8;
+  uint32 part_leg = 9;
+  uint32 costume_id = 10;           // skin worn (characters), 0 = none
+  float x = 11;
+  float y = 12;
+  uint64 hp_max = 13;
+  uint64 hp = 14;
+  uint64 ki_max = 15;
+  uint64 ki = 16;
+  uint32 level = 17;
+  float radius = 18;
+  bool controlled = 19;             // true for the entity this client moves
+  string dummy_key = 20;            // training dummies: the key of balance_config training.dummies (the client places it where its map says)
+  int32 mob_template_id = 21;       // training dummies drawn as an Nro mob (0 = Mộc nhân), -1 = drawn with costume_id
+}
+
+message MatchStarted {
+  uint64 run_id = 1;
+  string match_token = 2;           // secret: lets the client come back after a lost connection (ResumeMatchRequest)
+  uint32 dungeon_id = 3;
+  string dungeon_name = 4;
+  uint32 tick_rate_hz = 5;
+  Arena arena = 6;
+  uint32 time_limit_s = 7;          // 0 = none
+  uint32 revives_left = 8;
+  repeated EntitySpawn entities = 9;
+  uint32 boss_count = 10;           // real bosses in this match
+  repeated SkillSlot skills = 11;   // skills of the controlled character, by slot
+  bool training = 12;               // a training session of the village: no time limit, no reward, nothing recorded; ends with MatchEnded ABANDONED
+}
+
+// Starts a training session in the starter village: the squad of the account against the training dummies (balance_config training).
+// The village is a side view with gravity that the client simulates: the client reports the positions of all three characters (PlayerStateReport.allies).
+message StartTrainingRequest {
+  uint64 controlled_character_id = 1;
+  uint64 fusion_partner_id = 2;     // 0 = no fusion (same rules as StartMatchRequest)
+  float arena_w = 3;                // size of the village map: positions are kept inside it
+  float arena_h = 4;
+  repeated TrainingSpot spots = 5;  // where the client draws each dummy (a dummy without a spot is not spawned)
+}
+
+message TrainingSpot {
+  string key = 1;                   // balance_config training.dummies[].key
+  float x = 2;
+  float y = 3;
+}
+
+message SkillSlot {
+  uint32 slot = 1;
+  uint32 skill_id = 2;
+  uint32 level = 3;
+  uint32 cooldown_ms = 4;
+  uint32 ki_cost = 5;               // 0 for "all Ki" skills (see ki_all)
+  bool ki_all = 6;
+  uint32 icon_id = 7;               // Nro icon of the skill button
+  string name = 8;
+  uint32 cooldown_left_ms = 9;      // what is left of the cooldown when the session starts (kept from the last session, real server time)
+}
+
+enum Effect {
+  EFFECT_NONE = 0;
+  STUN = 1;
+  HOLD = 2;
+  SLEEP = 3;
+  SHIELD = 4;
+  CHOCOLATE = 5;
+  REGEN = 6;
+  BUFF = 7;
+  TELEGRAPH_RECT = 8;               // an area that will hit after duration_ms (boss ultimate): x, y, dir, length, width
+  TELEGRAPH_CIRCLE = 9;
+  CAST_START = 10;                  // charging or gong before a skill (duration_ms)
+  TELEPORT = 11;
+  ENRAGE = 12;
+}
+
+message EntityState {
+  uint32 entity_id = 1;
+  float x = 2;
+  float y = 3;
+  float dir_x = 4;                  // facing
+  float dir_y = 5;
+  uint64 hp = 6;
+  uint64 hp_max = 7;
+  uint64 ki = 8;
+  uint64 ki_max = 9;
+  bool alive = 10;
+  uint32 effects = 11;              // bit mask: 1 stun, 2 hold, 4 sleep, 8 shield, 16 chocolate, 32 regen, 64 buff, 128 enraged
+}
+
+message DamageEvent {
+  uint32 source_id = 1;
+  uint32 target_id = 2;
+  uint64 amount = 3;
+  bool crit = 4;
+  bool absorbed = 5;                // blocked by a shield or dodge: amount 0
+  uint32 skill_id = 6;
+}
+
+message EffectEvent {
+  Effect effect = 1;
+  uint32 source_id = 2;
+  uint32 target_id = 3;
+  uint32 duration_ms = 4;
+  float x = 5;
+  float y = 6;
+  float dir_x = 7;
+  float dir_y = 8;
+  float length = 9;
+  float width = 10;
+  uint32 skill_id = 11;
+}
+
+message ProjectileState {
+  uint32 projectile_id = 1;
+  uint32 owner_id = 2;
+  float x = 3;
+  float y = 4;
+  float dir_x = 5;
+  float dir_y = 6;
+  float radius = 7;
+  uint32 skill_id = 8;
+}
+
+message MatchFrame {
+  uint32 server_tick = 1;
+  repeated EntityState states = 2;
+  repeated DamageEvent damages = 3;
+  repeated EffectEvent effects = 4;
+  repeated EntitySpawn spawns = 5;
+  repeated uint32 despawns = 6;
+  repeated ProjectileState projectiles = 7;
+  bool paused = 8;                  // the simulation waits for a lost connection to come back
+  uint32 bosses_defeated = 9;
+  uint32 elapsed_s = 10;
+  uint32 revives_left = 11;
+  uint32 kill_streak = 12;
+  uint32 ack_seq = 13;              // the last PlayerStateReport / UseSkillRequest seq the server processed
+}
+
+message PlayerStateReport {
+  uint32 seq = 1;
+  float x = 2;
+  float y = 3;
+  float dir_x = 4;
+  float dir_y = 5;
+  repeated AllyPosition allies = 6; // training only: the AI characters walk in the client's village, their positions come from here
+}
+
+message AllyPosition {
+  uint32 entity_id = 1;
+  float x = 2;
+  float y = 3;
+  float dir_x = 4;
+  float dir_y = 5;
+}
+
+message UseSkillRequest {
+  uint32 seq = 1;
+  uint32 slot = 2;                  // skill slot 0..8
+  uint32 target_id = 3;             // for target skills; 0 = none
+  float dir_x = 4;                  // aim direction for direction skills (0,0 = current facing)
+  float dir_y = 5;
+}
+
+message ReviveRequest {}
+message LeaveMatchRequest {}         // gives up the match (counts as a loss)
+
+message LevelUp {
+  uint64 character_id = 1;
+  uint32 from_level = 2;
+  uint32 to_level = 3;
+}
+
+message DropResult {
+  uint32 template_id = 1;
+  uint32 quantity = 2;
+  bool to_account = 3;              // Potara shards go to the account
+}
+
+message CharacterReward {
+  uint64 character_id = 1;
+  uint64 exp_gained = 2;
+  uint32 level_before = 3;
+  uint32 level_after = 4;
+}
+
+enum MatchResult {
+  MATCH_RESULT_UNSPECIFIED = 0;
+  WON = 1;
+  LOST = 2;
+  ABANDONED = 3;
+  EXPIRED = 4;
+}
+
+message MatchEnded {
+  uint64 run_id = 1;
+  MatchResult result = 2;
+  uint32 bosses_defeated = 3;
+  uint32 boss_count = 4;
+  uint32 duration_s = 5;
+  uint64 gold = 6;                  // gold the controlled character received
+  uint32 gems = 7;
+  repeated CharacterReward characters = 8;
+  repeated DropResult drops = 9;
+  repeated uint32 achievements = 10; // achievement ids completed now
+  bool first_clear = 11;
+  bool timed_clear = 12;
+  uint32 revive_gold_spent = 13;
+}
+
+message ResumeMatchRequest { string match_token = 1; }
+message MatchResumed {
+  bool ok = 1;
+  MatchStarted match = 2;           // the full picture again (entities with their current state)
+  string error = 3;
+}

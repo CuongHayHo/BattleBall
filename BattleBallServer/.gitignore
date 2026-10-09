@@ -1,0 +1,4 @@
+server/target/
+tools/apache-maven-*/
+*.p12
+*.jks

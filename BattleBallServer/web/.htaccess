@@ -1,0 +1,5 @@
+# Apache: register.php and captcha.php are the only entry points; helpers and config are not reachable directly.
+<FilesMatch "^(lib|config|config\.sample)\.php$">
+  Require all denied
+</FilesMatch>
+Options -Indexes

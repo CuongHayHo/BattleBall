@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chọn nhóm boss cho phó bản</title>
+<style>
+:root{--bg:#f6f7f9;--fg:#1c2330;--muted:#66708a;--card:#fff;--line:#d9dde6;--accent:#2f6fed;--on:#e7f0ff;--warn:#a65f00;--ok:#17653a;--tile:#eef0f5}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--fg:#e6e9f0;--muted:#98a2b8;--card:#1b2030;--line:#2e3650;--accent:#6c9bff;--on:#1f2c4d;--warn:#e0a24a;--ok:#7bd69e;--tile:#262d44}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+h1{font-size:1.2rem;margin:0 0 2px}
+h2{font-size:1rem;margin:0 0 8px}
+.muted{color:var(--muted)}
+.layout{display:grid;grid-template-columns:330px 1fr;gap:16px;padding:12px 16px 40px;max-width:1600px;margin:0 auto;align-items:start}
+@media (max-width:900px){.layout{grid-template-columns:1fr}}
+aside{position:sticky;top:8px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:calc(100vh - 16px);overflow:auto}
+@media (max-width:900px){aside{position:static;max-height:none}}
+.dun{border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;background:var(--bg)}
+.dun.active{border-color:var(--accent);background:var(--on)}
+.dun .row{display:flex;gap:6px;align-items:center;margin-bottom:4px}
+.dun input[type=text]{flex:1;min-width:0}
+input[type=text],select{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
+button{font:inherit;color:#fff;background:var(--accent);border:0;border-radius:6px;padding:5px 12px;cursor:pointer}
+button.alt{background:var(--card);color:var(--accent);border:1px solid var(--accent)}
+button.small{padding:2px 8px;font-size:.85em}
+.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
+.gcard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:12px}
+.gcard.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.ghead{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.ghead .t{font-weight:600;font-size:1.02em}
+.badge{font-size:.78em;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.badge.used{border-color:var(--ok);color:var(--ok)}
+.badge.dun{border-color:var(--accent);color:var(--accent)}
+.sp{flex:1}
+.bosses{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.boss{background:var(--tile);border-radius:8px;padding:6px;text-align:center}
+.boss canvas{width:110px;height:110px;image-rendering:pixelated}
+.boss .n{font-weight:600;font-size:.9em;line-height:1.2}
+.boss .i{font-size:.75em;color:var(--muted)}
+.boss select{width:100%;margin-top:4px;font-size:.85em}
+textarea{width:100%;min-height:140px;font:12px/1.4 ui-monospace,Consolas,monospace;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px}
+.out{margin-top:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Chọn nhóm boss cho từng phó bản</h1>
+  <div class="muted">Mỗi phó bản của BattleBall dùng <b>một nhóm boss khác nhau</b>. Chọn phó bản ở cột trái, rồi bấm "Chọn nhóm này" ở nhóm boss bên phải. Hình boss là trạng thái đứng yên (IDLE). Nhóm boss lấy từ code boss của NRO; số HP/ATK của NRO chỉ để tham khảo (BattleBall tính lại theo cân bằng riêng).</div>
+</header>
+<div class="layout">
+  <aside>
+    <h2>Phó bản của BattleBall</h2>
+    <div id="dungeons"></div>
+    <button id="addDun" class="alt">+ Thêm phó bản</button>
+    <p class="muted">Bạn chưa chốt số lượng phó bản nên tôi để sẵn 6, thêm hoặc xóa tuỳ ý. "Cấp vùng" cho biết phó bản nằm ở giai đoạn đầu, giữa hay cuối game (ảnh hưởng độ mạnh của boss).</p>
+    <h2 style="margin-top:14px">Kết quả để gửi lại</h2>
+    <input type="text" id="notes" style="width:100%" placeholder="Ghi chú (ví dụ: phó bản 3 bỏ boss số 4)">
+    <div style="margin:8px 0">
+      <button id="btnJson">Tạo JSON</button> <button id="btnCsv" class="alt">Tạo CSV</button>
+      <button id="btnCopy" class="alt">Sao chép</button> <button id="btnSave" class="alt">Tải về</button>
+    </div>
+    <div id="status" class="muted"></div>
+    <textarea id="out" readonly placeholder="Bấm Tạo JSON hoặc Tạo CSV, rồi sao chép nội dung này và dán vào cuộc trò chuyện"></textarea>
+    <p><button id="btnReset" class="alt small">Xóa mọi lựa chọn</button></p>
+  </aside>
+  <section>
+    <div class="filters">
+      <input type="text" id="q" placeholder="Tìm tên nhóm hoặc tên boss">
+      <label><input type="checkbox" id="fDun" checked> Phó bản NRO</label>
+      <label><input type="checkbox" id="fBoss" checked> Nhóm boss</label>
+      <label><input type="checkbox" id="fMob" checked> Quái nhỏ</label>
+      <label><input type="checkbox" id="fSpecial"> Cần hệ thống khác</label>
+      <label><input type="checkbox" id="fEvent"> Sự kiện</label>
+      <label><input type="checkbox" id="fFree"> Chỉ nhóm chưa dùng</label>
+      <span class="muted" id="count"></span>
+    </div>
+    <div id="groups"></div>
+  </section>
+</div>
+<script>
+"use strict";
+const DATA = __DATA__;
+const IMGS = __IMGS__;
+const POSE = {head:[-13,34], leg:[-8,10], body:[-9,16]};   // NRO CharInfo[0]: dx, dy (dy up)
+const TAG_VI = {DUNGEON:'Phó bản NRO', BOSS:'Nhóm boss', MOB:'Quái nhỏ (ra ồ ạt)', SPECIAL:'Cần hệ thống khác', EVENT:'Sự kiện'};
+const TIERS = {early:'Vùng sớm', mid:'Vùng giữa', late:'Vùng cuối'};
+const ROLES = {'':'Mặc định', normal:'Boss thường', mini:'Mini-boss cuối tầng', final:'Boss cuối phó bản', minion:'Quái nhỏ thường (ra ồ ạt)', minion_elite:'Quái nhỏ elite (ra ồ ạt)'};
+const STORE = 'bb_boss_group_picker_v1';
+const el = id => document.getElementById(id);
+const byKey = new Map(DATA.groups.map(g => [g.key, g]));
+let st = {dungeons: [], active: 0, notes: ''};
+
+function defaultState() {
+  return {dungeons: [1,2,3,4,5,6].map(i => ({name: 'Phó bản ' + i, tier: i <= 2 ? 'early' : i <= 4 ? 'mid' : 'late', group: null, roles: {}})), active: 0, notes: ''};
+}
+function load() { try { const r = localStorage.getItem(STORE); if (r) { const o = JSON.parse(r); if (o && Array.isArray(o.dungeons) && o.dungeons.length) { st = o; return; } } } catch (e) {} st = defaultState(); }
+function save() { try { localStorage.setItem(STORE, JSON.stringify(st)); } catch (e) {} }
+function usedBy(key) { const i = st.dungeons.findIndex(d => d.group === key); return i; }
+
+// ---- rendering of bosses (lazy, IDLE) ----
+const imgCache = new Map();
+function loadImg(icon) {
+  if (!imgCache.has(icon)) imgCache.set(icon, new Promise(res => {
+    const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null);
+    im.src = IMGS[icon] ? 'data:image/png;base64,' + IMGS[icon] : '';
+  }));
+  return imgCache.get(icon);
+}
+async function draw(canvas, b) {
+  const items = [];
+  for (const slot of ['head', 'leg', 'body']) {
+    const f = b.parts[slot]; if (!f) continue;
+    const im = await loadImg(f[0]); if (!im) continue;
+    items.push({im, X: (POSE[slot][0] + f[1]) * 2, Y: (f[2] - POSE[slot][1]) * 2, w: im.naturalWidth, h: im.naturalHeight});
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!items.length) { ctx.fillStyle = '#999'; ctx.font = '12px sans-serif'; ctx.fillText('không có hình', 14, 60); return; }
+  const x0 = Math.min(...items.map(i => i.X)), y0 = Math.min(...items.map(i => i.Y));
+  const x1 = Math.max(...items.map(i => i.X + i.w)), y1 = Math.max(...items.map(i => i.Y + i.h));
+  const W = x1 - x0, H = y1 - y0;
+  const s = Math.min(2, (canvas.width - 8) / W, (canvas.height - 8) / H);   // small sprites are enlarged x2 for clarity
+  ctx.imageSmoothingEnabled = s < 1;
+  const ox = (canvas.width - W * s) / 2 - x0 * s, oy = (canvas.height - H * s) / 2 - y0 * s;
+  for (const i of items) ctx.drawImage(i.im, ox + i.X * s, oy + i.Y * s, i.w * s, i.h * s);
+}
+const io = new IntersectionObserver(es => es.forEach(e => {
+  if (e.isIntersecting) { io.unobserve(e.target); const g = byKey.get(e.target.dataset.g); draw(e.target, g.bosses[+e.target.dataset.i]); }
+}), {rootMargin: '300px'});
+
+// ---- dungeons panel ----
+function renderDungeons() {
+  const box = el('dungeons'); box.textContent = '';
+  st.dungeons.forEach((d, idx) => {
+    const wrap = document.createElement('div'); wrap.className = 'dun' + (idx === st.active ? ' active' : '');
+    const r1 = document.createElement('div'); r1.className = 'row';
+    const rd = document.createElement('input'); rd.type = 'radio'; rd.name = 'act'; rd.checked = idx === st.active; rd.title = 'Chọn phó bản này để gán nhóm boss';
+    rd.onchange = () => { st.active = idx; save(); renderDungeons(); renderGroups(); };
+    const nm = document.createElement('input'); nm.type = 'text'; nm.value = d.name; nm.oninput = () => { d.name = nm.value; save(); renderGroups(true); };
+    const del = document.createElement('button'); del.className = 'alt small'; del.textContent = '×'; del.title = 'Xóa phó bản';
+    del.onclick = () => { if (st.dungeons.length > 1 && confirm('Xóa "' + d.name + '"?')) { st.dungeons.splice(idx, 1); st.active = Math.min(st.active, st.dungeons.length - 1); save(); renderDungeons(); renderGroups(); } };
+    r1.append(rd, nm, del);
+    const r2 = document.createElement('div'); r2.className = 'row';
+    const sel = document.createElement('select');
+    Object.keys(TIERS).forEach(k => { const o = document.createElement('option'); o.value = k; o.textContent = TIERS[k]; if (k === d.tier) o.selected = true; sel.appendChild(o); });
+    sel.onchange = () => { d.tier = sel.value; save(); };
+    const gl = document.createElement('div'); gl.className = d.group ? '' : 'muted';
+    gl.textContent = d.group ? 'Nhóm: ' + byKey.get(d.group).label : 'Chưa chọn nhóm boss';
+    r2.append(sel);
+    wrap.append(r1, r2, gl);
+    if (d.group) { const c = document.createElement('button'); c.className = 'alt small'; c.textContent = 'Bỏ nhóm'; c.onclick = () => { d.group = null; d.roles = {}; save(); renderDungeons(); renderGroups(); }; wrap.appendChild(c); }
+    box.appendChild(wrap);
+  });
+}
+el('addDun').onclick = () => { st.dungeons.push({name: 'Phó bản ' + (st.dungeons.length + 1), tier: 'mid', group: null, roles: {}}); st.active = st.dungeons.length - 1; save(); renderDungeons(); renderGroups(); };
+
+// ---- groups gallery ----
+function visible(g) {
+  const tagOk = {DUNGEON: el('fDun').checked, BOSS: el('fBoss').checked, MOB: el('fMob').checked, SPECIAL: el('fSpecial').checked, EVENT: el('fEvent').checked}[g.tag];
+  if (!tagOk) return false;
+  if (el('fFree').checked && usedBy(g.key) >= 0) return false;
+  const q = el('q').value.trim().toLowerCase();
+  if (!q) return true;
+  return g.label.toLowerCase().includes(q) || g.bosses.some(b => b.name.toLowerCase().includes(q));
+}
+function renderGroups(labelsOnly) {
+  const box = el('groups'); box.textContent = '';
+  const list = DATA.groups.filter(visible);
+  el('count').textContent = list.length + ' nhóm';
+  const act = st.dungeons[st.active];
+  list.forEach(g => {
+    const u = usedBy(g.key);
+    const card = document.createElement('div'); card.className = 'gcard' + (u === st.active ? ' sel' : '');
+    const head = document.createElement('div'); head.className = 'ghead';
+    const t = document.createElement('span'); t.className = 't'; t.textContent = g.label;
+    const tg = document.createElement('span'); tg.className = 'badge ' + (g.tag === 'DUNGEON' ? 'dun' : ''); tg.textContent = TAG_VI[g.tag];
+    const n = document.createElement('span'); n.className = 'badge'; n.textContent = g.bosses.length + ' boss';
+    head.append(t, tg, n);
+    if (u >= 0) { const b = document.createElement('span'); b.className = 'badge used'; b.textContent = 'Đang dùng cho: ' + st.dungeons[u].name; head.appendChild(b); }
+    const sp = document.createElement('span'); sp.className = 'sp'; head.appendChild(sp);
+    const btn = document.createElement('button');
+    if (u === st.active) { btn.className = 'alt'; btn.textContent = 'Bỏ nhóm này'; btn.onclick = () => { act.group = null; act.roles = {}; save(); renderDungeons(); renderGroups(); }; }
+    else { btn.textContent = u >= 0 ? 'Chuyển sang "' + act.name + '"' : 'Chọn cho "' + act.name + '"'; btn.onclick = () => assign(g.key); }
+    head.appendChild(btn);
+    card.appendChild(head);
+    const grid = document.createElement('div'); grid.className = 'bosses';
+    g.bosses.forEach((b, i) => {
+      const tile = document.createElement('div'); tile.className = 'boss';
+      const cv = document.createElement('canvas'); cv.width = 220; cv.height = 220; cv.dataset.g = g.key; cv.dataset.i = i; tile.appendChild(cv);
+      const nm = document.createElement('div'); nm.className = 'n'; nm.textContent = b.name; tile.appendChild(nm);
+      const inf = document.createElement('div'); inf.className = 'i'; inf.textContent = b.g + (b.hp ? ' · HP NRO ' + b.hp.toLocaleString('vi-VN') : ''); tile.appendChild(inf);
+      if (u === st.active) {
+        const sel = document.createElement('select'); const id = g.key + ':' + i;
+        Object.keys(ROLES).forEach(k => { const o = document.createElement('option'); o.value = k; o.textContent = ROLES[k]; if ((act.roles[id] || '') === k) o.selected = true; sel.appendChild(o); });
+        sel.onchange = () => { if (sel.value) act.roles[id] = sel.value; else delete act.roles[id]; save(); };
+        if (!act.roles[id] && b.hint) sel.title = 'Mặc định: ' + (ROLES[b.hint] || b.hint);
+        tile.appendChild(sel);
+      }
+      grid.appendChild(tile); io.observe(cv);
+    });
+    card.appendChild(grid); box.appendChild(card);
+  });
+}
+function assign(key) {
+  st.dungeons.forEach(d => { if (d.group === key) { d.group = null; d.roles = {}; } });
+  const act = st.dungeons[st.active]; act.group = key; act.roles = {};
+  save(); renderDungeons(); renderGroups();
+}
+['q','fDun','fBoss','fMob','fSpecial','fEvent','fFree'].forEach(id => el(id).addEventListener(id === 'q' ? 'input' : 'change', () => renderGroups()));
+
+// ---- export ----
+function result() {
+  return st.dungeons.map(d => {
+    const g = d.group ? byKey.get(d.group) : null;
+    return {dungeon: d.name, tier: d.tier, group: d.group, group_label: g ? g.label : null,
+      bosses: g ? g.bosses.map((b, i) => ({name: b.name, role: d.roles[g.key + ':' + i] || b.hint || 'normal'})) : []};
+  });
+}
+function setOut(t, m) { el('out').value = t; el('status').textContent = m || ''; }
+el('btnJson').onclick = () => { const r = result(); setOut(JSON.stringify({version: 1, notes: st.notes, dungeons: r}, null, 1), r.filter(x => x.group).length + '/' + r.length + ' phó bản đã chọn nhóm'); };
+el('btnCsv').onclick = () => {
+  const q = s => '"' + String(s).replace(/"/g, '""') + '"', lines = ['dungeon,tier,group,group_label,boss,role'];
+  result().forEach(d => { if (!d.group) lines.push([q(d.dungeon), d.tier, '', '', '', ''].join(',')); d.bosses.forEach(b => lines.push([q(d.dungeon), d.tier, d.group, q(d.group_label), q(b.name), b.role].join(','))); });
+  if (st.notes) lines.push('# ghi chú: ' + st.notes.replace(/\n/g, ' '));
+  setOut(lines.join('\n'), 'Đã tạo CSV');
+};
+el('btnCopy').onclick = () => { const ta = el('out'); if (!ta.value) { el('status').textContent = 'Hãy bấm Tạo JSON hoặc Tạo CSV trước.'; return; } ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e) {} el('status').textContent = ok ? 'Đã sao chép.' : 'Chọn toàn bộ ô và nhấn Ctrl+C.'; };
+el('btnSave').onclick = () => { const v = el('out').value; if (!v) { el('status').textContent = 'Hãy bấm Tạo JSON hoặc Tạo CSV trước.'; return; } const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([v], {type: 'text/plain;charset=utf-8'})); a.download = 'boss_groups' + (v[0] === '{' ? '.json' : '.csv'); document.body.appendChild(a); a.click(); a.remove(); el('status').textContent = 'Đã tải về (thư mục Tải xuống).'; };
+el('btnReset').onclick = () => { if (confirm('Xóa toàn bộ lựa chọn và quay về 6 phó bản trống?')) { st = defaultState(); save(); el('notes').value = ''; renderDungeons(); renderGroups(); setOut('', ''); } };
+el('notes').addEventListener('input', e => { st.notes = e.target.value; save(); });
+load(); el('notes').value = st.notes || ''; renderDungeons(); renderGroups();
+</script>
+</body>
+</html>

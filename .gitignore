@@ -1,0 +1,44 @@
+# ---- Reference projects and generated tree reports (not pushed) ----
+/NroUnity/
+/Teamobi2026/
+/Teamobi2026_TREE.md
+/NroUnity_TREE.md
+/DIRECTORY_TREE.md
+
+# ---- Unity generated / local ----
+/BattleBall/Library/
+/BattleBall/Temp/
+/BattleBall/Logs/
+/BattleBall/UserSettings/
+/BattleBall/obj/
+/BattleBall/Builds/
+/BattleBall/*.csproj
+/BattleBall/*.sln
+/BattleBall/*.log
+/BattleBall/verification_report.txt
+*.pidb
+*.suo
+*.user
+.vs/
+.idea/
+
+# ---- Source data copied from the reference games (about 950 MB, 167k files; keep only its scripts) ----
+/BattleBall/SourceData/*
+!/BattleBall/SourceData/tools/
+
+# ---- Server: build output, logs, local tools, secrets ----
+/BattleBallServer/logs/
+/BattleBallServer/server/target/
+/BattleBallServer/tools/apache-maven-*/
+/BattleBallServer/tools/aura_planner/img/
+*.p12
+*.jks
+*.keystore
+config.php
+.env
+
+# ---- OS / editor / Claude local files ----
+.DS_Store
+Thumbs.db
+desktop.ini
+.claude/settings.local.json

@@ -1,0 +1,5 @@
+# Apache: only index.php is an entry point; helpers and config must not be reachable directly.
+<FilesMatch "^(lib|pages|config|config\.sample)\.php$">
+  Require all denied
+</FilesMatch>
+Options -Indexes

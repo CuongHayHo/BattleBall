@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phân bố Aura theo cấp độ</title>
+<style>
+:root {
+  --bg: #f4efe6; --panel: #fffaf0; --ink: #3a2a1a; --muted: #8a7459; --line: #e3d6bd;
+  --accent: #e8741c; --accent-ink: #fff; --ok: #2f8a3c; --warn: #b4531a; --stage: #2b3a52; --stage2: #1d2738;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1f1a14; --panel: #2a231b; --ink: #f1e6d2; --muted: #b3a187; --line: #43382a; --accent: #f08a35; --accent-ink: #1f1a14; --ok: #66c274; --warn: #f2a15f; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, "Segoe UI", Roboto, sans-serif; }
+header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+h1 { font-size: 18px; margin: 0 8px 0 0; }
+.stat { color: var(--muted); }
+.stat b { color: var(--ink); }
+button, input, select { font: inherit; color: inherit; }
+button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+input[type=number], input[type=text], input[type=search], select { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+input[type=number] { width: 72px; }
+.spacer { flex: 1; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; padding: 16px; align-items: start; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { position: static !important; max-height: none !important; } }
+.bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 12px; }
+.tabs button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.card.off { opacity: .5; }
+.card.flash { outline: 3px solid var(--accent); }
+.card .stage { background: linear-gradient(var(--stage), var(--stage2)); border-radius: 6px; display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; }
+.card .head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.card .id { font-weight: 700; }
+.card .layers { color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+.card .layers .row { display: flex; align-items: center; gap: 4px; }
+.card .layers input { width: 54px; padding: 1px 4px; }
+.card .layers .unsure { color: var(--warn); }
+.card label.lv { display: flex; align-items: center; gap: 6px; }
+.card label.lv input { width: 84px; }
+.card input[type=text] { width: 100%; }
+.card .tick { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.assigned { border-color: var(--ok); }
+aside { position: sticky; top: 64px; max-height: calc(100vh - 80px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+aside h2 { font-size: 15px; margin: 0 0 6px; }
+.ms { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+.ms .lvl { width: 52px; font-weight: 700; color: var(--accent); flex: none; }
+.ms a { color: inherit; margin-right: 6px; cursor: pointer; text-decoration: underline dotted; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.panel[hidden] { display: none; }
+.panel .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 4px 0; }
+.note { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Phân bố Aura theo cấp độ</h1>
+  <span class="stat">Đã phân bố <b id="statDone">0</b> / <b id="statAll">0</b> aura (<b id="statOff">0</b> tắt)</span>
+  <span class="spacer"></span>
+  <label>Cấp tối đa <input type="number" id="cap" min="1" max="999" value="100"></label>
+  <label>Tốc độ <input type="range" id="fps" min="2" max="20" value="8"> <span id="fpsText">8</span> khung/giây</label>
+  <label><input type="checkbox" id="showMan" checked> Hình người</label>
+  <button id="btnAuto">Phân bố tự động…</button>
+  <button id="btnImport">Nhập JSON</button>
+  <button class="primary" id="btnExport">Xuất JSON</button>
+  <input type="file" id="file" accept="application/json,.json" hidden>
+</header>
+
+<main>
+  <section>
+    <div class="panel" id="autoPanel" hidden>
+      <b>Phân bố tự động</b>
+      <p class="note">Rải đều các mốc cấp độ cho nhiều aura cùng lúc, theo thứ tự mã aura tăng dần. Sau đó bạn vẫn sửa tay từng aura được.</p>
+      <div class="row">
+        <label>Áp dụng cho
+          <select id="autoScope">
+            <option value="new">các aura chưa có cấp</option>
+            <option value="all">tất cả aura đang bật (ghi đè)</option>
+          </select>
+        </label>
+        <label>Từ cấp <input type="number" id="autoFrom" min="1" value="5"></label>
+        <label>đến cấp <input type="number" id="autoTo" min="1" value="100"></label>
+        <label>làm tròn bội của <input type="number" id="autoStep" min="1" value="1" title="ví dụ 5 thì các mốc là 5, 10, 15 ..."></label>
+      </div>
+      <div class="row">
+        <button class="primary" id="autoApply">Áp dụng</button>
+        <button id="autoClose">Đóng</button>
+        <span class="note" id="autoInfo"></span>
+      </div>
+    </div>
+
+    <div class="bar">
+      <span class="tabs" id="tabs">
+        <button data-f="all" class="on">Tất cả</button>
+        <button data-f="todo">Chưa phân bố</button>
+        <button data-f="done">Đã phân bố</button>
+        <button data-f="off">Tắt</button>
+      </span>
+      <input type="search" id="search" placeholder="Tìm mã hoặc tên…">
+      <label>Xếp theo
+        <select id="sort">
+          <option value="id">mã aura</option>
+          <option value="level">cấp độ</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <aside>
+    <h2>Các mốc cấp độ</h2>
+    <p class="note">Người chơi đạt cấp này thì nhận aura (thành tựu) và cất vào tab Aura, dùng chung cho cả 3 hành tinh. Bấm tên để nhảy tới aura.</p>
+    <div id="milestones"></div>
+  </aside>
+</main>
+
+<script src="data.js"></script>
+<script>
+"use strict";
+const KEY = "bb.auraPlanner.v1";
+const BOX_W = 200, BOX_H = 250;                                   // size of the drawing area of a card (the canvas is drawn at 2x for a sharp picture)
+
+let state = { cap: 100, fps: 8, showMan: true, auras: {} };
+try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s) state = Object.assign(state, s); } catch (e) { /* no storage: keep the defaults */ }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignore */ } };
+
+const images = {};
+function img(file) {
+  if (!images[file]) { const i = new Image(); i.src = file; images[file] = i; }
+  return images[file];
+}
+
+function cfg(a) {
+  const c = state.auras[a.id] || (state.auras[a.id] = { level: null, name: "", off: false, frames: {} });
+  return c;
+}
+function framesOf(a, l) {
+  const c = cfg(a);
+  const n = c.frames && c.frames[l.layer];
+  return n > 0 ? n : l.frames;
+}
+
+// ------------------------------------------------------------------------------------------------ drawing
+const cards = [];                                                 // {a, canvas, ctx}
+
+function drawCard(card, t) {
+  const { a, ctx, canvas } = card;
+  const cw = canvas.width, ch = canvas.height;
+  ctx.clearRect(0, 0, cw, ch);
+  // one scale for every layer of the aura so they stay aligned: the largest frame fits the area
+  let maxW = 1, maxH = 1;
+  for (const l of a.layers) { maxW = Math.max(maxW, l.w); maxH = Math.max(maxH, l.h / framesOf(a, l)); }
+  const s = Math.min(cw * 0.94 / maxW, ch * 0.94 / maxH);
+  const frameIndex = Math.floor(t * state.fps);
+  const ordered = a.layers.slice().sort((x, y) => x.layer - y.layer);
+  const drawMan = () => {
+    if (!state.showMan) return;
+    // a Nro character is about 40 px tall at x1: the figure is drawn at the scale of the pictures so the size of the aura around it reads right
+    const scale = a.layers[0].scale || 2;
+    const mh = 40 * scale * s;
+    const cx = cw / 2, feet = (ch + maxH * s) / 2;                       // Nro draws the frame BOTTOM | HCENTER on the feet
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,.6)";
+    ctx.beginPath(); ctx.arc(cx, feet - mh * 0.83, mh * 0.15, 0, Math.PI * 2); ctx.fill();                  // head
+    ctx.fillRect(cx - mh * 0.15, feet - mh * 0.66, mh * 0.3, mh * 0.36);                                      // body
+    ctx.fillRect(cx - mh * 0.14, feet - mh * 0.3, mh * 0.12, mh * 0.3);                                       // legs
+    ctx.fillRect(cx + mh * 0.02, feet - mh * 0.3, mh * 0.12, mh * 0.3);
+    ctx.restore();
+  };
+  let manDrawn = false;
+  for (const l of ordered) {
+    if (l.layer >= 1 && !manDrawn) { drawMan(); manDrawn = true; }                                       // layer 0 is behind the character, layer 1 in front
+    const im = img(l.file);
+    if (!im.complete || !im.naturalWidth) continue;
+    const n = framesOf(a, l);
+    const fh = l.h / n;
+    const f = frameIndex % n;
+    const dw = l.w * s, dh = fh * s;
+    ctx.drawImage(im, 0, f * fh, l.w, fh, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+  }
+  if (!manDrawn) drawMan();
+}
+
+let t0 = performance.now();
+function loop(now) {
+  const t = (now - t0) / 1000;
+  for (const c of cards) if (c.visible) drawCard(c, t);
+  requestAnimationFrame(loop);
+}
+
+// ------------------------------------------------------------------------------------------------ the cards
+const grid = document.getElementById("grid");
+const io = "IntersectionObserver" in window ? new IntersectionObserver(es => es.forEach(e => { e.target._card.visible = e.isIntersecting; }), { rootMargin: "200px" }) : null;
+let filter = "all";
+
+function layerSummary(a) {
+  return a.layers.map(l => {
+    const n = framesOf(a, l);
+    return `<div class="row"><span>${l.layer === 0 ? "Sau người" : "Trước người"} (${l.w}×${Math.round(l.h / n)})</span>` +
+           `<input type="number" min="1" max="60" value="${n}" data-layer="${l.layer}" title="Số khung của ảnh này (ảnh chia đều theo chiều dọc)">` +
+           `<span>khung</span>${l.sure ? "" : '<span class="unsure" title="Máy chưa chắc số khung, hãy xem hình rồi chỉnh nếu cần">?</span>'}</div>`;
+  }).join("");
+}
+
+function buildCard(a) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.id = "aura" + a.id;
+  el.innerHTML =
+    `<canvas class="stage" width="${BOX_W * 2}" height="${BOX_H * 2}"></canvas>` +
+    `<div class="head"><span class="id">Aura ${a.id}</span><label class="tick"><input type="checkbox" data-k="off"> tắt</label></div>` +
+    `<div class="layers">${layerSummary(a)}</div>` +
+    `<label class="lv">Cấp độ <input type="number" min="1" data-k="level" placeholder="—"></label>` +
+    `<input type="text" data-k="name" placeholder="Tên (tuỳ chọn)">`;
+  const canvas = el.querySelector("canvas");
+  const card = { a, el, canvas, ctx: canvas.getContext("2d"), visible: true };
+  canvas._card = card;
+  el._card = card;
+  cards.push(card);
+  if (io) io.observe(canvas);
+
+  const c = cfg(a);
+  el.querySelector('[data-k="level"]').value = c.level == null ? "" : c.level;
+  el.querySelector('[data-k="name"]').value = c.name || "";
+  el.querySelector('[data-k="off"]').checked = !!c.off;
+
+  el.addEventListener("input", e => {
+    const k = e.target.dataset.k;
+    const cc = cfg(a);
+    if (k === "level") {
+      const v = parseInt(e.target.value, 10);
+      cc.level = isNaN(v) ? null : Math.max(1, Math.min(state.cap, v));
+    } else if (k === "name") {
+      cc.name = e.target.value;
+    } else if (k === "off") {
+      cc.off = e.target.checked;
+    } else if (e.target.dataset.layer != null) {
+      const v = parseInt(e.target.value, 10);
+      if (v > 0) { cc.frames = cc.frames || {}; cc.frames[e.target.dataset.layer] = v; }
+    }
+    save();
+    refreshMeta();
+  });
+  el.addEventListener("change", e => {
+    if (e.target.dataset.k === "level") e.target.value = cfg(a).level == null ? "" : cfg(a).level;
+    if (e.target.dataset.k === "level" || e.target.dataset.k === "off") applyFilter();
+  });
+  return el;
+}
+
+function matches(a, q) {
+  const c = cfg(a);
+  if (filter === "todo" && (c.level != null || c.off)) return false;
+  if (filter === "done" && c.level == null) return false;
+  if (filter === "off" && !c.off) return false;
+  if (q) {
+    const text = ("aura " + a.id + " " + (c.name || "")).toLowerCase();
+    if (!text.includes(q)) return false;
+  }
+  return true;
+}
+
+function applyFilter() {
+  const q = document.getElementById("search").value.trim().toLowerCase();
+  const sort = document.getElementById("sort").value;
+  const list = AURA_DATA.slice();
+  if (sort === "level") list.sort((x, y) => (cfg(x).level ?? 1e9) - (cfg(y).level ?? 1e9) || x.id - y.id);
+  for (const a of list) {
+    const card = cards.find(c => c.a === a);
+    card.el.hidden = !matches(a, q);
+    grid.appendChild(card.el);                                    // moves the card to its place in the new order
+    card.el.classList.toggle("off", !!cfg(a).off);
+    card.el.classList.toggle("assigned", cfg(a).level != null);
+  }
+  refreshMeta();
+}
+
+function refreshMeta() {
+  let done = 0, off = 0;
+  const byLevel = {};
+  for (const a of AURA_DATA) {
+    const c = cfg(a);
+    if (c.off) off++;
+    if (c.level != null && !c.off) { done++; (byLevel[c.level] = byLevel[c.level] || []).push(a); }
+  }
+  document.getElementById("statDone").textContent = done;
+  document.getElementById("statAll").textContent = AURA_DATA.length - off;
+  document.getElementById("statOff").textContent = off;
+  const ms = document.getElementById("milestones");
+  const levels = Object.keys(byLevel).map(Number).sort((x, y) => x - y);
+  ms.innerHTML = levels.length ? "" : '<p class="note">Chưa có mốc nào.</p>';
+  for (const lv of levels) {
+    const row = document.createElement("div");
+    row.className = "ms";
+    row.innerHTML = `<span class="lvl">Cấp ${lv}</span><span>` +
+      byLevel[lv].map(a => `<a data-id="${a.id}">${escapeHtml(cfg(a).name || "Aura " + a.id)}</a>`).join("") + "</span>";
+    ms.appendChild(row);
+  }
+  for (const card of cards) {
+    card.el.classList.toggle("assigned", cfg(card.a).level != null);
+    card.el.classList.toggle("off", !!cfg(card.a).off);
+  }
+}
+
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch])); }
+
+document.getElementById("milestones").addEventListener("click", e => {
+  const id = e.target.dataset && e.target.dataset.id;
+  if (!id) return;
+  const el = document.getElementById("aura" + id);
+  if (!el) return;
+  if (el.hidden) { filter = "all"; setTabs(); document.getElementById("search").value = ""; applyFilter(); }
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 1400);
+});
+
+function setTabs() {
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.f === filter));
+}
+document.getElementById("tabs").addEventListener("click", e => {
+  if (!e.target.dataset.f) return;
+  filter = e.target.dataset.f;
+  setTabs();
+  applyFilter();
+});
+document.getElementById("search").addEventListener("input", applyFilter);
+document.getElementById("sort").addEventListener("change", applyFilter);
+
+// ------------------------------------------------------------------------------------------------ settings
+const capInput = document.getElementById("cap");
+capInput.value = state.cap;
+capInput.addEventListener("change", () => {
+  state.cap = Math.max(1, parseInt(capInput.value, 10) || 100);
+  capInput.value = state.cap;
+  for (const a of AURA_DATA) { const c = cfg(a); if (c.level != null && c.level > state.cap) c.level = state.cap; }
+  for (const card of cards) { const v = cfg(card.a).level; card.el.querySelector('[data-k="level"]').value = v == null ? "" : v; }
+  save();
+  refreshMeta();
+});
+const fps = document.getElementById("fps");
+fps.value = state.fps;
+document.getElementById("fpsText").textContent = state.fps;
+fps.addEventListener("input", () => { state.fps = parseInt(fps.value, 10); document.getElementById("fpsText").textContent = state.fps; save(); });
+const man = document.getElementById("showMan");
+man.checked = state.showMan;
+man.addEventListener("change", () => { state.showMan = man.checked; save(); });
+
+// ------------------------------------------------------------------------------------------------ automatic distribution
+const autoPanel = document.getElementById("autoPanel");
+document.getElementById("btnAuto").addEventListener("click", () => {
+  autoPanel.hidden = !autoPanel.hidden;
+  document.getElementById("autoTo").value = state.cap;
+  updateAutoInfo();
+});
+document.getElementById("autoClose").addEventListener("click", () => { autoPanel.hidden = true; });
+function autoTargets() {
+  const scope = document.getElementById("autoScope").value;
+  return AURA_DATA.filter(a => !cfg(a).off && (scope === "all" || cfg(a).level == null));
+}
+function updateAutoInfo() {
+  document.getElementById("autoInfo").textContent = autoTargets().length + " aura sẽ được rải đều.";
+}
+["autoScope", "autoFrom", "autoTo", "autoStep"].forEach(id => document.getElementById(id).addEventListener("input", updateAutoInfo));
+document.getElementById("autoApply").addEventListener("click", () => {
+  const list = autoTargets();
+  if (!list.length) return;
+  const from = Math.max(1, parseInt(document.getElementById("autoFrom").value, 10) || 1);
+  const to = Math.max(from, Math.min(state.cap, parseInt(document.getElementById("autoTo").value, 10) || state.cap));
+  const step = Math.max(1, parseInt(document.getElementById("autoStep").value, 10) || 1);
+  list.forEach((a, i) => {
+    const raw = list.length === 1 ? from : from + (to - from) * i / (list.length - 1);
+    cfg(a).level = Math.max(1, Math.min(state.cap, Math.round(raw / step) * step));
+  });
+  for (const card of cards) { const v = cfg(card.a).level; card.el.querySelector('[data-k="level"]').value = v == null ? "" : v; }
+  save();
+  applyFilter();
+});
+
+// ------------------------------------------------------------------------------------------------ export and import
+document.getElementById("btnExport").addEventListener("click", () => {
+  const out = {
+    version: 1,
+    note: "aura_levels: mỗi aura nhận khi nhân vật đạt cấp `level`; layers[].layer 0 = sau người, 1 = trước người; frames = số khung chia đều theo chiều dọc ảnh",
+    levelCap: state.cap,
+    auras: AURA_DATA.map(a => {
+      const c = cfg(a);
+      return {
+        id: a.id, name: c.name || "", level: c.level, enabled: !c.off,
+        layers: a.layers.map(l => ({ layer: l.layer, file: l.file.replace(/^img\//, ""), frames: framesOf(a, l) }))
+      };
+    })
+  };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "aura_levels.json";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+});
+document.getElementById("btnImport").addEventListener("click", () => document.getElementById("file").click());
+document.getElementById("file").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const d = JSON.parse(r.result);
+      if (d.levelCap) { state.cap = d.levelCap; capInput.value = d.levelCap; }
+      for (const x of d.auras || []) {
+        const a = AURA_DATA.find(k => k.id === x.id);
+        if (!a) continue;
+        const c = cfg(a);
+        c.level = x.level == null ? null : x.level;
+        c.name = x.name || "";
+        c.off = x.enabled === false;
+        c.frames = {};
+        for (const l of x.layers || []) {
+          const orig = a.layers.find(k => k.layer === l.layer);
+          if (orig && l.frames > 0 && l.frames !== orig.frames) c.frames[l.layer] = l.frames;
+        }
+      }
+      save();
+      location.reload();
+    } catch (err) {
+      alert("Không đọc được file: " + err.message);
+    }
+  };
+  r.readAsText(f);
+  e.target.value = "";
+});
+
+// ------------------------------------------------------------------------------------------------ start
+for (const a of AURA_DATA) grid.appendChild(buildCard(a));
+applyFilter();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

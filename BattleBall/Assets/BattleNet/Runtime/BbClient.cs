@@ -1,0 +1,160 @@
+using System;
+using System.Threading.Tasks;
+using BattleBall.Proto;
+
+namespace BattleBall.Net
+{
+    /// <summary>
+    /// Account flow on top of <see cref="BbConnection"/>: connect, register, log in with a password or a stored refresh token, and keep the latest
+    /// <see cref="PlayerDataSnapshot"/> the server pushes after login. Plain C#: call <see cref="Pump"/> from the main thread to read pushed events.
+    /// </summary>
+    public sealed class BbClient : IDisposable
+    {
+        public BbConnection Connection { get; private set; }
+        public LoginResult Login { get; private set; }
+        public PlayerDataSnapshot Snapshot { get; private set; }
+        public DisconnectNotice LastDisconnect { get; private set; }
+        public bool Dropped { get; private set; }
+
+        public event Action<PlayerDataSnapshot> SnapshotChanged;
+        public event Action<Envelope> EventReceived;
+
+        public async Task ConnectAsync(string host, int port, bool acceptAnyCertificate, string clientVersion, string platform, Action<float> progress = null)
+        {
+            Connection = new BbConnection { AcceptAnyCertificate = acceptAnyCertificate };
+            Connection.Disconnected += n => { LastDisconnect = n; Dropped = true; };
+            await Connection.ConnectAsync(host, port, clientVersion, platform, 8000, progress);
+        }
+
+        public async Task<RegisterResult> RegisterAsync(string username, string password)
+        {
+            var answer = await Connection.RequestAsync(new Envelope { RegisterRequest = new RegisterRequest { Username = username, Password = password } });
+            if (answer.PayloadCase != Envelope.PayloadOneofCase.RegisterResult)
+                throw new InvalidOperationException("register failed: " + BbConnection.Describe(answer));
+            return answer.RegisterResult;
+        }
+
+        public Task<LoginResult> LoginWithPasswordAsync(string username, string password, string deviceInfo)
+        {
+            return DoLogin(new LoginRequest { Username = username, Password = password, DeviceInfo = deviceInfo ?? "" });
+        }
+
+        public Task<LoginResult> LoginWithTokenAsync(string username, string refreshToken, string deviceInfo)
+        {
+            return DoLogin(new LoginRequest { Username = username ?? "", RefreshToken = refreshToken, DeviceInfo = deviceInfo ?? "" });
+        }
+
+        async Task<LoginResult> DoLogin(LoginRequest req)
+        {
+            var answer = await Connection.RequestAsync(new Envelope { LoginRequest = req });
+            if (answer.PayloadCase != Envelope.PayloadOneofCase.LoginResult)
+                throw new InvalidOperationException("login failed: " + BbConnection.Describe(answer));
+            Login = answer.LoginResult;
+            return Login;
+        }
+
+        // ---- requests of a logged-in player: each answer is the reply of the server to that request; on success the server also pushes a fresh PlayerDataSnapshot
+
+        async Task<Envelope> Ask(Envelope request, Envelope.PayloadOneofCase expected)
+        {
+            var answer = await Connection.RequestAsync(request);
+            if (answer.PayloadCase != expected)
+                throw new InvalidOperationException("unexpected answer: " + BbConnection.Describe(answer));
+            return answer;
+        }
+
+        /// <param name="fusion">true: a fusion skin for the fusion form of this (main) character</param>
+        public async Task<ActionResult> EquipSkinAsync(ulong characterId, uint costumeId, bool fusion = false)
+        {
+            var a = await Ask(new Envelope { EquipSkinRequest = new EquipSkinRequest { CharacterId = characterId, CostumeId = costumeId, Fusion = fusion } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>Wears an aura (0 takes it off); the aura must be unlocked by the highest character of the account.</summary>
+        public async Task<ActionResult> EquipAuraAsync(uint auraId)
+        {
+            var a = await Ask(new Envelope { EquipAuraRequest = new EquipAuraRequest { AuraId = auraId } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>Learns a skill (level 0 to 1) or raises it by one level with the gold of the account; the server pushes a fresh snapshot on success.</summary>
+        public async Task<ActionResult> UpgradeSkillAsync(ulong characterId, uint skillId)
+        {
+            var a = await Ask(new Envelope { UpgradeSkillRequest = new UpgradeSkillRequest { CharacterId = characterId, SkillId = skillId } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>Throws a skin away for good (refused while a character of the account wears it).</summary>
+        public async Task<ActionResult> DiscardSkinAsync(uint costumeId)
+        {
+            var a = await Ask(new Envelope { DiscardSkinRequest = new DiscardSkinRequest { CostumeId = costumeId } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        public async Task<MailList> MailListAsync()
+        {
+            var a = await Ask(new Envelope { MailListRequest = new MailListRequest() }, Envelope.PayloadOneofCase.MailList);
+            return a.MailList;
+        }
+
+        /// <summary>Mail actions (read, take the gift, delete, take all); the server also pushes the fresh mail list and snapshot.</summary>
+        public async Task<ActionResult> MailActionAsync(ulong mailId, MailAction action)
+        {
+            var a = await Ask(new Envelope { MailActionRequest = new MailActionRequest { MailId = mailId, Action = action } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        public async Task<NoticeList> NoticeListAsync()
+        {
+            var a = await Ask(new Envelope { NoticeListRequest = new NoticeListRequest() }, Envelope.PayloadOneofCase.NoticeList);
+            return a.NoticeList;
+        }
+
+        public async Task<ChangePasswordResult> ChangePasswordAsync(string oldPassword, string newPassword)
+        {
+            var a = await Ask(new Envelope { ChangePasswordRequest = new ChangePasswordRequest { OldPassword = oldPassword, NewPassword = newPassword } },
+                Envelope.PayloadOneofCase.ChangePasswordResult);
+            return a.ChangePasswordResult;
+        }
+
+        /// <summary>
+        /// Starts a training session of the village (docs/architecture/BattleBallServer.md 15.12): returns the MatchStarted of the session, or throws with the reason
+        /// the server gave. The frames then arrive as pushed events (EventReceived with a MatchFrame), the end as a MatchEnded.
+        /// </summary>
+        public async Task<MatchStarted> StartTrainingAsync(StartTrainingRequest request)
+        {
+            var answer = await Connection.RequestAsync(new Envelope { StartTrainingRequest = request });
+            if (answer.PayloadCase == Envelope.PayloadOneofCase.MatchStarted) return answer.MatchStarted;
+            if (answer.PayloadCase == Envelope.PayloadOneofCase.ActionResult) throw new InvalidOperationException(answer.ActionResult.Message);
+            throw new InvalidOperationException("unexpected answer: " + BbConnection.Describe(answer));
+        }
+
+        /// <summary>Sends a message that has no answer (the position reports, the skills and leaving a match).</summary>
+        public void Send(Envelope message)
+        {
+            Connection?.Send(message);
+        }
+
+        /// <summary>Main thread: hands out what the server pushed (the first PlayerDataSnapshot arrives right after a successful login).</summary>
+        public void Pump()
+        {
+            while (Connection != null && Connection.TryDequeueEvent(out var e))
+            {
+                if (e.PayloadCase == Envelope.PayloadOneofCase.PlayerDataSnapshot)
+                {
+                    Snapshot = e.PlayerDataSnapshot;
+                    SnapshotChanged?.Invoke(Snapshot);
+                }
+                EventReceived?.Invoke(e);
+            }
+        }
+
+        public void Logout()
+        {
+            try { Connection?.Send(new Envelope { LogoutRequest = new LogoutRequest() }); } catch (Exception) { }
+            Connection?.Close();
+        }
+
+        public void Dispose() { Connection?.Dispose(); }
+    }
+}
