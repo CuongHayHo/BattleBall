@@ -510,8 +510,12 @@ namespace BattleBall.EditorTools
             tr.anchoredPosition = new Vector2(PW * 0.5f, 260f);
             AddOutline(ui.toastText.gameObject, 1f);
 
+            // ---- the shop of an NPC (Urôn): a second panel on the left, under the popup (the menu panel moves to the right while it is open)
+            ui.shop = BuildShop(root, ui);
+
             // ---- the popup (skin, mail, notice), the Chức năng tab and its password form
             ui.popup = BuildPopup(root);
+            ui.shop.popup = ui.popup;
             ui.functions = BuildFunctions(panel, root, ui);
             ui.functions.popup = ui.popup;
             ui.auras = BuildAuras(panel, ui);
@@ -921,6 +925,149 @@ namespace BattleBall.EditorTools
             return k;
         }
 
+        /// <summary>
+        /// The shop panel of an NPC (Nro Panel.cs, typeShop): the same frame as the menu panel on the left of the screen (hidden away until a shop opens): the portrait of the NPC and its
+        /// name at the top, up to four tabs, the list of items (made at run time, BbShopPanel) and the money strip.
+        /// </summary>
+        static BbShopPanel BuildShop(Transform canvasRoot, BbMenuUi ui)
+        {
+            var panelGo = new GameObject("ShopPanel", typeof(RectTransform), typeof(Image), typeof(BbShopPanel));
+            panelGo.transform.SetParent(canvasRoot, false);
+            var rect = Rect(panelGo);
+            rect.anchorMin = new Vector2(0f, 0f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.sizeDelta = new Vector2(PW, 0f);
+            rect.anchoredPosition = new Vector2(-PW, 0f);
+            var bg = panelGo.GetComponent<Image>();
+            bg.sprite = Sprite("white");
+            bg.color = NroPanel;
+            var panel = panelGo.transform;
+            var shop = panelGo.GetComponent<BbShopPanel>();
+            shop.root = panelGo;
+            shop.panelRect = rect;
+            shop.font = BuiltinFont;
+            shop.menu = ui;
+            var edge = Image("Edge", panel, "white", false);
+            edge.rectTransform.anchorMin = new Vector2(1f, 0f);
+            edge.rectTransform.anchorMax = new Vector2(1f, 1f);
+            edge.rectTransform.pivot = new Vector2(1f, 0.5f);
+            edge.rectTransform.sizeDelta = new Vector2(2f, 0f);
+            edge.rectTransform.anchoredPosition = Vector2.zero;
+            edge.color = NroEdge;
+            edge.raycastTarget = false;
+
+            Flat("HeaderBg", panel, 0, 0, PW, G(50), NroHeader);
+            var footerGo = new GameObject("Footer", typeof(RectTransform));
+            footerGo.transform.SetParent(panel, false);
+            var footerRect = Rect(footerGo);
+            footerRect.anchorMin = new Vector2(0f, 0f);
+            footerRect.anchorMax = new Vector2(1f, 0f);
+            footerRect.pivot = new Vector2(0.5f, 0f);
+            footerRect.sizeDelta = new Vector2(0f, G(15));
+            footerRect.anchoredPosition = Vector2.zero;
+            Stretch(Flat("FooterBg", footerGo.transform, 0, 0, PW, G(15), NroBag).rectTransform, 0, 0);
+            Flat("FooterLine", footerGo.transform, 0, 0, PW, 2, NroLine);
+            var goldIcon = Image("GoldIcon", footerGo.transform, "nro_gold", false);
+            TopLeft(goldIcon.rectTransform, G(11) - 12, 6, 24, 18);
+            goldIcon.preserveAspect = true;
+            goldIcon.raycastTarget = false;
+            shop.goldText = Label("GoldText", footerGo.transform, "0", 15, StatYellow, Vector2.zero, Vector2.zero, true);
+            TopLeft(shop.goldText.rectTransform, G(24), 2, 100, G(15) - 2);
+            shop.goldText.alignment = TextAnchor.MiddleLeft;
+            AddOutline(shop.goldText.gameObject, 1f);
+            var gemIcon = Image("GemIcon", footerGo.transform, "nro_gem", false);
+            TopLeft(gemIcon.rectTransform, G(75) - 11, 6, 22, 18);
+            gemIcon.preserveAspect = true;
+            gemIcon.raycastTarget = false;
+            shop.gemText = Label("GemText", footerGo.transform, "0", 15, StatYellow, Vector2.zero, Vector2.zero, true);
+            TopLeft(shop.gemText.rectTransform, G(85), 2, 140, G(15) - 2);
+            shop.gemText.alignment = TextAnchor.MiddleLeft;
+            AddOutline(shop.gemText.gameObject, 1f);
+            shop.gemSprite = Sprite("nro_gem");
+
+            // header: the portrait of the NPC on the left, its name and what it sells to the right, the close button
+            shop.portrait = Image("Portrait", panel, "white", false);
+            TopLeft(shop.portrait.rectTransform, 2, 2, G(50) - 4, G(50) - 4);
+            shop.portrait.preserveAspect = true;
+            shop.portrait.raycastTarget = false;
+            shop.headerText = Label("HeaderText", panel, "", 16, StatYellow, Vector2.zero, Vector2.zero, false);
+            TopLeft(shop.headerText.rectTransform, G(60), 3, PW - G(60) - G(17) - 8, G(50) - 5);
+            shop.headerText.alignment = TextAnchor.MiddleLeft;
+            shop.headerText.lineSpacing = 1.1f;
+            shop.headerText.resizeTextForBestFit = true;
+            shop.headerText.resizeTextMinSize = 11;
+            shop.headerText.resizeTextMaxSize = 16;
+            shop.headerText.verticalOverflow = VerticalWrapMode.Truncate;
+            AddOutline(shop.headerText.gameObject, 1f);
+            var close = Image("Close", panel, "nro_close", false);
+            TopLeft(close.rectTransform, PW - G(17) - 4, 4, G(17), G(17));
+            shop.closeButton = close.gameObject.AddComponent<Button>();
+            shop.closeButton.targetGraphic = close;
+
+            // tabs (up to four, spread at run time) and the orange line under them
+            shop.tabIdle = Sprite("nro_tab_idle");
+            shop.tabOn = Sprite("nro_tab_on");
+            float tabY = G(50) + 4f;
+            shop.tabs = new Button[4];
+            shop.tabImages = new UnityEngine.UI.Image[4];
+            shop.tabLabels = new Text[4];
+            for (int i = 0; i < 4; i++)
+            {
+                var tab = Image("Tab" + i, panel, "nro_tab_idle", true);
+                TopLeft(tab.rectTransform, 4 + i * 78, tabY, 76, G(25));
+                var b = tab.gameObject.AddComponent<Button>();
+                b.targetGraphic = tab;
+                var label = Label("Text", tab.transform, "", 15, new Color(0.45f, 0.18f, 0.05f), Vector2.zero, Vector2.zero, false);
+                Stretch(Rect(label.gameObject), 1, 1);
+                label.lineSpacing = 0.85f;
+                shop.tabs[i] = b;
+                shop.tabImages[i] = tab;
+                shop.tabLabels[i] = label;
+            }
+            Flat("TabLine", panel, 2, tabY + G(25) + 1, PW - 4, 2, NroLine);
+
+            // the list of items
+            shop.rowSprite = Sprite("white");
+            shop.cellSprite = Sprite("nro_cell_body");
+            var scrollGo = new GameObject("Scroll", typeof(RectTransform), typeof(Image), typeof(ScrollRect));
+            scrollGo.transform.SetParent(panel, false);
+            var sr = scrollGo.GetComponent<RectTransform>();
+            sr.anchorMin = Vector2.zero;
+            sr.anchorMax = Vector2.one;
+            sr.offsetMin = new Vector2(2f, G(15) + 2f);
+            sr.offsetMax = new Vector2(-2f, -(tabY + G(25) + 5f));
+            scrollGo.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+            var viewport = new GameObject("Viewport", typeof(RectTransform), typeof(RectMask2D));
+            viewport.transform.SetParent(scrollGo.transform, false);
+            Stretch(Rect(viewport), 0, 0);
+            var content = new GameObject("Content", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+            content.transform.SetParent(viewport.transform, false);
+            var cr = Rect(content);
+            cr.anchorMin = new Vector2(0f, 1f);
+            cr.anchorMax = new Vector2(1f, 1f);
+            cr.pivot = new Vector2(0.5f, 1f);
+            cr.anchoredPosition = Vector2.zero;
+            cr.sizeDelta = Vector2.zero;
+            var layout = content.GetComponent<VerticalLayoutGroup>();
+            layout.spacing = 2;
+            layout.childControlHeight = true;
+            layout.childControlWidth = true;
+            layout.childForceExpandHeight = false;
+            layout.childForceExpandWidth = true;
+            content.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            var scroll = scrollGo.GetComponent<ScrollRect>();
+            scroll.viewport = Rect(viewport);
+            scroll.content = cr;
+            scroll.horizontal = false;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 30f;
+            shop.scroll = scroll;
+            shop.content = cr;
+            panelGo.SetActive(false);
+            return shop;
+        }
+
         /// <summary>The Chức năng tab as the tool list of Nro (paintTools): full-width light rows with the name centred; the mail and notice lists, the account and the sprite scale.</summary>
         static BbMenuFunctions BuildFunctions(Transform panel, Transform canvasRoot, BbMenuUi ui)
         {
@@ -1046,6 +1193,8 @@ namespace BattleBall.EditorTools
                 Stretch(Rect(f.scaleLabels[i].gameObject), 6, 4);
             }
             f.configStatus = PlacedText("Status", configView, "", 16, Dark, 4, scaleTop + 188, PW - 8, 32, TextAnchor.MiddleCenter);
+            f.soundButton = RowButton("SoundButton", configView, 2, scaleTop + 292, PW - 4, G(24), "Âm thanh: Bật", 18);
+            f.weatherButton = RowButton("WeatherButton", configView, 2, scaleTop + 342, PW - 4, G(24), "Thời tiết: Bật", 18);
             PlacedText("Note", configView, "x1 nhẹ nhất cho máy yếu, x4 nét nhất. Đổi sang độ phân giải chưa có sẽ tải thêm từ máy chủ.", 14, Brown, 8, scaleTop + 222, PW - 16, 60, TextAnchor.UpperCenter, false);
 
             // password form (on top of the panel)

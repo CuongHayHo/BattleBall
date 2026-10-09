@@ -18,7 +18,6 @@ if (-not (Test-Path $keystore)) { & powershell -NoProfile -File (Join-Path $PSSc
 $env:BB_TLS_KEYSTORE = $keystore
 if (-not $env:BB_DB_URL) { $env:BB_DB_URL = "jdbc:mariadb://127.0.0.1:3306/$Db" }
 if (-not $env:BB_PORT) { $env:BB_PORT = "$Port" }
-# Assets are downloaded by the client over HTTP from the web server (see run_web.ps1 and the web folder, subfolder assets); the game server only announces where and which version.
-if (-not $env:BB_ASSET_BASE_URL) { $env:BB_ASSET_BASE_URL = 'http://127.0.0.1:8081/assets/' }
+# Assets (packs built by tools/build_assets.py into webssets) are sent by this server over the game connection; BB_ASSET_BASE_URL is obsolete.
 if (-not $env:BB_ASSET_MANIFEST) { $env:BB_ASSET_MANIFEST = Join-Path $root 'web\assets\manifest.json' }
 & (Join-Path $env:JAVA_HOME 'bin\java.exe') -jar $jar

@@ -44,14 +44,15 @@ FIXED_TIME = (2026, 1, 1, 0, 0, 0)
 
 # icons the menus need besides the costumes: the Potara earring (Nro item 1819, icon 15614) and its shard (item 1820, icon 15613); see V025__potara_items_nro_ids.sql.
 # 11569, 11572, 15412: the book materials #301 to #303 (the mailbox shows the picture of a gift).
-EXTRA_ICON_IDS = (15614, 15613, 11569, 11572, 15412)
+# 728: the portrait of Urôn (the NPC shop shows it at the top, like the avatar of an NPC in Nro).
+EXTRA_ICON_IDS = (15614, 15613, 11569, 11572, 15412, 728)
 # the skill buttons of the village training (skill_template.icon_id of the 25 skills, docs/architecture/BattleBallServer.md 15.12)
 SKILL_ICON_IDS = (539, 540, 717, 724, 720, 716, 711, 723, 722, 718, 2248, 3778, 3780, 3784, 3783, 3781, 3782, 3779, 11162, 11193, 11194)
 
 # Nro mobs drawn by the client (the training dummy Mộc nhân is mob template 0): SourceData/data/mob/x{N}/{id} is the Nro file (a byte for the reader kind,
 # the frame data, the PNG atlas, see NroUnity Controller case 11 / EffectData.readData); it is cut here into one strip of equal frames per scale
 # (data/mob/strip/x{N}/{id}.png) and one JSON in Nro pixels (data/mob/strip/{id}.json: frames, w, h of a frame, the feet at ax from the left and ay from the bottom)
-MOB_IDS = (0,)
+MOB_IDS = (0, 8, 11, 25, 32, 43, 49, 50)       # Mộc nhân and the pets hatched by Đẻ trứng (SkillUtil.getTempMobMe)
 
 
 # the auras (owner decision 2026-10-08): the pictures of tools/aura_planner/aura_levels.json, taken from the Nro folder img_by_name/x{N} (read only) into
@@ -423,6 +424,14 @@ def main():
     common.extend(aura_thumbs())
     common.extend(skill_poses())
     common.extend(skill_fx())
+    # the sounds of the skills (Nro res/sound, numbered as SoundMn of Nro): punches, beams, gong, blasts, the three ultimates
+    snd_dir = os.path.join(SOURCE, "sound")
+    if os.path.isdir(snd_dir):
+        common.extend(("data/sound/" + n, os.path.join(snd_dir, n)) for n in sorted(os.listdir(snd_dir)) if n.endswith(".wav"))
+    # the weather of the village (Nro bg/light.png: the sunbeam, bg/fog0.png: the clouds)
+    weather_dir = os.path.join(SOURCE, "weather")
+    if os.path.isdir(weather_dir):
+        common.extend(("data/weather/" + n, os.path.join(weather_dir, n)) for n in sorted(os.listdir(weather_dir)) if n.endswith(".png"))
     # the pictures of the three ultimates (Nro Effect_End, res/x4/e/e_9 to e_28: auras, gong, beam, energy balls, jar), one scale, the client shrinks them
     fx_dir = os.path.join(SOURCE, "effect_end")
     if os.path.isdir(fx_dir):

@@ -18,6 +18,7 @@ namespace BattleBall.Net
         class StripInfo { public int id, frames, w, h, ax, ay; }
 
         public float uiScale = 2.2f;              // UI pixels per Nro pixel
+        public bool loop;                         // a creature that moves all the time (the pet hatched by Đẻ trứng): its frames play one after the other
 
         static readonly Dictionary<string, Sprite[]> Cache = new Dictionary<string, Sprite[]>();
         static readonly Dictionary<int, StripInfo> Infos = new Dictionary<int, StripInfo>();
@@ -55,6 +56,12 @@ namespace BattleBall.Net
             return true;
         }
 
+        /// <summary>The mob is stunned: the hurt frames go on for this long (Mob.update of Nro: isFreez).</summary>
+        public void Stun(float seconds)
+        {
+            _hurtUntil = Time.unscaledTime + seconds;
+        }
+
         /// <summary>The mob was hit: the hurt frames for a moment.</summary>
         public void Hurt()
         {
@@ -66,7 +73,8 @@ namespace BattleBall.Net
             if (_frames == null) return;
             _clock += Time.unscaledDeltaTime;
             bool hurt = Time.unscaledTime < _hurtUntil && _frames.Length >= 3;
-            SetFrame(hurt ? _frames.Length - 2 + ((int)(_clock * 12f) % 2) : 0);
+            int moving = _frames.Length > 4 ? _frames.Length - 2 : _frames.Length;        // the last two frames of a mob are for when it is hit
+            SetFrame(hurt ? _frames.Length - 2 + ((int)(_clock * 12f) % 2) : loop ? (int)(_clock * 8f) % Mathf.Max(1, moving) : 0);
         }
 
         void SetFrame(int i)

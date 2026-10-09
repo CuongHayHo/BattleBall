@@ -1,5 +1,5 @@
 @echo off
-rem Starts everything the BattleBall dev server needs: MariaDB (XAMPP) if it is not running, the web server (assets, port 8081) and the game server (port 7443).
+rem Starts everything the BattleBall dev server needs: MariaDB (XAMPP) if it is not running, the web server (registration page, port 8081) and the game server (port 7443).
 rem Close the two extra windows (or press Ctrl+C in them) to stop. Database: battleball on 127.0.0.1:3306, user root without password.
 setlocal
 cd /d "%~dp0"
@@ -14,7 +14,7 @@ if errorlevel 1 (
     echo MariaDB is already running.
 )
 
-rem 2) Web server for the game assets (new window)
+rem 2) Web server for the registration page (new window); the game assets are sent by the game server itself
 netstat -an | findstr /C:":8081 " | findstr LISTENING >nul
 if errorlevel 1 (
     start "BattleBall Web 8081" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\run_web.ps1"

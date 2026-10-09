@@ -120,7 +120,7 @@ public final class MigrationRunner {
                 }
                 int version = Integer.parseInt(m.group(1));
                 String sql = Files.readString(p, StandardCharsets.UTF_8);
-                if (byVersion.put(version, new Migration(version, m.group(2), p.getFileName().toString(), sql, sha256(sql))) != null) {
+                if (byVersion.put(version, new Migration(version, m.group(2), p.getFileName().toString(), sql, sha256(sql.replace("\r\n", "\n")))) != null) {
                     throw new IllegalStateException("two migrations have version " + version);
                 }
             }

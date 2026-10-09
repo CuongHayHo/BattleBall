@@ -1,5 +1,9 @@
 package com.battleball.server.net;
 
+import com.battleball.proto.AssetChunk;
+import com.battleball.proto.AssetChunkRequest;
+import com.battleball.proto.AssetManifestReply;
+import com.battleball.proto.AssetPackInfo;
 import com.battleball.proto.DisconnectNotice;
 import com.battleball.proto.DisconnectReason;
 import com.battleball.proto.Envelope;
@@ -38,6 +42,8 @@ import java.util.concurrent.TimeUnit;
 public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelope> {
     private static final Logger LOG = LoggerFactory.getLogger(ConnectionHandler.class);
     private static final int MAX_VIOLATIONS = 3;
+    private static final int ASSET_CHUNK_DEFAULT = 128 * 1024;
+    private static final int ASSET_CHUNK_MAX = 256 * 1024;
 
     enum State { CONNECTED, HANDSHAKED, AUTHENTICATED, CLOSED }
 
@@ -115,6 +121,8 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
             case REGISTER_REQUEST -> onRegister(ctx, rid, msg.getRegisterRequest());
             case LOGIN_REQUEST -> onLogin(ctx, rid, msg.getLoginRequest());
             case LOGOUT_REQUEST -> ctx.close();
+            case ASSET_MANIFEST_REQUEST -> onAssetManifest(ctx, rid);
+            case ASSET_CHUNK_REQUEST -> onAssetChunk(ctx, rid, msg.getAssetChunkRequest());
             case CHANGE_PASSWORD_REQUEST -> {
                 if (state != State.AUTHENTICATED) {
                     violation(ctx, rid, ErrorCode.INVALID_STATE, "log in first");
@@ -209,8 +217,49 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
                 .setHeartbeatIntervalMs(config.heartbeatIntervalMs())
                 .setTickRateHz(config.tickRateHz())
                 .setServerName(config.serverName())
-                .setAssetBaseUrl(config.assetBaseUrl())
                 .setAssetVersion(AssetInfo.version(config.assetManifest()))).build());
+    }
+
+    /** The list of packs (answered from memory: the manifest is cached until its file changes). Allowed once Hello is done, so before login too. */
+    private void onAssetManifest(ChannelHandlerContext ctx, int rid) {
+        if (state != State.HANDSHAKED && state != State.AUTHENTICATED) {
+            violation(ctx, rid, ErrorCode.INVALID_STATE, "say Hello first");
+            return;
+        }
+        AssetInfo.Manifest m = AssetInfo.manifest(config.assetManifest());
+        AssetManifestReply.Builder reply = AssetManifestReply.newBuilder().setVersion(m.version());
+        for (AssetInfo.Pack p : m.packs()) {
+            reply.addPacks(AssetPackInfo.newBuilder().setId(p.id()).setScale(p.scale()).setSize(p.size()).setSha256(p.sha256()));
+        }
+        ctx.writeAndFlush(Envelope.newBuilder().setRequestId(rid).setAssetManifestReply(reply).build());
+    }
+
+    /** One chunk of one pack. The pack is found by its id in the manifest only; the file read runs on the executor of slow work, then the answer is posted back. */
+    private void onAssetChunk(ChannelHandlerContext ctx, int rid, AssetChunkRequest req) {
+        if (state != State.HANDSHAKED && state != State.AUTHENTICATED) {
+            violation(ctx, rid, ErrorCode.INVALID_STATE, "say Hello first");
+            return;
+        }
+        AssetInfo.Pack pack = AssetInfo.manifest(config.assetManifest()).find(req.getPackId());
+        if (pack == null) {
+            violation(ctx, rid, ErrorCode.MALFORMED, "unknown pack");
+            return;
+        }
+        int want = req.getMaxBytes() == 0 ? ASSET_CHUNK_DEFAULT : (int) Math.min(req.getMaxBytes(), ASSET_CHUNK_MAX);
+        long offset = req.getOffset();
+        submit(ctx, () -> {
+            byte[] data;
+            try {
+                data = AssetInfo.readChunk(pack, offset, want);
+            } catch (java.io.IOException e) {
+                LOG.warn("cannot read pack {}: {}", pack.id(), e.toString());
+                ctx.executor().execute(() -> ctx.writeAndFlush(error(rid, ErrorCode.INTERNAL, "cannot read the pack")));
+                return;
+            }
+            Envelope reply = Envelope.newBuilder().setRequestId(rid).setAssetChunk(AssetChunk.newBuilder()
+                    .setPackId(pack.id()).setOffset(offset).setTotal(pack.size()).setData(com.google.protobuf.ByteString.copyFrom(data))).build();
+            ctx.executor().execute(() -> ctx.writeAndFlush(reply));
+        });
     }
 
     private void onRegister(ChannelHandlerContext ctx, int rid, RegisterRequest req) {

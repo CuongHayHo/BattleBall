@@ -68,6 +68,14 @@ message Envelope {
     MatchResumed match_resumed = 59;
     // ---- training in the starter village (decision 2026-10-08): a match without bosses, rewards or records, answered by MatchStarted (training = true)
     StartTrainingRequest start_training_request = 60;
+    // ---- game assets over the game connection (decision 2026-10-09: as Teamobi does, no separate HTTP server); allowed after Hello, before and after login
+    AssetManifestRequest asset_manifest_request = 61;
+    AssetManifestReply asset_manifest_reply = 62;
+    AssetChunkRequest asset_chunk_request = 63;
+    AssetChunk asset_chunk = 64;
+    // ---- NPC shops (decision 2026-10-09: Urôn sells every skin; the server decides what a shop sells, as Teamobi's Npc opens a shop with cmd -44) ----
+    ShopRequest shop_request = 65;           // an authenticated player taps the NPC; answered by ShopContent (or ActionResult NOT_FOUND for an NPC that sells nothing)
+    ShopContent shop_content = 66;
   }
 }
 
@@ -83,12 +91,61 @@ message HelloAck {
   uint64 server_time_ms = 2;        // Unix time in milliseconds
   uint32 heartbeat_interval_ms = 3; // the client should send Ping at this interval
   uint32 tick_rate_hz = 4;          // information only (match simulation = 20 Hz)
-  string asset_base_url = 5;        // where the client downloads game assets (HTTP file server; empty = the server publishes none); ends with '/'
+  string asset_base_url = 5;        // OBSOLETE since 2026-10-09: assets now come over this connection (AssetManifestRequest); the server leaves it empty
   string server_name = 7;           // display name of this server for the client (for example on the start menu); empty = the client keeps its own default
-  string asset_version = 6;         // version of the asset manifest published there; the client downloads when it differs from the installed one
+  string asset_version = 6;         // version of the asset manifest the server publishes (empty = none); the client downloads when it differs from the installed one
+}
+
+// ---- game assets (docs/architecture/BattleBallServer.md 15.6, 15.13) ---------------------------------------------------
+// The assets are zip packs listed in a manifest. The client asks for the list, then for the packs it lacks, chunk by chunk (it may have several
+// requests in flight; every chunk says its own offset), checks the SHA-256 of the finished pack and unzips it.
+message AssetManifestRequest { }
+
+message AssetPackInfo {
+  string id = 1;                    // e.g. "x3_atlas", "common"
+  uint32 scale = 2;                 // 0 = needed at every scale, otherwise 1, 2, 3 or 4
+  uint64 size = 3;                  // bytes of the zip
+  string sha256 = 4;                // lower-case hex
+}
+
+message AssetManifestReply {
+  string version = 1;
+  repeated AssetPackInfo packs = 2;
+}
+
+message AssetChunkRequest {
+  string pack_id = 1;
+  uint64 offset = 2;                // first byte wanted
+  uint32 max_bytes = 3;             // 0 = the server's default (128 KiB); the server never sends more than 256 KiB
+}
+
+message AssetChunk {
+  string pack_id = 1;
+  uint64 offset = 2;
+  uint64 total = 3;                 // size of the whole pack
+  bytes data = 4;                   // empty only when offset is at or past the end
 }
 
 message Ping { uint64 client_time_ms = 1; }
+
+// ---- NPC shops -------------------------------------------------------------------------------------------------------
+message ShopRequest { string npc_id = 1; }              // the id of the NPC of the map (balance_config npc_shops key), e.g. "uron"
+
+message ShopItem {
+  SkinInfo skin = 1;                // costume_id, name, race, kind, fusion race and the bonus lines (StatLine.text is ready to show)
+  uint32 gem_price = 2;             // skins are paid with gems; buy with BuySkinRequest (the server checks everything again)
+}
+
+message ShopTab {
+  string name = 1;
+  repeated ShopItem items = 2;
+}
+
+message ShopContent {
+  string npc_id = 1;
+  string npc_name = 2;
+  repeated ShopTab tabs = 3;        // only tabs that have something to sell
+}
 message Pong { uint64 client_time_ms = 1; uint64 server_time_ms = 2; }
 
 enum DisconnectReason {

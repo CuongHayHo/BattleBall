@@ -44,6 +44,7 @@ namespace BattleBall.Net
         // skills that charge first: the server sends CAST_START with the duration, the poses start then (BbSkillPoses.Charge)
         static readonly HashSet<uint> ChargeSkills = new HashSet<uint> { 10, 11, 14, 24, 25, 26 };
         const uint MonkeySkill = 13, TeleportSkill = 20;
+        const int MonkeyPunchPaint = 105, MonkeyAntomicPaint = 106;       // Nro Char.setSkillPaint: the great ape plays paint 105 for its punches and 106 for Antomic
 
         Phase _phase;
         string _focusKey;
@@ -95,9 +96,231 @@ namespace BattleBall.Net
         readonly List<SkillButton> _buttons = new List<SkillButton>();
         readonly List<Floating> _floating = new List<Floating>();
         readonly Dictionary<uint, Image> _projectiles = new Dictionary<uint, Image>();
-        readonly Dictionary<uint, BbDart> _darts = new Dictionary<uint, BbDart>();        // the Nro picture of a projectile (the glow stays for the ones without)
+        readonly Dictionary<uint, BbDart> _darts = new Dictionary<uint, BbDart>();
+
+        sealed class Launch
+        {
+            public BbDart dart;
+            public Vector2 hand, stop, from;
+            public float at;
+            public uint tick;
+        }
+
+        readonly Dictionary<uint, Launch> _launches = new Dictionary<uint, Launch>();         // beams waiting for the speed of the projectile to be known        // the Nro picture of a projectile (the glow stays for the ones without)
         BbSkillFx _fx;
         BbUltimateFx _ultimate;
+
+        // the pet hatched by Đẻ trứng, drawn from the server's entity (the Nro mob of the level of the skill)
+        sealed class PetView
+        {
+            public RectTransform root;
+            public BbMobView mob;
+            public Vector2 at;
+            public int facing = 1;
+            public bool placed;
+        }
+
+        readonly Dictionary<uint, PetView> _pets = new Dictionary<uint, PetView>();
+
+        // the white blast of Tự phát nổ (Nro: GameScr.activeSuperPower), and the great ape of Biến hình
+        sealed class FlashPlan
+        {
+            public float at;
+            public ulong who;
+            public bool atTarget;             // the blast is where the dart lands (Quả cầu kênh khí, Makankosappo), not on the caster (Tự phát nổ)
+        }
+
+        // Thái dương hạ san: the whole screen flashes white and normal in turn for about 50 ticks (GameScr.isUseFreez)
+        float _strobeStart = float.MinValue;
+
+        sealed class StunPlan
+        {
+            public string key;
+            public float until, nextAt;
+        }
+
+        readonly List<StunPlan> _stuns = new List<StunPlan>();
+
+        readonly List<FlashPlan> _flashPlans = new List<FlashPlan>();
+        Image _flash, _flashRing;
+        float _flashStart = float.MinValue;
+        Vector2 _flashWorld;
+        readonly Dictionary<ulong, Vector2> _monkeyWindow = new Dictionary<ulong, Vector2>();       // character: from, until (Time.unscaledTime) it is the great ape
+
+        bool IsMonkey(ulong character)
+        {
+            Vector2 w;
+            return _monkeyWindow.TryGetValue(character, out w) && Time.unscaledTime >= w.x && Time.unscaledTime < w.y;
+        }
+
+        void AddPet(EntitySpawn e)
+        {
+            if (village == null || village.WorldLayer == null || e.MobTemplateId < 0 || _pets.ContainsKey(e.EntityId)) return;
+            var go = new GameObject("Pet" + e.EntityId, typeof(RectTransform));
+            go.transform.SetParent(village.WorldLayer, false);
+            var rt = (RectTransform)go.transform;
+            rt.anchorMin = rt.anchorMax = Vector2.zero;
+            rt.pivot = new Vector2(0.5f, 0f);
+            var mob = go.AddComponent<BbMobView>();
+            mob.uiScale = village.UiScale;
+            mob.loop = true;
+            mob.Show(e.MobTemplateId);
+            _pets[e.EntityId] = new PetView { root = rt, mob = mob };
+        }
+
+        void UpdatePets(float dt)
+        {
+            if (_pets.Count == 0) return;
+            float s = village.UiScale;
+            List<uint> gone = null;
+            foreach (var kv in _pets)
+            {
+                EntityState st;
+                if (kv.Value.root == null || !_states.TryGetValue(kv.Key, out st) || !st.Alive)
+                {
+                    if (gone == null) gone = new List<uint>();
+                    gone.Add(kv.Key);
+                    continue;
+                }
+                var p = kv.Value;
+                // it flies a little above the ground, bobbing (Nro: the mob of the egg hovers at the height of the head)
+                Vector2 target = new Vector2(st.X * s, st.Y * s + (34f + 5f * Mathf.Sin(Time.unscaledTime * 3f + kv.Key)) * s);
+                if (!p.placed) { p.at = target; p.placed = true; }
+                float dx = target.x - p.at.x;
+                if (Mathf.Abs(dx) > 2f) p.facing = dx > 0f ? 1 : -1;
+                p.at = Vector2.Lerp(p.at, target, 1f - Mathf.Exp(-10f * dt));
+                p.root.anchoredPosition = p.at;
+                p.root.localScale = new Vector3(p.facing, 1f, 1f);
+                p.root.SetAsLastSibling();
+            }
+            if (gone != null)
+                foreach (uint id in gone)
+                {
+                    if (_pets[id].root != null) Kill(_pets[id].root.gameObject);
+                    _pets.Remove(id);
+                }
+        }
+
+        /// <summary>The expanding white circle that fills the screen, then fades, with the whole view shaking (Nro: GameScr.activeSuperPower).</summary>
+        /// <summary>The stars Nro draws on a stunned enemy (ServerEffect 113 every 5 ticks) for as long as the stun lasts.</summary>
+        void UpdateStuns()
+        {
+            if (_stuns.Count == 0) return;
+            float now = Time.unscaledTime;
+            for (int i = _stuns.Count - 1; i >= 0; i--)
+            {
+                var s = _stuns[i];
+                if (now >= s.until) { _stuns.RemoveAt(i); continue; }
+                Vector2 at;
+                float h;
+                if (now >= s.nextAt && village.DummyInfo(s.key, out at, out h))
+                {
+                    EnsureFx();
+                    _fx.PlayEffectAt(113, at, 1);
+                    s.nextAt = now + 5f / BbSkillPoses.FramesPerSecond;
+                }
+            }
+        }
+
+        void UpdateFlash()
+        {
+            float now = Time.unscaledTime;
+            for (int i = 0; i < _flashPlans.Count; i++)
+            {
+                if (now < _flashPlans[i].at) continue;
+                ulong id;
+                Vector2 feet;
+                int facing;
+                for (int k = 0; k < village.PartyCount; k++)
+                    if (village.PartyMember(k, out id, out feet, out facing) && id == _flashPlans[i].who) _flashWorld = feet + new Vector2(0f, 30f * village.UiScale);
+                Vector2 aimed;
+                if (_flashPlans[i].atTarget && UltimateTarget(_flashPlans[i].who, out aimed)) _flashWorld = aimed + new Vector2(0f, 26f * village.UiScale);
+                _flashStart = now;
+                BbSfx.Play(BbSfx.BigExplode, 0.8f);
+                _flashPlans.RemoveAt(i--);
+            }
+            if (_flash == null) return;
+            if (_strobeStart != float.MinValue)
+            {
+                // white on one tick out of four, then one out of three: the screen blinks (Nro paints white and nothing else on those ticks)
+                int n = Mathf.FloorToInt((now - _strobeStart) * BbSkillPoses.FramesPerSecond);
+                if (n > 50) _strobeStart = float.MinValue;
+                else
+                {
+                    bool white = n < 30 ? n % 4 == 0 : n % 3 == 0;
+                    _flash.enabled = white;
+                    _flash.color = Color.white;
+                    if (white) return;
+                }
+            }
+            if (_flashStart == float.MinValue) { if (_strobeStart == float.MinValue) _flash.enabled = false; if (_flashRing != null) _flashRing.enabled = false; return; }
+            float t = now - _flashStart;
+            const float Grow = 0.7f, Fade = 0.3f;
+            if (t > Grow + Fade + 0.4f)
+            {
+                _flashStart = float.MinValue;
+                village.ShakeOffset = Vector2.zero;
+                _flash.enabled = false;
+                if (_flashRing != null) _flashRing.enabled = false;
+                return;
+            }
+            village.ShakeOffset = t < Grow + 0.3f ? new Vector2(Mathf.FloorToInt(t * 30f) % 3 != 0 ? -3f : 3f, 0f) * village.UiScale : Vector2.zero;
+            if (t < Grow)
+            {
+                float k = t / Grow;
+                float radius = 1700f * k * k;                                                   // grows faster and faster, like the Nro circle
+                if (_flashRing == null)
+                {
+                    var go = new GameObject("FlashRing", typeof(RectTransform), typeof(Image));
+                    go.transform.SetParent(village.WorldLayer, false);
+                    _flashRing = go.GetComponent<Image>();
+                    _flashRing.sprite = glowSprite;
+                    _flashRing.raycastTarget = false;
+                    _flashRing.canvasRenderer.cullTransparentMesh = false;
+                    var rt0 = _flashRing.rectTransform;
+                    rt0.anchorMin = rt0.anchorMax = Vector2.zero;
+                }
+                _flashRing.enabled = true;
+                _flashRing.color = Color.white;
+                _flashRing.rectTransform.sizeDelta = new Vector2(radius * 2.6f, radius * 2.6f);
+                _flashRing.rectTransform.anchoredPosition = _flashWorld;
+                _flashRing.transform.SetAsLastSibling();
+                _flash.enabled = false;
+            }
+            else
+            {
+                if (_flashRing != null) _flashRing.enabled = false;
+                _flash.enabled = true;
+                float alpha = t < Grow + 0.05f ? 1f : Mathf.Clamp01(1f - (t - Grow - 0.05f) / Fade);
+                _flash.color = new Color(1f, 1f, 1f, alpha);
+            }
+        }
+
+        sealed class LookChange
+        {
+            public ulong character;
+            public int costume;               // 0 = the own costume again
+            public float at;
+            public bool replay;               // the paint of Biến hình plays again (the server sends the effect when the body changes and when it changes back)
+        }
+
+        readonly List<LookChange> _looks = new List<LookChange>();
+
+        void UpdateLooks()
+        {
+            for (int i = 0; i < _looks.Count; i++)
+            {
+                var c = _looks[i];
+                if (Time.unscaledTime < c.at) continue;
+                village.SetLook(c.character, c.costume);
+                if (c.replay)
+                {
+                    var again = BbSkillPoses.UsePaint(BbSkillPoses.PaintOf(MonkeySkill, LevelOf(c.character, MonkeySkill)), false);
+                    PlayPicked(c.character, MonkeySkill, again.poses, again.paint, again.fly, 0, float.NaN);
+                }
+                _looks.RemoveAt(i--);
+            }
+        }
         readonly Dictionary<ulong, int> _lastPaint = new Dictionary<ulong, int>();       // the paint (the combo hit that was picked) each character played last
         readonly HashSet<uint> _seenProjectiles = new HashSet<uint>();
 
@@ -210,19 +433,22 @@ namespace BattleBall.Net
                 if (village.DummyInfo(key, out at, out h)) req.Spots.Add(new TrainingSpot { Key = key, X = at.x / s, Y = at.y / s });
             }
             _phase = Phase.Starting;
-            Say("Đang vào luyện tập...");
+            if (!_quiet) Say("Đang vào luyện tập...");
             try
             {
                 var started = await BbSession.Client.StartTrainingAsync(req);
                 if (_phase != Phase.Starting) return;                    // left again meanwhile
                 Begin(started, main);
                 Say("");
+                _quiet = false;
             }
             catch (Exception e)
             {
                 _phase = Phase.Idle;
                 Say("");
-                if (menu != null) menu.Toast("Không vào được luyện tập: " + e.Message);
+                _leftAt = Time.unscaledTime + 8f;                         // do not try again at once
+                if (menu != null && !_quiet) menu.Toast("Không vào được luyện tập: " + e.Message);
+                _quiet = false;
             }
         }
 
@@ -275,6 +501,10 @@ namespace BattleBall.Net
                 _dummyKey[e.EntityId] = e.DummyKey;
                 _dummyId[e.DummyKey] = e.EntityId;
             }
+            else if (e.Kind == EntityKind.Pet)
+            {
+                AddPet(e);
+            }
             else if (e.CharacterId != 0)
             {
                 _characterOf[e.EntityId] = e.CharacterId;
@@ -290,8 +520,37 @@ namespace BattleBall.Net
             Stop();
         }
 
+        float _leftAt = -100f, _noTargetSince = -1f;
+        bool _quiet;
+
+        /// <summary>
+        /// Owner request 2026-10-09: the AI characters fight what is in view of the player without any help from him. A training session starts by itself when a dummy
+        /// is in view (and again two seconds after one ended), and it ends when nothing has been in view for five seconds.
+        /// </summary>
+        void AutoSession()
+        {
+            if (_demo || village == null || _phase != Phase.Idle || !BbSession.IsActive || Time.unscaledTime - _leftAt < 2f) return;
+            if (village.VisibleDummyKeys().Count == 0) return;
+            _quiet = true;
+            StartSession();
+        }
+
         void Stop()
         {
+            _leftAt = Time.unscaledTime;
+            _looks.Clear();
+            _monkeyWindow.Clear();
+            _flashPlans.Clear();
+            _stuns.Clear();
+            _strobeStart = float.MinValue;
+            foreach (var p in _pets.Values) if (p.root != null) Kill(p.root.gameObject);
+            _pets.Clear();
+            if (village != null)
+            {
+                village.ShakeOffset = Vector2.zero;
+                foreach (var m in _characterOf.Values) { village.SetLook(m, 0); village.SetLift(m, 0f); }
+            }
+            _flashStart = float.MinValue;
             _phase = Phase.Idle;
             _focusKey = null;
             if (village != null) village.CombatTarget = null;
@@ -299,6 +558,7 @@ namespace BattleBall.Net
             _projectiles.Clear();
             foreach (var d in _darts.Values) if (d != null) Kill(d.gameObject);
             _darts.Clear();
+            _launches.Clear();
             foreach (var fl in _floating) if (fl.text != null) Kill(fl.text.gameObject);
             _floating.Clear();
             _seenProjectiles.Clear();
@@ -417,6 +677,7 @@ namespace BattleBall.Net
             if (dir == 0f) dir = facing;
             _lastFireAt = Time.unscaledTime;
             BbSession.Client.Send(new Envelope { UseSkillRequest = new UseSkillRequest { Seq = ++_seq, Slot = slot.Slot, TargetId = target, DirX = dir, DirY = 0f } });
+            Debug.Log("[SkillFx] fire slot " + slot.Slot + " skill " + slot.SkillId + " level " + slot.Level + " target " + target);
             // what the player sees at once (the server decides the hit): the pose and the cooldown
             SetCooldown(_myCharacter, slot.SkillId, Time.unscaledTime + slot.CooldownMs / 1000f);
             if (!ChargeSkills.Contains(slot.SkillId)) ShowSkill(_myCharacter, slot.SkillId, hasFoe ? foe.x : float.NaN, true);
@@ -426,7 +687,6 @@ namespace BattleBall.Net
         void DriveCombat()
         {
             if (_demo || village == null || _buttons.Count == 0) return;
-            if (menu != null && menu.BlocksCombatUi) { _pendingSlot = -1; return; }       // the menu or an NPC talking: nothing is used
             var pending = _pendingSlot >= 0 ? SlotOf((uint)_pendingSlot) : null;
             if (pending != null)
             {
@@ -467,9 +727,31 @@ namespace BattleBall.Net
                 return;
             }
             var picked = BbSkillPoses.UsePicked(skillId, level, skillId == MonkeySkill ? false : flying);
+            if (IsMonkey(character) && (skillId == 4 || skillId == 5)) picked = BbSkillPoses.UsePaint(skillId == 5 ? MonkeyAntomicPaint : MonkeyPunchPaint, flying);
             int[] poses = skillId == MonkeySkill ? BbSkillPoses.Monkey(level) : picked.poses;
             PlayPicked(character, skillId, poses, picked.paint, picked.fly, 0, faceX);
         }
+
+        /// <summary>The sound of a skill when it starts (Nro: SoundMn); the ultimates and the hits have their own sounds.</summary>
+        static void SkillSound(uint skillId)
+        {
+            switch (skillId)
+            {
+                case 1: BbSfx.Play(BbSfx.EarthKame, 0.9f); break;
+                case 3: BbSfx.Play(BbSfx.NamekKame, 0.6f); break;
+                case 5: BbSfx.Play(BbSfx.XaydaKame, 0.6f); break;
+                case 6: BbSfx.Play(BbSfx.SolarFlare, 0.5f); break;
+                case 7: BbSfx.Play(BbSfx.Revive, 0.5f); break;
+                case 8:
+                case 12: BbSfx.Play(BbSfx.HpUp, 0.5f); break;
+                case 10:
+                case 11:
+                case 13:
+                case 14: BbSfx.Play(BbSfx.Gong, 0.4f); break;
+            }
+        }
+
+        static readonly int[] HitSounds = { BbSfx.LowPunch, BbSfx.LowKick, BbSfx.MediumPunch, BbSfx.MediumKick };
 
         void EnsureUltimate()
         {
@@ -529,6 +811,41 @@ namespace BattleBall.Net
             _fx.PlayHit(60, feet);
         }
 
+        /// <summary>
+        /// Where a beam ends: the dummy it was shot at (the focused one for the controlled character, the nearest in its way for the others), seen from the
+        /// server's projectile; false when nothing lies in its way.
+        /// </summary>
+        bool DartStop(ProjectileState p, ulong owner, out Vector2 stop)
+        {
+            stop = Vector2.zero;
+            Vector2 dir = new Vector2(p.DirX, p.DirY);
+            if (dir.sqrMagnitude < 1e-4f) return false;
+            dir.Normalize();
+            float s = village.UiScale;
+            EntityState chosen = null;
+            uint focusId;
+            EntityState focused;
+            if (owner == _myCharacter && _focusKey != null && _dummyId.TryGetValue(_focusKey, out focusId) && _states.TryGetValue(focusId, out focused)
+                && Vector2.Dot(new Vector2(focused.X - p.X, focused.Y - p.Y), dir) > -10f)
+                chosen = focused;
+            if (chosen == null)
+            {
+                float best = float.MaxValue;
+                foreach (var kv in _dummyKey)
+                {
+                    EntityState st;
+                    if (!_states.TryGetValue(kv.Key, out st)) continue;
+                    Vector2 d = new Vector2(st.X - p.X, st.Y - p.Y);
+                    float along = Vector2.Dot(d, dir), perp = Mathf.Abs(d.x * dir.y - d.y * dir.x);
+                    if (along < -10f || perp > 80f) continue;
+                    if (along < best) { best = along; chosen = st; }
+                }
+            }
+            if (chosen == null) return false;
+            stop = new Vector2(chosen.X * s, chosen.Y * s + 26f * s);
+            return true;
+        }
+
         static readonly HashSet<uint> ServerProjectileSkills = new HashSet<uint> { 1, 3, 5, 11 };      // the skills whose dart is the projectile of the server
         readonly Dictionary<ulong, float> _arrowAt = new Dictionary<ulong, float>();                    // when each character's last paint throws its dart
         readonly Dictionary<ulong, Vector2> _arrowHand = new Dictionary<ulong, Vector2>();              // and where its hand is (Nro px: dx, up)
@@ -536,6 +853,8 @@ namespace BattleBall.Net
         void PlayPicked(ulong character, uint skillId, int[] poses, int paint, bool fly, int fxFrom, float faceX)
         {
             float seconds = BbSkillPoses.Seconds(poses);
+            SkillSound(skillId);
+            Debug.Log("[SkillFx] character " + character + " skill " + skillId + " paint " + paint + " poses " + poses.Length + " fxFrom " + fxFrom);
             if (poses.Length > 0) village.PlayAction(character, poses, seconds, faceX);
             if (paint < 0) return;
             _lastPaint[character] = paint;
@@ -558,7 +877,10 @@ namespace BattleBall.Net
             // a skill that throws something without a projectile of the server (Quả cầu kênh khí, Trói, Thôi miên, Biến Sôcôla): the dart flies by itself to the target
             Vector2 aim, hand;
             int dir;
-            if (!UltimateTarget(character, out aim) || !HandOf(character, out hand, out dir)) return;
+            bool haveAim = UltimateTarget(character, out aim);
+            bool haveHand = HandOf(character, out hand, out dir);
+            Debug.Log("[SkillFx] dart " + arrow.dart + " for skill " + skillId + ": target " + haveAim + ", hand " + haveHand);
+            if (!haveAim || !haveHand) return;
             var dart = BbDart.Create(village.WorldLayer, arrow.dart, village.UiScale);
             if (dart == null) return;
             _darts[1000000u + (uint)(_flying++ % 100000)] = dart;
@@ -729,13 +1051,15 @@ namespace BattleBall.Net
             }
             if (onDummy && !d.Absorbed)
             {
+                if (MeleeSkills.Contains(d.SkillId)) BbSfx.Play(HitSounds[UnityEngine.Random.Range(0, HitSounds.Length)], 0.5f);
+                else if (d.SkillId == 1 || d.SkillId == 3 || d.SkillId == 5 || d.SkillId == 11) BbSfx.Play(BbSfx.Explode1, 0.5f);
                 // the effect of the skill landing on the target (Nro: effectHappenOnMob of the paint that was played)
                 ulong hitter;
                 int paint = -1;
                 if (_characterOf.TryGetValue(d.SourceId, out hitter) && !_lastPaint.TryGetValue(hitter, out paint)) paint = -1;
                 if (hitter != 0)
                 {
-                    int fromSkill = BbSkillPoses.PaintOf(d.SkillId, LevelOf(hitter, d.SkillId));
+                    int fromSkill = IsMonkey(hitter) && d.SkillId == 5 ? MonkeyAntomicPaint : BbSkillPoses.PaintOf(d.SkillId, LevelOf(hitter, d.SkillId));
                     if (fromSkill >= 0)
                     {
                         EnsureFx();
@@ -760,18 +1084,54 @@ namespace BattleBall.Net
                 _lostRatio = 1f;
                 return;
             }
+            if ((ef.Effect == Effect.Hold || ef.Effect == Effect.Stun) && _dummyKey.TryGetValue(ef.TargetId, out key) && village.DummyInfo(key, out at, out h))
+            {
+                EnsureFx();
+                float seconds = ef.DurationMs / 1000f;
+                if (ef.Effect == Effect.Hold)
+                    _fx.PlayData(32, at + new Vector2(0f, -24f * village.UiScale), 0, seconds);      // the rope of Trói: Effect(32, x, y + 24) while it holds
+                else
+                {
+                    _stuns.Add(new StunPlan { key = key, until = Time.unscaledTime + seconds, nextAt = Time.unscaledTime });
+                    village.StunDummy(key, seconds);
+                }
+            }
+            if (ef.Effect == Effect.Buff && ef.SkillId == 21)
+            {
+                // Huýt sáo: every ally it strengthens gets the whistle (Nro: Effect(39, cx, cy, 3, 3, 1), three times over)
+                ulong ally;
+                if (_characterOf.TryGetValue(ef.TargetId, out ally))
+                    for (int k = 0; k < village.PartyCount; k++)
+                    {
+                        ulong pid;
+                        Vector2 where;
+                        int facing;
+                        if (village.PartyMember(k, out pid, out where, out facing) && pid == ally) { EnsureFx(); _fx.PlayData(39, where, 3); }
+                    }
+            }
             ulong who;
             if (!_characterOf.TryGetValue(ef.SourceId, out who) || ef.SkillId == 0) return;
             if (ef.Effect == Effect.CastStart)
             {
                 // the charge of every character, the controlled one too (the server knows how long it lasts); Thái Dương Hạ San has none (duration 0)
-                if (ef.DurationMs == 0) { if (ef.SourceId != _myId) ShowSkill(who, ef.SkillId, FocusX(), false); return; }
+                if (ef.DurationMs == 0)
+                {
+                    if (ef.SkillId == 6 && ef.SourceId == _myId) _strobeStart = Time.unscaledTime;       // Thái dương hạ san: the screen blinks white
+                    if (ef.SourceId != _myId) ShowSkill(who, ef.SkillId, FocusX(), false);
+                    return;
+                }
                 string race;
                 _races.TryGetValue(who, out race);
                 int fxFrom, paint;
                 bool fly;
                 int[] poses = BbSkillPoses.Charge(ef.SkillId, LevelOf(who, ef.SkillId), village.Airborne(who), race == "XAYDA", ef.DurationMs / 1000f, out fxFrom, out paint, out fly);
                 PlayPicked(who, ef.SkillId, poses, paint, fly, fxFrom, FocusX());
+                if (ef.SkillId == 10) { EnsureFx(); _fx.PlaySpiritBomb(who, ef.DurationMs / 1000f); }
+                if (ef.SkillId == 11 || ef.SkillId == 14) { EnsureFx(); _fx.PlayCharge(who, (int)ef.SkillId, ef.DurationMs / 1000f); }
+                if (ef.SkillId == 11) BbSfx.Play(BbSfx.NamekLazer, 0.6f, ef.DurationMs / 1000f);          // the beam leaves when the charge ends
+                // the blast of the whole screen (GameScr.activeSuperPower): where Tự phát nổ goes off, where the dart of Quả cầu kênh khí and Makankosappo lands
+                if (ef.SkillId == 10 || ef.SkillId == 11 || ef.SkillId == 14)
+                    _flashPlans.Add(new FlashPlan { at = Time.unscaledTime + ef.DurationMs / 1000f, who = who, atTarget = ef.SkillId != 14 });
                 if (ef.SkillId >= 24 && ef.SkillId <= 26)
                 {
                     Vector2 aim;
@@ -780,6 +1140,17 @@ namespace BattleBall.Net
                     _ultimate.Cast(who, ef.SkillId, ef.DurationMs / 1000f, hasAim, aim);
                 }
                 return;
+            }
+            if (ef.Effect == Effect.Buff && ef.SkillId == MonkeySkill)
+            {
+                // Biến hình: after its poses (the wait of Nro) the character becomes the great ape of its level for the time of the skill
+                uint level = LevelOf(who, MonkeySkill);
+                float wait = 1.5f;                          // the server holds the character for 1.5 s, then the body changes (and the paint plays again, and again at the end)
+                EnsureFx();
+                _fx.PlayCharge(who, 13, wait);
+                _looks.Add(new LookChange { character = who, costume = 9000 + (int)Math.Max(1u, Math.Min(7u, level)), at = Time.unscaledTime + wait, replay = true });
+                _looks.Add(new LookChange { character = who, costume = 0, at = Time.unscaledTime + wait + ef.DurationMs / 1000f, replay = true });
+                _monkeyWindow[who] = new Vector2(Time.unscaledTime + wait, Time.unscaledTime + wait + ef.DurationMs / 1000f);       // its skills change while it is the ape
             }
             // the other skills of the AI characters (shield, regeneration, the monkey, teleport, sleep...): their poses when the server reports them
             if (ef.SourceId != _myId) ShowSkill(who, ef.SkillId, FocusX(), false);
@@ -814,6 +1185,7 @@ namespace BattleBall.Net
                     if (isNew && p.OwnerId != _myId && _characterOf.TryGetValue(p.OwnerId, out who))
                         ShowSkill(who, p.SkillId, FocusX(), false);          // the pose first: the dart appears at the frame that throws it
                     int dartId = _characterOf.TryGetValue(p.OwnerId, out owner) ? BbSkillFxData.DartOf(p.SkillId, LevelOf(owner, p.SkillId)) : -1;
+                    if (dartId >= 0 && p.SkillId == 5 && IsMonkey(owner)) dartId = BbSkillFxData.ArrowOf(MonkeyAntomicPaint, false).dart;          // the beam of the great ape
                     var dart = dartId >= 0 ? BbDart.Create(world, dartId, s) : null;
                     if (dart != null)
                     {
@@ -823,11 +1195,35 @@ namespace BattleBall.Net
                         int handDir;
                         float at;
                         if (HandOf(owner, out hand, out handDir) && _arrowAt.TryGetValue(owner, out at)) dart.Begin(hand, at - Time.unscaledTime);
+                        Vector2 stop;
+                        if (DartStop(p, owner, out stop))
+                        {
+                            dart.StopAt(stop);
+                            // the picture flies by itself from the hand to the target, at the speed of the server's projectile (measured on the next report)
+                            if (HandOf(owner, out hand, out handDir))
+                                _launches[p.ProjectileId] = new Launch { dart = dart, hand = hand, stop = stop, at = _arrowAt.TryGetValue(owner, out at) ? at : Time.unscaledTime,
+                                                                          from = new Vector2(p.X * s, p.Y * s + 26f * s), tick = f.ServerTick };
+                        }
                     }
                 }
                 img.rectTransform.anchoredPosition = new Vector2(p.X * s, p.Y * s + 26f * s);
                 BbDart picture;
-                if (_darts.TryGetValue(p.ProjectileId, out picture) && picture != null) picture.Move(img.rectTransform.anchoredPosition, p.DirX, p.DirY);
+                if (_darts.TryGetValue(p.ProjectileId, out picture) && picture != null) picture.Move(img.rectTransform.anchoredPosition, p.DirX, p.DirY, -1f, f.ServerTick);
+                Launch launch;
+                if (_launches.TryGetValue(p.ProjectileId, out launch) && f.ServerTick > launch.tick)
+                {
+                    // the server moves it once every 50 ms: its speed in Nro pixels a second, the picture flies at that speed
+                    Vector2 now2 = new Vector2(p.X * s, p.Y * s + 26f * s);
+                    float serverSpeed = Vector2.Distance(now2, launch.from) / ((f.ServerTick - launch.tick) * 0.05f);          // canvas px a second
+                    Vector2 way = new Vector2(p.DirX, p.DirY).normalized;
+                    float remaining = Mathf.Max(0f, Vector2.Dot(launch.stop - now2, way));
+                    float eta = remaining / Mathf.Max(1f, serverSpeed);                    // when the server's projectile reaches the target (and strikes)
+                    float wait = Mathf.Max(0f, launch.at - Time.unscaledTime);             // the picture leaves the hand at the frame of the throw
+                    float flight = Mathf.Max(0.15f, eta - wait);                           // ... and arrives together with the strike
+                    float visual = Vector2.Distance(launch.hand, launch.stop) / flight / s;
+                    if (launch.dart != null) launch.dart.Fly(launch.hand, launch.stop, wait, Mathf.Clamp(visual, 200f, 4000f), true);
+                    _launches.Remove(p.ProjectileId);
+                }
             }
             var gone = new List<uint>();
             foreach (var kv in _projectiles) if (!alive.Contains(kv.Key)) gone.Add(kv.Key);
@@ -836,7 +1232,14 @@ namespace BattleBall.Net
                 if (_projectiles[id] != null) Kill(_projectiles[id].gameObject);
                 _projectiles.Remove(id);
                 BbDart picture;
-                if (_darts.TryGetValue(id, out picture)) { if (picture != null) Kill(picture.gameObject); _darts.Remove(id); }
+                Launch pending;
+                if (_launches.TryGetValue(id, out pending))
+                {
+                    // the projectile ended before its speed was known: the picture flies at the usual speed of Nro
+                    if (pending.dart != null) pending.dart.Fly(pending.hand, pending.stop, pending.at - Time.unscaledTime, 480f);
+                    _launches.Remove(id);
+                }
+                if (_darts.TryGetValue(id, out picture)) { if (picture != null) picture.Finish(); _darts.Remove(id); }
             }
         }
 
@@ -847,6 +1250,11 @@ namespace BattleBall.Net
             float dt = Time.unscaledDeltaTime;
             if (_phase == Phase.Active && !_demo) ReportAndWatch(dt);
             if (village != null) village.AiHunt = _phase == Phase.Active;
+            if (village != null) UpdateLooks();
+            if (village != null && _phase == Phase.Active) UpdatePets(dt);
+            UpdateStuns();
+            AutoSession();
+            if (village != null) UpdateFlash();
             DriveCombat();
             if (_sayUntil > 0f && Time.unscaledTime > _sayUntil) { _sayUntil = 0f; if (_status != null) _status.text = ""; }
             AnimateFloating(dt);
@@ -862,13 +1270,14 @@ namespace BattleBall.Net
             if (main != _myCharacter) { _pendingSlot = -1; Leave(); return; }                       // another main character: a new session is needed
             Vector2 foe;
             float h;
-            if (_focusKey == null || !village.DummyInfo(_focusKey, out foe, out h) || Mathf.Abs(foe.x - feet.x) > LeaveDistance)
+            bool inView = village.VisibleDummyKeys().Count > 0;
+            if (!inView && (_focusKey == null || !village.DummyInfo(_focusKey, out foe, out h) || Mathf.Abs(foe.x - feet.x) > LeaveDistance))
             {
                 if (Time.unscaledTime - _lastFireAt < 3f) _farSince = -1f;       // a skill used with no target keeps the session open
                 else
                 {
                     if (_farSince < 0f) _farSince = Time.unscaledTime;
-                    if (Time.unscaledTime - _farSince > 3f) { Leave(); return; }
+                    if (Time.unscaledTime - _farSince > 5f) { Leave(); return; }
                 }
             }
             else _farSince = -1f;
@@ -957,6 +1366,12 @@ namespace BattleBall.Net
                 b.shade.fillAmount = left > 0f && b.slot.CooldownMs > 0 ? Mathf.Clamp01(left / (b.slot.CooldownMs / 1000f)) : 0f;
                 b.cooldown.gameObject.SetActive(left > 0f);
                 if (left > 0f) b.cooldown.text = left >= 1f ? Mathf.CeilToInt(left).ToString(CultureInfo.InvariantCulture) : left.ToString("0.0", CultureInfo.InvariantCulture);
+                if (b.slot.Level > 0 && b.slot.SkillId == 5)
+                {
+                    bool ape = IsMonkey(_myCharacter);          // Antomic is another skill while the character is the great ape
+                    b.level.text = ape ? "KHỈ" : b.slot.Level.ToString(CultureInfo.InvariantCulture);
+                    b.level.color = ape ? new Color(1f, 0.45f, 0.3f) : new Color(1f, 0.95f, 0.5f);
+                }
                 bool chosen = b.slot.Slot == _selectedSlot;
                 b.frame.color = b.slot.Level == 0 ? new Color(0.5f, 0.5f, 0.55f) : chosen ? new Color(1f, 1f, 0.55f) : Color.white;              // the skill in focus; locked: grey
                 b.root.localScale = chosen ? new Vector3(1.1f, 1.1f, 1f) : Vector3.one;
@@ -1071,6 +1486,13 @@ namespace BattleBall.Net
                 }
             }
             NewArrow();
+
+            // the white of Tự phát nổ over the whole view, under every button
+            _flash = NewImage("Flash", _root, whiteSprite, new Color(1f, 1f, 1f, 1f));
+            _flash.canvasRenderer.cullTransparentMesh = false;
+            Stretch(_flash.rectTransform, 0f);
+            _flash.enabled = false;
+            _flash.transform.SetAsFirstSibling();
 
             // the HP/Ki frames of the party, top left
             _hudRoot = NewRect("PartyHud", _root);
@@ -1353,6 +1775,60 @@ namespace BattleBall.Net
             bool has = village.DummyInfo(dummyKey, out aim, out h);
             _ultimate.Cast(main, skillId, chargeSeconds, has, aim);
             _ultimate.DemoAtTick(tick);
+        }
+
+        /// <summary>For the screenshot tool: the egg of Đẻ trứng hatched into this mob next to the main character, the spirit bomb charging, the blast of Tự phát nổ, the great ape.</summary>
+        public void DemoPet(int mobId)
+        {
+            EnsureBuilt();
+            ulong main;
+            Vector2 feet;
+            int facing;
+            village.PartyMember(0, out main, out feet, out facing);
+            float s = village.UiScale;
+            AddPet(new EntitySpawn { EntityId = 500, Kind = EntityKind.Pet, MobTemplateId = mobId });
+            _states[500] = new EntityState { EntityId = 500, X = (feet.x + 110f) / s, Y = feet.y / s, Alive = true };
+            UpdatePets(1f);
+        }
+
+        public void DemoBomb(float seconds)
+        {
+            EnsureBuilt();
+            EnsureFx();
+            ulong main;
+            Vector2 feet;
+            int facing;
+            village.PartyMember(0, out main, out feet, out facing);
+            _fx.PlaySpiritBomb(main, 3f);
+            village.PlayAction(main, new[] { (int)NroPose.Kame_Release_Fly }, 10f);
+            _fx.DemoBombAt(seconds);
+        }
+
+        public void DemoFlash(float seconds)
+        {
+            EnsureBuilt();
+            ulong main;
+            Vector2 feet;
+            int facing;
+            village.PartyMember(0, out main, out feet, out facing);
+            _flashWorld = feet + new Vector2(0f, 30f * village.UiScale);
+            _flashStart = Time.unscaledTime - seconds;
+            UpdateFlash();
+        }
+
+        public void DemoApe(ulong character, int level)
+        {
+            village.SetLook(character, 9000 + level);
+        }
+
+        /// <summary>For the scripted run in Play mode: the white of a blast or of the blinking is on the screen now.</summary>
+        public bool DebugFlashOn { get { return _flash != null && _flash.enabled && _flash.color.a > 0.9f; } }
+
+        /// <summary>For the scripted run in Play mode: the button of this skill is pressed.</summary>
+        public void DebugUse(uint skillId)
+        {
+            foreach (var sl in _skills) if (sl.SkillId == skillId) { PressSkill(sl); return; }
+            Debug.Log("[SkillFx] debug: no button for skill " + skillId);
         }
 
         /// <summary>For the screenshot tool: the fist switched on.</summary>

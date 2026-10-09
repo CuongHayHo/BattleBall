@@ -206,6 +206,7 @@ public final class Entities {
         public long expiresAt;
         public double damagePct;
         public long nextHitAt;
+        public int mobTemplateId = -1;       // the Nro mob the egg hatches into (drawn by the client): by level of Đẻ trứng
 
         public PetEntity(int id, Fighter owner) {
             super(id, Team.PLAYER, "Trứng của " + owner.name, 14);

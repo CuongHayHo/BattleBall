@@ -99,7 +99,7 @@ namespace BattleBall.Net
                 if (f.npcs != null)
                     foreach (var n in f.npcs)
                         map.Npcs.Add(new NpcSpec { Id = n.id, Name = n.name, Talk = n.talk, CostumeId = n.costume, X = n.x * ui, MobId = n.mob,
-                            Action = n.action == "DungeonGate" ? NpcAction.DungeonGate : n.action == "TrainingDummy" ? NpcAction.TrainingDummy : NpcAction.Talk });
+                            Action = n.action == "DungeonGate" ? NpcAction.DungeonGate : n.action == "TrainingDummy" ? NpcAction.TrainingDummy : n.action == "Shop" ? NpcAction.Shop : NpcAction.Talk });
 
                 var bgf = f.background;
                 if (bgf != null && bgf.width > 0f && bgf.top != null && bgf.top.Length == 3 && bgf.bottom != null && bgf.bottom.Length == 3)

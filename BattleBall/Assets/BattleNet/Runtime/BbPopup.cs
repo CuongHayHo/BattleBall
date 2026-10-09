@@ -27,6 +27,9 @@ namespace BattleBall.Net
         public Button close;
         public Sprite primarySprite, normalSprite;
         public float areaWidth = 320f;                           // the buttons are centred in the width of the panel
+        public Func<float> areaLeftProvider;                     // where the panel that owns the popup starts: 0 on the left, the menu panel docked on the right (asked at every Show)
+        public float? areaLeftOverride;                          // the shop on the left sets 0 for the popup of its items; Hide clears it
+        float areaLeft;
 
         public struct ButtonSpec
         {
@@ -65,6 +68,7 @@ namespace BattleBall.Net
                          IList<ButtonSpec> specs, Action<int> onButton, Action onClose = null, int previewCostume = 0, AuraInfo previewAura = null)
         {
             Wire();
+            areaLeft = areaLeftOverride ?? (areaLeftProvider != null ? areaLeftProvider() : 0f);
             _onButton = onButton;
             _onClose = onClose;
             icon.sprite = iconSprite;
@@ -124,7 +128,7 @@ namespace BattleBall.Net
                 int row = i / perRow;
                 int col = i - row * perRow;
                 int inRow = row == rows - 1 ? n - row * perRow : perRow;
-                float left = (areaWidth - (inRow * size.x + gap * (inRow - 1))) * 0.5f;
+                float left = areaLeft + (areaWidth - (inRow * size.x + gap * (inRow - 1))) * 0.5f;
                 r.anchoredPosition = new Vector2(left + col * (size.x + gap), bottom + (rows - 1 - row) * (size.y + gap));
                 buttons[i].interactable = specs[i].enabled;
                 buttonImages[i].sprite = specs[i].primary ? primarySprite : normalSprite;
@@ -132,7 +136,9 @@ namespace BattleBall.Net
                 buttonLabels[i].color = new Color(0.30f, 0.14f, 0.05f);          // Nro writes every command in dark bold
                 buttonLabels[i].fontSize = specs[i].label.Length > 14 ? 15 : 17;
             }
-            box.anchoredPosition = new Vector2(box.anchoredPosition.x, bottom + rows * (size.y + gap));
+            // the box is a little wider than the panel (as in Nro): it hangs out on the right of a panel on the left, and on the left of a panel docked on the right
+            float boxX = areaLeft > 0f ? areaLeft + areaWidth - box.sizeDelta.x - 5.5f : 5.5f;
+            box.anchoredPosition = new Vector2(boxX, bottom + rows * (size.y + gap));
             root.SetActive(true);
         }
 
@@ -140,6 +146,7 @@ namespace BattleBall.Net
         {
             if (!IsOpen) return;
             root.SetActive(false);
+            areaLeftOverride = null;
             var closed = _onClose;
             _onClose = null;
             if (closed != null) closed();

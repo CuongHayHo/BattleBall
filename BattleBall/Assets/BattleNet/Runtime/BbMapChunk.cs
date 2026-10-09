@@ -83,7 +83,7 @@ namespace BattleBall.Net
         public Color Color;
     }
 
-    public enum NpcAction { Talk, DungeonGate, TrainingDummy }
+    public enum NpcAction { Talk, DungeonGate, TrainingDummy, Shop }          // Shop: the server sends what the NPC sells (docs 15.15)
 
     public sealed class NpcSpec
     {
@@ -136,6 +136,8 @@ namespace BattleBall.Net
                 Talk = "Cửa hàng sắp mở. Cháu hãy ghé lại sau nhé." });
             map.Npcs.Add(new NpcSpec { Id = "gate", Name = "Cổng phó bản", CostumeId = 432, X = 2300, Action = NpcAction.DungeonGate,
                 Talk = "Nơi chọn phó bản để vào trận. Chức năng này sắp có." });
+            // Urôn sells every skin (docs 15.15)
+            map.Npcs.Add(new NpcSpec { Id = "uron", Name = "Urôn", CostumeId = 9020, X = 1550, Action = NpcAction.Shop, Talk = "" });
             // the training dummies (docs/architecture/BattleBallServer.md 15.12)
             map.Npcs.Add(new NpcSpec { Id = "moc_nhan", Name = "Mộc nhân", MobId = 0, X = 560, Action = NpcAction.TrainingDummy, Talk = "" });
             map.Npcs.Add(new NpcSpec { Id = "saibamen", Name = "Saibamen", CostumeId = 647, X = 760, Action = NpcAction.TrainingDummy, Talk = "" });

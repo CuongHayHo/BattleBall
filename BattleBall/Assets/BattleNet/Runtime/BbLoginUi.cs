@@ -190,9 +190,9 @@ namespace BattleBall.Net
 
             // game assets announced by the server (HelloAck): download what is missing or changed, with the progress on the same bar
             var info = client.Connection.ServerInfo;
-            if (!string.IsNullOrEmpty(info.AssetBaseUrl))
+            if (!string.IsNullOrEmpty(info.AssetVersion))
             {
-                try { await UpdateAssets(info.AssetBaseUrl, info.AssetVersion, ct); }
+                try { await UpdateAssets(client.Connection, info.AssetVersion, ct); }
                 catch (OperationCanceledException) { client.Dispose(); return; }
                 catch (Exception e)
                 {
@@ -211,11 +211,11 @@ namespace BattleBall.Net
             if (HasSaved) ShowMenu(); else ShowForm(false);
         }
 
-        async Task UpdateAssets(string baseUrl, string version, CancellationToken ct)
+        async Task UpdateAssets(BbConnection connection, string version, CancellationToken ct)
         {
             loadingStatus.text = "Đang kiểm tra tài nguyên...";
             var updater = new BbAssetUpdater(BbAssetCache.DefaultRoot);
-            var result = await updater.UpdateAsync(baseUrl, version, BbAssetCache.Scale, (done, total) =>
+            var result = await updater.UpdateAsync(connection, version, BbAssetCache.Scale, (done, total) =>
             {
                 _target = 0.2f + 0.8f * (total > 0 ? Mathf.Clamp01(done / (float)total) : 1f);
                 loadingStatus.text = total > 0

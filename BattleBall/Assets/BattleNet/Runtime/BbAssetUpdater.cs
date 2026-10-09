@@ -7,27 +7,10 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.Networking;
+using BattleBall.Proto;
 
 namespace BattleBall.Net
 {
-    [Serializable]
-    public class BbAssetPack
-    {
-        public string id;
-        public int scale;        // 0 = needed at every scale, otherwise 1, 2, 3 or 4
-        public string url;       // relative to the asset base URL
-        public long size;
-        public string sha256;
-    }
-
-    [Serializable]
-    public class BbAssetManifest
-    {
-        public string version;
-        public BbAssetPack[] packs;
-    }
-
     /// <summary>What is installed in the cache folder (installed.json).</summary>
     [Serializable]
     class BbInstalledIndex
@@ -102,13 +85,17 @@ namespace BattleBall.Net
     }
 
     /// <summary>
-    /// Downloads the game assets announced by the server (HelloAck.asset_base_url and asset_version): reads manifest.json, downloads the packs of this
-    /// device's scale that are missing or changed, checks each pack's SHA-256, unzips it into the cache folder and records it in installed.json.
-    /// A pack is one zip; an interrupted run keeps what was already installed and continues with the rest next time.
-    /// Unity main thread only (UnityWebRequest); await it from a MonoBehaviour or from an editor update loop.
+    /// Downloads the game assets the server announces in HelloAck.asset_version, over the game connection itself (as Teamobi does with cmd -74; no HTTP server):
+    /// asks for the manifest, then for each pack of this device's scale that is missing or changed, chunk by chunk, checks the pack's SHA-256, unzips it
+    /// into the cache folder and records it in installed.json. A pack is one zip; an interrupted run keeps what was already installed and continues with the rest next time.
+    /// Await it from the Unity main thread (or any thread with a synchronization context): the work that is slow (hash, unzip) runs on the thread pool.
     /// </summary>
     public sealed class BbAssetUpdater
     {
+        const int ChunkBytes = 128 * 1024;        // what the server sends by default
+        const int Window = 8;                     // chunk requests in flight at once: the round trip of the phone network does not stall the download
+        const int ChunkTimeoutMs = 30000;
+
         readonly string _root;
         public string Root { get { return _root; } }
 
@@ -123,9 +110,8 @@ namespace BattleBall.Net
         }
 
         /// <param name="progress">(bytes done, bytes to download in total) over the packs that have to be downloaded.</param>
-        public async Task<BbAssetResult> UpdateAsync(string baseUrl, string serverVersion, int scale, Action<long, long> progress, CancellationToken ct)
+        public async Task<BbAssetResult> UpdateAsync(BbConnection connection, string serverVersion, int scale, Action<long, long> progress, CancellationToken ct)
         {
-            if (!baseUrl.EndsWith("/")) baseUrl += "/";
             Directory.CreateDirectory(_root);
             var index = LoadIndex();
             var result = new BbAssetResult { version = serverVersion, scale = scale };
@@ -136,18 +122,19 @@ namespace BattleBall.Net
                 return result;
             }
 
-            string manifestText = await GetText(baseUrl + "manifest.json", ct);
-            var manifest = JsonUtility.FromJson<BbAssetManifest>(manifestText);
-            if (manifest == null || manifest.packs == null) throw new InvalidDataException("the asset manifest is not valid");
+            var answer = await connection.RequestAsync(new Envelope { AssetManifestRequest = new AssetManifestRequest() }, 20000);
+            if (answer.PayloadCase != Envelope.PayloadOneofCase.AssetManifestReply)
+                throw new InvalidDataException("the server did not send the asset list: " + BbConnection.Describe(answer));
+            var manifest = answer.AssetManifestReply;
 
-            var todo = new List<BbAssetPack>();
+            var todo = new List<AssetPackInfo>();
             long total = 0;
-            foreach (var p in manifest.packs)
+            foreach (var p in manifest.Packs)
             {
-                if (p.scale != 0 && p.scale != scale) continue;
-                if (index.HashOf(p.id) == p.sha256) continue;
+                if (p.Scale != 0 && p.Scale != (uint)scale) continue;
+                if (index.HashOf(p.Id) == p.Sha256) continue;
                 todo.Add(p);
-                total += p.size;
+                total += (long)p.Size;
             }
             progress?.Invoke(0, total);
 
@@ -157,30 +144,67 @@ namespace BattleBall.Net
             foreach (var p in todo)
             {
                 ct.ThrowIfCancellationRequested();
-                string zipPath = Path.Combine(tmpDir, SafeName(p.id) + ".zip");
+                string zipPath = Path.Combine(tmpDir, SafeName(p.Id) + ".zip");
                 long before = done;
-                await Download(baseUrl + p.url, zipPath, bytes => progress?.Invoke(before + (long)bytes, total), ct);
-                done = before + p.size;
+                await DownloadPack(connection, p, zipPath, bytes => progress?.Invoke(before + bytes, total), ct);
+                done = before + (long)p.Size;
                 string actual = await Task.Run(() => Sha256Of(zipPath));
-                if (!string.Equals(actual, p.sha256, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(actual, p.Sha256, StringComparison.OrdinalIgnoreCase))
                 {
                     File.Delete(zipPath);
-                    throw new InvalidDataException("pack " + p.id + " is damaged (hash differs)");
+                    throw new InvalidDataException("pack " + p.Id + " is damaged (hash differs)");
                 }
                 await Task.Run(() => Extract(zipPath, _root));
                 File.Delete(zipPath);
-                index.Set(p.id, p.sha256);
+                index.Set(p.Id, p.Sha256);
                 SaveIndex(index);                       // progress survives an interruption
                 result.packsDownloaded++;
-                result.bytesDownloaded += p.size;
+                result.bytesDownloaded += (long)p.Size;
                 progress?.Invoke(done, total);
             }
 
-            index.version = manifest.version;
+            index.version = manifest.Version;
             index.scale = scale;
             SaveIndex(index);
-            result.version = manifest.version;
+            result.version = manifest.Version;
             return result;
+        }
+
+        /// <summary>
+        /// Asks for the pack chunk by chunk with up to <see cref="Window"/> requests in flight and writes the answers in order (the server answers each
+        /// request alone: it keeps no state about the download). A wrong offset, an empty or short chunk, or a different total size is an error.
+        /// </summary>
+        static async Task DownloadPack(BbConnection connection, AssetPackInfo pack, string path, Action<long> onBytes, CancellationToken ct)
+        {
+            if (File.Exists(path)) File.Delete(path);
+            long size = (long)pack.Size;
+            var inflight = new Queue<KeyValuePair<long, Task<Envelope>>>();
+            long next = 0, written = 0;
+            using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, true))
+            {
+                while (written < size)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    while (inflight.Count < Window && next < size)
+                    {
+                        var request = new Envelope { AssetChunkRequest = new AssetChunkRequest { PackId = pack.Id, Offset = (ulong)next, MaxBytes = ChunkBytes } };
+                        inflight.Enqueue(new KeyValuePair<long, Task<Envelope>>(next, connection.RequestAsync(request, ChunkTimeoutMs)));
+                        next += ChunkBytes;
+                    }
+                    var head = inflight.Dequeue();
+                    var e = await head.Value;
+                    if (e.PayloadCase != Envelope.PayloadOneofCase.AssetChunk)
+                        throw new InvalidDataException("pack " + pack.Id + ": " + BbConnection.Describe(e));
+                    var chunk = e.AssetChunk;
+                    long expected = Math.Min(ChunkBytes, size - head.Key);
+                    if ((long)chunk.Offset != head.Key || (long)chunk.Total != size || chunk.Data.Length != expected)
+                        throw new InvalidDataException("pack " + pack.Id + ": the chunk at " + head.Key + " is not what was asked (changed on the server?)");
+                    var bytes = chunk.Data.ToByteArray();
+                    await fs.WriteAsync(bytes, 0, bytes.Length, ct);
+                    written += bytes.Length;
+                    onBytes?.Invoke(written);
+                }
+            }
         }
 
         // ---------------------------------------------------------------------------------------------------------------- files
@@ -250,39 +274,5 @@ namespace BattleBall.Net
             }
         }
 
-        // ---------------------------------------------------------------------------------------------------------------- web
-
-        static async Task<string> GetText(string url, CancellationToken ct)
-        {
-            using (var req = UnityWebRequest.Get(url))
-            {
-                req.timeout = 20;
-                await Send(req, null, ct);
-                return req.downloadHandler.text;
-            }
-        }
-
-        static async Task Download(string url, string path, Action<ulong> onBytes, CancellationToken ct)
-        {
-            if (File.Exists(path)) File.Delete(path);
-            using (var req = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET))
-            {
-                req.timeout = 60;
-                req.downloadHandler = new DownloadHandlerFile(path) { removeFileOnAbort = true };
-                await Send(req, onBytes, ct);
-            }
-        }
-
-        static async Task Send(UnityWebRequest req, Action<ulong> onBytes, CancellationToken ct)
-        {
-            var op = req.SendWebRequest();
-            while (!op.isDone)
-            {
-                if (ct.IsCancellationRequested) { req.Abort(); throw new OperationCanceledException(ct); }
-                onBytes?.Invoke(req.downloadedBytes);
-                await Task.Yield();
-            }
-            if (req.result != UnityWebRequest.Result.Success) throw new IOException(req.error + " (" + req.url + ")");
-        }
     }
 }

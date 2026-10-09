@@ -150,6 +150,8 @@ namespace BattleBall.Net
             public Vector2 feet;
             public float start;
             public Image image;
+            public bool center;               // placed by its centre with the offsets of every picture (ServerEffect of Nro), else bottom centre on the feet
+            public int loops = 1;
         }
 
         readonly List<Hit> _hits = new List<Hit>();
@@ -162,14 +164,24 @@ namespace BattleBall.Net
             _hits.Add(new Hit { effect = effect, feet = feet, start = Time.unscaledTime });
         }
 
+        /// <summary>An effect of the table drawn by its centre at this point (Nro ServerEffect), played {@code loops} times.</summary>
+        public void PlayEffectAt(int effectId, Vector2 center, int loops)
+        {
+            var effect = BbSkillFxData.Effect(effectId);
+            if (effect == null || effect.Length < 3) return;
+            _hits.Add(new Hit { effect = effect, feet = center, start = Time.unscaledTime, center = true, loops = Mathf.Max(1, loops) });
+        }
+
         void TickHits()
         {
             if (village == null || village.WorldLayer == null) return;
             for (int i = _hits.Count - 1; i >= 0; i--)
             {
                 var h = _hits[i];
-                int index = Mathf.FloorToInt((Time.unscaledTime - h.start) * BbSkillPoses.FramesPerSecond);
-                if (index * 3 >= h.effect.Length)
+                int count = h.effect.Length / 3;
+                int step = Mathf.FloorToInt((Time.unscaledTime - h.start) * BbSkillPoses.FramesPerSecond);
+                int index = step % count;
+                if (step >= count * h.loops)
                 {
                     if (h.image != null) BbFxKill.Go(h.image.gameObject);
                     _hits.RemoveAt(i);
@@ -184,13 +196,13 @@ namespace BattleBall.Net
                     h.image.raycastTarget = false;
                     var rt0 = h.image.rectTransform;
                     rt0.anchorMin = rt0.anchorMax = Vector2.zero;
-                    rt0.pivot = new Vector2(0.5f, 0f);
+                    rt0.pivot = h.center ? new Vector2(0.5f, 0.5f) : new Vector2(0.5f, 0f);
                 }
                 h.image.enabled = sprite != null;
                 if (sprite == null) continue;
                 h.image.sprite = sprite;
                 h.image.rectTransform.sizeDelta = SizeOf(sprite, village.UiScale);
-                h.image.rectTransform.anchoredPosition = h.feet;
+                h.image.rectTransform.anchoredPosition = h.center ? h.feet + new Vector2(h.effect[index * 3 + 1], -h.effect[index * 3 + 2]) * village.UiScale : h.feet;
                 h.image.transform.SetAsLastSibling();
             }
         }
@@ -223,10 +235,255 @@ namespace BattleBall.Net
             Tick();
         }
 
+        // ---- the charges (Char.update of Nro: isFlyAndCharge, isStandAndCharge, isWaitMonkey): what shines around a character while it gathers its power
+
+        sealed class Charge
+        {
+            public ulong character;
+            public int kind;                  // 10 Quả cầu kênh khí (flies), 11 Makankosappo and 14 Tự phát nổ (stands), 13 Biến hình (waits)
+            public float start, seconds;
+            public int done;                  // game ticks already handled
+        }
+
+        readonly List<Charge> _charges = new List<Charge>();
+
+        /// <summary>A charge of {@code kind} for {@code seconds}: the effects Nro spawns every few ticks around the character (and the rise of the spirit bomb).</summary>
+        public void PlayCharge(ulong character, int kind, float seconds)
+        {
+            _charges.RemoveAll(x => { if (x.character == character) { if (x.kind == 10) village.SetLift(character, 0f); return true; } return false; });
+            _charges.Add(new Charge { character = character, kind = kind, start = Time.unscaledTime, seconds = Mathf.Max(0.3f, seconds) });
+        }
+
+        /// <summary>Quả cầu kênh khí: the character rises 3 Nro px a tick for 20 ticks, then holds its arms up while effect 153 pulses over its head every 3 ticks.</summary>
+        public void PlaySpiritBomb(ulong character, float seconds)
+        {
+            PlayCharge(character, 10, seconds);
+        }
+
+        void TickCharges()
+        {
+            if (village == null || village.WorldLayer == null) return;
+            float scale = village.UiScale;
+            for (int i = _charges.Count - 1; i >= 0; i--)
+            {
+                var ch = _charges[i];
+                float t = Time.unscaledTime - ch.start;
+                int tick = Mathf.FloorToInt(t * BbSkillPoses.FramesPerSecond);
+                float lift = 0f;
+                if (ch.kind == 10)
+                {
+                    lift = t < ch.seconds ? Mathf.Min(60f, 3f * tick) : Mathf.Max(0f, 60f - (t - ch.seconds) * 240f);       // up 3 px a tick, down in a quarter of a second
+                    village.SetLift(ch.character, lift);
+                }
+                if (t > ch.seconds + (ch.kind == 10 ? 0.3f : 0f))
+                {
+                    if (ch.kind == 10) village.SetLift(ch.character, 0f);
+                    _charges.RemoveAt(i);
+                    continue;
+                }
+                ulong id;
+                Vector2 feet = Vector2.zero;
+                int facing = 1;
+                bool found = false;
+                for (int k = 0; k < village.PartyCount && !found; k++) found = village.PartyMember(k, out id, out feet, out facing) && id == ch.character;
+                if (!found) continue;
+                int dir = facing >= 0 ? 1 : -1;
+                while (ch.done <= tick && t < ch.seconds)
+                {
+                    int n = ch.done++;
+                    switch (ch.kind)
+                    {
+                        case 10:        // cy - ch (ch = 32): over the head of the character
+                            if (n > 20 && n % 3 == 0) PlayEffectAt(153, feet + new Vector2(0f, (lift + 32f) * scale), 2);
+                            break;
+                        case 14:        // Xayda: effect 154 at the waist every 3 ticks, effect 114 around it every 5
+                            if (n % 3 == 0) PlayEffectAt(154, feet + new Vector2(0f, 6f * scale), 1);
+                            if (n % 5 == 0) PlayEffectAt(114, feet + new Vector2(UnityEngine.Random.Range(-20, 21), -UnityEngine.Random.Range(-20, 21) + 6f) * scale, 1);
+                            break;
+                        case 11:        // Namek: two bursts (effect 70) at the sides of the body every 2 ticks
+                            if (n % 2 == 0)
+                            {
+                                PlayEffectAt(70, feet + new Vector2(-18f * dir, 8f) * scale, 1);
+                                PlayEffectAt(70, feet + new Vector2(23f * dir, 1f) * scale, 1);
+                            }
+                            break;
+                        case 13:        // the wait of Biến hình: effect 154 (twice over) and effect 1 under the feet every 5 ticks
+                            if (n % 5 == 0)
+                            {
+                                PlayEffectAt(154, feet + new Vector2(0f, 10f * scale), 2);
+                                PlayEffectAt(1, feet + new Vector2(0f, -10f * scale), 1);
+                            }
+                            break;
+                    }
+                }
+            }
+        }
+
+        /// <summary>For the screenshot tool: the charges as if they had been going on for this many seconds.</summary>
+        public void DemoBombAt(float seconds)
+        {
+            foreach (var x in _charges) x.start = Time.unscaledTime - seconds;
+            TickCharges();
+        }
+
+        // ---- effects of the EffectData kind of Nro (data/effdata/DataEffect_N and the sheet data/effect/x4/ImgEffect_N.png): the rope that holds, the whistle...
+
+        sealed class EData
+        {
+            public Texture2D tex;
+            public int zoom;
+            public readonly Dictionary<int, Rect> rect = new Dictionary<int, Rect>();      // picture id: its place in the sheet (Unity texture pixels)
+            public readonly Dictionary<int, Vector2> size = new Dictionary<int, Vector2>();   // picture id: its size in Nro px
+            public int[][] dx, dy, img;
+            public short[] seq;
+        }
+
+        static readonly Dictionary<int, EData> DataCache = new Dictionary<int, EData>();
+        static readonly Dictionary<long, Sprite> DataSprites = new Dictionary<long, Sprite>();
+
+        static EData LoadData(int id)
+        {
+            EData d;
+            if (DataCache.TryGetValue(id, out d)) return d;
+            DataCache[id] = null;
+            try
+            {
+                string root = NroSpriteResolver.GetDefaultServerRoot();
+                string file = Path.Combine(root, "data", "effdata", "DataEffect_" + id);
+                if (!File.Exists(file)) return null;
+                byte[] b = File.ReadAllBytes(file);
+                int p = 0;
+                Func<int> u8 = () => b[p++];
+                Func<int> s8 = () => (sbyte)b[p++];
+                Func<int> s16 = () => { int v = (short)((b[p] << 8) | b[p + 1]); p += 2; return v; };
+                var infos = new Dictionary<int, int[]>();
+                int n = s8();
+                for (int i = 0; i < n; i++) { int iid = s8(); infos[iid] = new[] { u8(), u8(), u8(), u8() }; }
+                int frames = s16();
+                d = new EData { dx = new int[frames][], dy = new int[frames][], img = new int[frames][] };
+                for (int f = 0; f < frames; f++)
+                {
+                    int parts = s8();
+                    d.dx[f] = new int[parts];
+                    d.dy[f] = new int[parts];
+                    d.img[f] = new int[parts];
+                    for (int q = 0; q < parts; q++) { d.dx[f][q] = s16(); d.dy[f][q] = s16(); d.img[f][q] = s8(); }
+                }
+                int ns = s16();
+                d.seq = new short[ns];
+                for (int i = 0; i < ns; i++) d.seq[i] = (short)s16();
+                foreach (int z in new[] { BbAssetCache.Scale, 4, 3, 2, 1 })
+                {
+                    string png = Path.Combine(root, "data", "effect", "x" + z, "ImgEffect_" + id + ".png");
+                    if (!File.Exists(png)) continue;
+                    var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+                    if (!tex.LoadImage(File.ReadAllBytes(png))) continue;
+                    d.tex = tex;
+                    d.zoom = z;
+                    break;
+                }
+                if (d.tex == null) return null;
+                foreach (var kv in infos)
+                {
+                    int[] r = kv.Value;
+                    d.rect[kv.Key] = new Rect(r[0] * d.zoom, d.tex.height - (r[1] + r[3]) * d.zoom, r[2] * d.zoom, r[3] * d.zoom);
+                    d.size[kv.Key] = new Vector2(r[2], r[3]);
+                }
+                DataCache[id] = d;
+                return d;
+            }
+            catch (Exception) { return null; }
+        }
+
+        static Sprite DataSprite(int id, EData d, int imageId)
+        {
+            long key = id * 1000L + imageId;
+            Sprite sp;
+            if (!DataSprites.TryGetValue(key, out sp) || sp == null)
+            {
+                Rect r;
+                if (!d.rect.TryGetValue(imageId, out r)) return null;
+                sp = Sprite.Create(d.tex, r, new Vector2(0f, 1f), 100f * d.zoom);
+                DataSprites[key] = sp;
+            }
+            return sp;
+        }
+
+        sealed class DataPlay
+        {
+            public int id;
+            public EData data;
+            public Vector2 origin;
+            public float start, until;
+            public int loops;                 // 0 = until {@code until}
+            public readonly List<Image> images = new List<Image>();
+        }
+
+        readonly List<DataPlay> _datas = new List<DataPlay>();
+
+        /// <summary>
+        /// An effect of the EffectData kind of Nro: its pictures are put together frame by frame (the origin is the top left corner of the frame, offsets in Nro px) and
+        /// the list of frames is played one a tick (30 a second): {@code loops} times, or for {@code seconds} when {@code loops} is 0 (the rope of Trói while it holds).
+        /// </summary>
+        public void PlayData(int effectId, Vector2 origin, int loops, float seconds = 0f)
+        {
+            var d = LoadData(effectId);
+            if (d == null || d.seq.Length == 0) return;
+            _datas.Add(new DataPlay { id = effectId, data = d, origin = origin, start = Time.unscaledTime, until = Time.unscaledTime + seconds, loops = loops });
+        }
+
+        void TickDatas()
+        {
+            if (village == null || village.WorldLayer == null) return;
+            float scale = village.UiScale;
+            for (int i = _datas.Count - 1; i >= 0; i--)
+            {
+                var p = _datas[i];
+                var d = p.data;
+                int step = Mathf.FloorToInt((Time.unscaledTime - p.start) * BbSkillPoses.FramesPerSecond);
+                bool over = p.loops > 0 ? step >= d.seq.Length * p.loops : Time.unscaledTime >= p.until;
+                if (over)
+                {
+                    foreach (var img in p.images) if (img != null) BbFxKill.Go(img.gameObject);
+                    _datas.RemoveAt(i);
+                    continue;
+                }
+                int frame = Mathf.Clamp(d.seq[step % d.seq.Length], 0, d.dx.Length - 1);
+                int parts = d.dx[frame].Length;
+                while (p.images.Count < parts)
+                {
+                    var go = new GameObject("EffectData" + p.id, typeof(RectTransform), typeof(Image));
+                    go.transform.SetParent(village.WorldLayer, false);
+                    var img = go.GetComponent<Image>();
+                    img.raycastTarget = false;
+                    var rt0 = img.rectTransform;
+                    rt0.anchorMin = rt0.anchorMax = Vector2.zero;
+                    rt0.pivot = new Vector2(0f, 1f);
+                    p.images.Add(img);
+                }
+                for (int q = 0; q < p.images.Count; q++)
+                {
+                    var img = p.images[q];
+                    if (img == null) continue;
+                    if (q >= parts) { img.enabled = false; continue; }
+                    var sprite = DataSprite(p.id, d, d.img[frame][q]);
+                    img.enabled = sprite != null;
+                    if (sprite == null) continue;
+                    img.sprite = sprite;
+                    Vector2 size = d.size[d.img[frame][q]];
+                    img.rectTransform.sizeDelta = size * scale;
+                    img.rectTransform.anchoredPosition = p.origin + new Vector2(d.dx[frame][q], -d.dy[frame][q]) * scale;
+                    img.transform.SetAsLastSibling();
+                }
+            }
+        }
+
         public void Tick()
         {
             if (village == null) return;
             TickHits();
+            TickCharges();
+            TickDatas();
             float now = Time.unscaledTime;
             for (int i = _runs.Count - 1; i >= 0; i--)
             {
@@ -376,15 +633,22 @@ namespace BattleBall.Net
         // what the server said
         Vector2 _server, _velocity, _dirVec = Vector2.right;
         float _serverTime;
+        uint _serverTick;
         bool _haveServer, _manual;
         // the start at the hand
         Vector2 _hand, _offset;
         float _showAt;
         bool _useHand, _shown;
+        // where the dart ends: the target it was shot at (the projectile of the server goes on through everything on its way until its range is spent)
+        bool _hasStop, _finishing, _haveOrigin;
+        Vector2 _stopAt, _origin;
         // a dart that flies by itself
-        bool _fly;
+        bool _fly, _constantSpeed;
         Vector2 _from, _to;
         float _flyStart, _flySpeed;
+
+        /// <summary>Where the head of the dart is drawn (canvas px): for the scripted run in Play mode.</summary>
+        public Vector2 DebugHead { get { return _head != null ? new Vector2(Mathf.Round(_head.rectTransform.anchoredPosition.x), Mathf.Round(_head.rectTransform.anchoredPosition.y)) : Vector2.zero; } }
 
         public static BbDart Create(Transform parent, int dartId, float uiScale)
         {
@@ -411,10 +675,26 @@ namespace BattleBall.Net
             SetVisible(false);
         }
 
+        /// <summary>The dart ends at this point (the target): it is not drawn beyond it, whatever the server's projectile does.</summary>
+        public void StopAt(Vector2 point)
+        {
+            _stopAt = point;
+            _hasStop = true;
+        }
+
+        /// <summary>The server's projectile is gone: the dart flies on to its target when it has one, else it disappears at once.</summary>
+        public void Finish()
+        {
+            if (_fly) return;                                    // it flies by itself and ends at its target
+            if (!_hasStop || !_haveServer || _manual) { BbFxKill.Go(gameObject); return; }
+            _finishing = true;
+        }
+
         /// <summary>A dart that flies from {@code from} to {@code to} by itself after {@code delay} seconds ({@code nroPerSecond}: Nro pixels a second at the top speed).</summary>
-        public void Fly(Vector2 from, Vector2 to, float delay, float nroPerSecond)
+        public void Fly(Vector2 from, Vector2 to, float delay, float nroPerSecond, bool constantSpeed = false)
         {
             _fly = true;
+            _constantSpeed = constantSpeed;
             _from = from;
             _to = to;
             _flyStart = Time.unscaledTime + Mathf.Max(0f, delay);
@@ -471,7 +751,7 @@ namespace BattleBall.Net
         }
 
         /// <summary>The server reports the projectile at {@code at} flying along (dirX, dirY). With {@code dt} (screenshot tool) it is drawn at once.</summary>
-        public void Move(Vector2 at, float dirX, float dirY, float dt = -1f)
+        public void Move(Vector2 at, float dirX, float dirY, float dt = -1f, uint serverTick = 0)
         {
             if (dirX != 0f || dirY != 0f) _dirVec = new Vector2(dirX, dirY).normalized;
             if (dt >= 0f)
@@ -481,13 +761,16 @@ namespace BattleBall.Net
                 return;
             }
             float now = Time.unscaledTime;
-            if (!_haveServer) { _server = at; _serverTime = now; _haveServer = true; return; }
+            if (!_haveServer) { _server = at; _serverTime = now; _serverTick = serverTick; _haveServer = true; return; }
             if ((at - _server).sqrMagnitude > 0.01f)
             {
-                float span = now - _serverTime;
-                if (span > 0.001f) _velocity = Vector2.Lerp(_velocity, (at - _server) / span, _velocity == Vector2.zero ? 1f : 0.6f);
+                // the server moves the projectile once every 50 ms: the speed comes from the ticks (the frames can arrive in a bunch), along the flight only
+                float span = serverTick > _serverTick && _serverTick != 0 ? (serverTick - _serverTick) * 0.05f : 0.05f;
+                float speed = Mathf.Clamp(Vector2.Dot((at - _server) / span, _dirVec), 0f, 4000f);
+                _velocity = Vector2.Lerp(_velocity, _dirVec * speed, _velocity == Vector2.zero ? 1f : 0.6f);
                 _server = at;
                 _serverTime = now;
+                _serverTick = serverTick;
             }
         }
 
@@ -501,7 +784,7 @@ namespace BattleBall.Net
                 if (now < _flyStart) return;
                 float t = now - _flyStart;
                 // the dart of Nro speeds up as it goes: from 40% to the full speed in a quarter of a second
-                float travelled = _flySpeed * (t < 0.25f ? 0.4f * t + 0.6f * t * t * 2f : 0.4f * t + 0.6f * (t - 0.125f));
+                float travelled = _constantSpeed ? _flySpeed * t : _flySpeed * (t < 0.25f ? 0.4f * t + 0.6f * t * t * 2f : 0.4f * t + 0.6f * (t - 0.125f));
                 Vector2 line = _to - _from;
                 if (travelled >= line.magnitude) { BbFxKill.Go(gameObject); return; }
                 _dirVec = line.normalized;
@@ -509,7 +792,10 @@ namespace BattleBall.Net
                 return;
             }
             if (!_haveServer) return;
-            Vector2 at = _server + _velocity * Mathf.Min(0.15f, now - _serverTime);
+            if (_finishing && now - _serverTime > 1.5f) { BbFxKill.Go(gameObject); return; }
+            Vector2 at = _server + _velocity * Mathf.Min(_finishing ? 1.5f : 0.1f, now - _serverTime);
+            if (!_haveOrigin) { _origin = _server; _haveOrigin = true; }
+            if (_hasStop && Vector2.Dot(at - _origin, _dirVec) >= Vector2.Dot(_stopAt - _origin, _dirVec)) { BbFxKill.Go(gameObject); return; }
             if (_useHand)
             {
                 if (now < _showAt) return;

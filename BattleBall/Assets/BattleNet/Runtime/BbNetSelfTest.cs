@@ -26,8 +26,8 @@ namespace BattleBall.Net
             await a.ConnectAsync(host, port, true, "selftest", "editor");
             Expect(a.Connection.ServerInfo.ProtocolVersion == BbConnection.ProtocolVersion && a.Connection.ServerInfo.TickRateHz > 0,
                 "TLS connect and Hello: protocol " + a.Connection.ServerInfo.ProtocolVersion + ", tick " + a.Connection.ServerInfo.TickRateHz + " Hz");
-            Expect(a.Connection.ServerInfo.AssetBaseUrl.StartsWith("http") && a.Connection.ServerInfo.AssetVersion.Length > 0,
-                "HelloAck announces the assets: " + a.Connection.ServerInfo.AssetBaseUrl + " version " + a.Connection.ServerInfo.AssetVersion);
+            Expect(a.Connection.ServerInfo.AssetVersion.Length > 0,
+                "HelloAck announces the assets: version " + a.Connection.ServerInfo.AssetVersion);
             Expect(a.Connection.ServerInfo.ServerName.Length > 0, "HelloAck carries the server name: " + a.Connection.ServerInfo.ServerName);
 
             // 2. register: bad name, then good, then duplicate

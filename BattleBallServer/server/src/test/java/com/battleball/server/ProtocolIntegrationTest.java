@@ -60,6 +60,9 @@ class ProtocolIntegrationTest {
     private static com.battleball.server.data.StaticDataStore staticData;
     private static com.battleball.server.game.PlayerActions actions;
     private static com.battleball.server.game.match.MatchManager matches;
+    private static String manifestPath;
+    private static byte[] packBytes;
+    private static String packSha;
 
     @BeforeAll
     static void start() throws Exception {
@@ -71,6 +74,20 @@ class ProtocolIntegrationTest {
                 "-ext", "SAN=dns:localhost,ip:127.0.0.1").redirectErrorStream(true).start();
         p.getInputStream().readAllBytes();
         assertEquals(0, p.waitFor(), "keytool failed");
+        // assets served over the game connection: one real pack, one entry that points outside the folder, one entry whose file does not exist
+        Path assets = dir.resolve("assets");
+        Files.createDirectories(assets.resolve("packs"));
+        packBytes = new byte[300_000];
+        new java.util.Random(7).nextBytes(packBytes);
+        Files.write(assets.resolve("packs").resolve("p1.zip"), packBytes);
+        Files.writeString(dir.resolve("secret.txt"), "secret");
+        String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(packBytes));
+        Files.writeString(assets.resolve("manifest.json"), "{\"version\":\"v-test\",\"packs\":["
+                + "{\"id\":\"p1\",\"scale\":3,\"url\":\"packs/p1.zip\",\"size\":1,\"sha256\":\"" + sha + "\"},"
+                + "{\"id\":\"evil\",\"scale\":0,\"url\":\"../../secret.txt\",\"size\":1,\"sha256\":\"00\"},"
+                + "{\"id\":\"gone\",\"scale\":0,\"url\":\"packs/gone.zip\",\"size\":1,\"sha256\":\"00\"}]}");
+        manifestPath = assets.resolve("manifest.json").toString();
+        packSha = sha;
         testDb = TestDb.create();
         config = testConfig(500, 1500);
         db = new Database(config);
@@ -86,7 +103,7 @@ class ProtocolIntegrationTest {
 
     private static ServerConfig testConfig(int maxConnections, int helloTimeoutMs) {
         return new ServerConfig(0, testDb.url, testDb.user, testDb.password, 4,
-                keystore, "changeit", maxConnections, helloTimeoutMs, 60_000, 15_000, 20, 1 << 20, 4, 30, false, null, 0, "", "", "Test server");
+                keystore, "changeit", maxConnections, helloTimeoutMs, 60_000, 15_000, 20, 1 << 20, 4, 30, false, null, 0, "", manifestPath, "Test server");
     }
 
     @AfterAll
@@ -167,6 +184,53 @@ class ProtocolIntegrationTest {
             assertEquals(6, pong.getRequestId());
             assertEquals(123, pong.getPong().getClientTimeMs());
             assertTrue(pong.getPong().getServerTimeMs() > 0);
+        }
+    }
+
+    @Test
+    void assetsAreServedOverTheGameConnection() throws Exception {
+        // before Hello nothing is served
+        try (TestClient c = new TestClient(port)) {
+            c.send(Envelope.newBuilder().setRequestId(1).setAssetManifestRequest(com.battleball.proto.AssetManifestRequest.getDefaultInstance()).build());
+            assertEquals(ErrorCode.INVALID_STATE, c.expect(3000).getError().getCode());
+        }
+        try (TestClient c = connected()) {
+            // HelloAck no longer carries a URL; it carries the version
+            c.send(Envelope.newBuilder().setRequestId(2).setAssetManifestRequest(com.battleball.proto.AssetManifestRequest.getDefaultInstance()).build());
+            Envelope m = c.expect(3000);
+            assertEquals(2, m.getRequestId());
+            assertEquals("v-test", m.getAssetManifestReply().getVersion());
+            assertEquals(1, m.getAssetManifestReply().getPacksCount(), "only the pack inside the folder that exists is listed");
+            var info = m.getAssetManifestReply().getPacks(0);
+            assertEquals("p1", info.getId());
+            assertEquals(3, info.getScale());
+            assertEquals(packBytes.length, info.getSize(), "the size is that of the file, not the one written in the manifest");
+            assertEquals(packSha, info.getSha256());
+            // the whole pack, chunk by chunk (the default is 128 KiB, a bigger ask is cut to 256 KiB)
+            java.io.ByteArrayOutputStream got = new java.io.ByteArrayOutputStream();
+            int rid = 10;
+            while (got.size() < packBytes.length) {
+                c.send(Envelope.newBuilder().setRequestId(rid++).setAssetChunkRequest(com.battleball.proto.AssetChunkRequest.newBuilder()
+                        .setPackId("p1").setOffset(got.size()).setMaxBytes(got.size() == 0 ? 0 : 10_000_000)).build());
+                var chunk = c.expect(3000).getAssetChunk();
+                assertEquals(got.size(), chunk.getOffset());
+                assertEquals(packBytes.length, chunk.getTotal());
+                assertTrue(chunk.getData().size() > 0 && chunk.getData().size() <= 256 * 1024);
+                if (got.size() == 0) {
+                    assertEquals(128 * 1024, chunk.getData().size());
+                }
+                got.write(chunk.getData().toByteArray());
+            }
+            assertTrue(java.util.Arrays.equals(packBytes, got.toByteArray()));
+            // past the end: an empty chunk; unknown or escaping packs: refused
+            c.send(Envelope.newBuilder().setRequestId(90).setAssetChunkRequest(com.battleball.proto.AssetChunkRequest.newBuilder().setPackId("p1").setOffset(packBytes.length + 5)).build());
+            assertEquals(0, c.expect(3000).getAssetChunk().getData().size());
+        }
+        for (String bad : new String[] {"evil", "gone", "../secret.txt", ""}) {        // a connection is closed after 3 invalid messages: one each
+            try (TestClient c = connected()) {
+                c.send(Envelope.newBuilder().setRequestId(91).setAssetChunkRequest(com.battleball.proto.AssetChunkRequest.newBuilder().setPackId(bad)).build());
+                assertEquals(ErrorCode.MALFORMED, c.expect(3000).getError().getCode(), bad);
+            }
         }
     }
 
@@ -344,6 +408,58 @@ class ProtocolIntegrationTest {
             c.send(Envelope.newBuilder().setRequestId(3).setChangePasswordRequest(ChangePasswordRequest.newBuilder().setOldPassword("password123").setNewPassword("another-pass-1")).build());
             assertEquals(ChangePasswordError.WRONG_OLD_PASSWORD, c.expectCase(Envelope.PayloadCase.CHANGE_PASSWORD_RESULT, 5000).getChangePasswordResult().getError(),
                     "the old password no longer works");
+        }
+    }
+
+    @Test
+    void uronShopListsEverySkinOnSaleAndTheyCanBeBought() throws Exception {
+        String user = uniqueUser();
+        try (TestClient c = connected()) {
+            c.send(Envelope.newBuilder().setRequestId(2).setShopRequest(com.battleball.proto.ShopRequest.newBuilder().setNpcId("uron")).build());
+            assertEquals(Envelope.PayloadCase.ERROR, c.expect(3000).getPayloadCase(), "a shop needs a login");
+        }
+        createAccount(user, "password123");
+        long account = scalar("SELECT account_id FROM account WHERE username = ?", user);
+        update("UPDATE account_wallet SET gems = 100000 WHERE account_id = ?", account);
+        long onSale = scalar("SELECT COUNT(*) FROM skin_template s JOIN skin_kind k USING (kind_key) WHERE s.enabled = 1 AND k.enabled = 1 AND k.sellable = 1 AND s.gem_price IS NOT NULL");
+        try (TestClient c = connected()) {
+            c.send(loginPw(3, user, "password123"));
+            assertTrue(c.expect(5000).getLoginResult().getOk());
+            var snap = c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            c.send(Envelope.newBuilder().setRequestId(4).setShopRequest(com.battleball.proto.ShopRequest.newBuilder().setNpcId("uron")).build());
+            var shop = c.expectCase(Envelope.PayloadCase.SHOP_CONTENT, 5000).getShopContent();
+            assertEquals("Urôn", shop.getNpcName());
+            int items = 0;
+            com.battleball.proto.ShopItem cheapestAnyRace = null;
+            for (var tab : shop.getTabsList()) {
+                assertTrue(tab.getItemsCount() > 0, "empty tabs are not sent");
+                int last = 0;
+                for (var item : tab.getItemsList()) {
+                    items++;
+                    assertTrue(item.getGemPrice() >= last, "sorted by price");
+                    last = item.getGemPrice();
+                    assertTrue(item.getSkin().getCostumeId() > 0 && !item.getSkin().getName().isEmpty());
+                    if (tab.getName().equals("Mọi tộc") && cheapestAnyRace == null && item.getSkin().getFusionRace().isEmpty()) {
+                        cheapestAnyRace = item;
+                    }
+                }
+            }
+            assertEquals(onSale, items, "Urôn sells every skin that can be sold, each in exactly one tab");
+            assertTrue(cheapestAnyRace != null);
+            // buy one with the character of the account
+            c.send(Envelope.newBuilder().setRequestId(5).setBuySkinRequest(com.battleball.proto.BuySkinRequest.newBuilder()
+                    .setCharacterId(snap.getCharacters(0).getCharacterId()).setCostumeId(cheapestAnyRace.getSkin().getCostumeId())).build());
+            assertTrue(c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getOk());
+            var after = c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            assertEquals(100000 - cheapestAnyRace.getGemPrice(), after.getGems());
+            boolean owned = false;
+            for (var sk : after.getSkinsList()) owned |= sk.getCostumeId() == cheapestAnyRace.getSkin().getCostumeId();
+            assertTrue(owned, "the skin is in the bag now");
+            // an NPC that sells nothing
+            c.send(Envelope.newBuilder().setRequestId(6).setShopRequest(com.battleball.proto.ShopRequest.newBuilder().setNpcId("elder")).build());
+            var none = c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult();
+            assertFalse(none.getOk());
+            assertEquals(com.battleball.proto.ActionError.NOT_FOUND, none.getError());
         }
     }
 

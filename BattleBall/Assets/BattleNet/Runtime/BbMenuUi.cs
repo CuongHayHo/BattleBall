@@ -80,6 +80,7 @@ namespace BattleBall.Net
         public BbMenuAuras auras;
         public BbTraining training;              // the training dummies of the village (docs 15.12)
         public BbMenuSkills skills;              // the Kỹ năng tab: the skills of the three characters, raised with gold
+        public BbShopPanel shop;                 // the shop of an NPC (Urôn): stands on the left while this panel moves to the right (docs 15.15)
 
         [Header("Fusion partner chooser")]
         public GameObject chooserRoot;
@@ -118,7 +119,9 @@ namespace BattleBall.Net
         Vector2 _pressAt;
         bool _pressing, _demo;
         bool _panelOpen = true;
-        float _panelX;                          // left edge of the panel: 0 open, -PanelWidth folded
+        float _panelX;                          // how far the panel has slid towards its own side: 0 open, -PanelWidth folded
+        bool _dockRight, _savedOpen, _shopBusy; // _dockRight: a shop is open, so the panel stands on the right (as the second panel of Nro); _savedOpen: how it was before
+        public bool IsDemo { get { return _demo; } }
 
         /// <summary>The pair chosen with the earring (character ids), or 0: to be sent as the team of the next match.</summary>
         public ulong FusionMainCharacterId { get { var c = _fusionMain >= 0 ? CharacterOf(Races[_fusionMain]) : null; return c != null ? c.CharacterId : 0; } }
@@ -138,6 +141,8 @@ namespace BattleBall.Net
             if (closeButton != null) closeButton.onClick.AddListener(() => SetPanelOpen(false, false));
             village.NpcTapped = OnNpc;
             if (auras != null) auras.Tapped = OnAuraTapped;
+            if (shop != null) { shop.menu = this; shop.Closed = OnShopClosed; }
+            WirePopupSide();
             _panelOpen = PlayerPrefs.GetInt(KeyPanel, 1) != 0;
             SetPanelOpen(_panelOpen, true);
             earringSlot.onClick.AddListener(OnEarring);
@@ -189,6 +194,7 @@ namespace BattleBall.Net
             if (_fusionMain >= 0 && (CharacterOf(Races[_fusionMain]) == null || CharacterOf(Races[_fusionSub]) == null)) Unfuse(false);
             ShowPage(_page, false);
             if (functions != null) functions.Refresh(snapshot);
+            if (shop != null && shop.IsOpen) shop.OnSnapshot(snapshot);
         }
 
         /// <summary>For the screenshot tool: build the page without a session.</summary>
@@ -611,6 +617,7 @@ namespace BattleBall.Net
 
         void OnNpc(NpcSpec npc)
         {
+            if (npc.Action == NpcAction.Shop && shop != null) { OpenShop(npc); return; }
             var specs = new List<BbPopup.ButtonSpec>();
             if (npc.Action == NpcAction.DungeonGate) specs.Add(new BbPopup.ButtonSpec("Chọn phó bản", false, false));
             popup.Show(null, npc.Name, "", npc.Talk, null, null, specs, null);
@@ -619,7 +626,7 @@ namespace BattleBall.Net
         /// <summary>True while the panel, a popup (an NPC talking, an item) or the function list is open: the combat buttons stay hidden then (owner request 2026-10-09).</summary>
         public bool BlocksCombatUi
         {
-            get { return _panelOpen || popup.IsOpen || chooserRoot.activeSelf || (functions != null && functions.IsOpen); }
+            get { return _panelOpen || popup.IsOpen || chooserRoot.activeSelf || (functions != null && functions.IsOpen) || (shop != null && shop.IsOpen); }
         }
 
         /// <summary>Folds the panel away to the left (the village fills the screen, the X of the panel) or brings it back (the triangle); the choice is remembered.</summary>
@@ -627,16 +634,96 @@ namespace BattleBall.Net
         {
             _panelOpen = open;
             panelToggle.gameObject.SetActive(!open);
-            if (!_demo) PlayerPrefs.SetInt(KeyPanel, open ? 1 : 0);
+            if (!_demo && !_dockRight) PlayerPrefs.SetInt(KeyPanel, open ? 1 : 0);        // beside a shop the panel is open on purpose: keep what the player chose
             if (immediate) { _panelX = open ? 0f : -PanelWidth; ApplyPanelX(); }
         }
 
         void ApplyPanelX()
         {
-            panelRect.anchoredPosition = new Vector2(_panelX, 0f);
-            float edge = _panelX + PanelWidth;                                    // right edge of the panel
+            panelRect.anchoredPosition = new Vector2(_dockRight ? -_panelX : _panelX, 0f);
             panelToggle.gameObject.SetActive(!_panelOpen);                        // Nro shows its menu triangle only while the panel is closed
-            village.SetInset(Mathf.Max(0f, edge));
+            ApplyInsets();
+        }
+
+        /// <summary>Tells the village how much of each side the panels cover (the menu on one side, the shop on the left), so that it centres on what is left.</summary>
+        public void ApplyInsets()
+        {
+            float menuW = Mathf.Clamp(PanelWidth + _panelX, 0f, PanelWidth);
+            float shopW = shop != null ? shop.VisibleWidth : 0f;
+            village.SetInset(_dockRight ? shopW : Mathf.Max(menuW, shopW), _dockRight ? menuW : 0f);
+        }
+
+        // ---------------------------------------------------------------------------------------------------------------- the NPC shop
+
+        /// <summary>The panel stands on the right (beside the shop) or back on the left; it slides in from its own side. The dark frame and the orange triangle go to the side of the village.</summary>
+        void SetDock(bool right)
+        {
+            if (_dockRight == right) return;
+            _dockRight = right;
+            float side = right ? 1f : 0f;
+            panelRect.anchorMin = new Vector2(side, 0f);
+            panelRect.anchorMax = new Vector2(side, 1f);
+            panelRect.pivot = new Vector2(side, 0.5f);
+            var edge = panelRect.Find("Edge") as RectTransform;
+            if (edge != null)
+            {
+                edge.anchorMin = new Vector2(1f - side, 0f);
+                edge.anchorMax = new Vector2(1f - side, 1f);
+                edge.pivot = new Vector2(1f - side, 0.5f);
+            }
+            panelToggleRect.anchorMin = panelToggleRect.anchorMax = new Vector2(side, 0.75f);
+            panelToggleRect.pivot = new Vector2(side, 0.5f);
+            panelToggleRect.localScale = new Vector3(right ? -1f : 1f, 1f, 1f);
+            _panelX = -PanelWidth;
+            ApplyPanelX();
+        }
+
+        /// <summary>Taps on an NPC that sells something: the server sends its shop (ShopRequest), then the shop opens on the left and this panel moves to the right.</summary>
+        async void OpenShop(NpcSpec npc)
+        {
+            if (_shopBusy) return;
+            if (_demo || !BbSession.IsActive) { Toast("Cửa hàng cần kết nối máy chủ"); return; }
+            _shopBusy = true;
+            ShopContent content = null;
+            try { content = await BbSession.Client.ShopAsync(npc.Id); }
+            catch (Exception e) { Toast("Không mở được cửa hàng: " + e.Message); }
+            _shopBusy = false;
+            if (content != null) ShowShop(content, false);
+        }
+
+        /// <summary>The popups of this panel stand under it, on whichever side it is (a shop moves it to the right).</summary>
+        void WirePopupSide()
+        {
+            popup.areaLeftProvider = () => _dockRight ? Mathf.Max(0f, ((RectTransform)popup.root.transform).rect.width - PanelWidth) : 0f;
+        }
+
+        void ShowShop(ShopContent content, bool immediate)
+        {
+            WirePopupSide();
+            popup.Hide();
+            if (!_dockRight) _savedOpen = _panelOpen;
+            SetDock(true);
+            SetPanelOpen(true, immediate);                                        // Nro opens the player's panel next to a shop
+            shop.Open(content, _snapshot, immediate);
+        }
+
+        void OnShopClosed()
+        {
+            SetDock(false);
+            SetPanelOpen(_demo ? _savedOpen : PlayerPrefs.GetInt(KeyPanel, 1) != 0, false);
+        }
+
+        /// <summary>For the screenshot tool: open the shop with this (made-up) content.</summary>
+        public void DemoShop(ShopContent content)
+        {
+            ShowShop(content, true);
+        }
+
+        /// <summary>Called by the shop after a purchase that was made without a server (the demo): show the new skin in the bag.</summary>
+        public void OnShopPurchase(PlayerDataSnapshot snapshot)
+        {
+            _snapshot = snapshot;
+            ShowPage(_page, false);
         }
 
         // ---------------------------------------------------------------------------------------------------------------- auras

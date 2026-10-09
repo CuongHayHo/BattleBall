@@ -210,6 +210,40 @@ namespace BattleBall.EditorTools
                 Canvas.ForceUpdateCanvases();
                 BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_training_" + (string)spec[3] + ".png");
             }
+            // the weather: sun, night, rain, heavy rain at night
+            if (ui.village.Weather != null)
+            {
+                foreach (var w in new[] { new object[] { 0f, 0f, "weather_sun" }, new object[] { 1f, 0f, "weather_night" }, new object[] { 0f, 0.9f, "weather_rain" }, new object[] { 1f, 0.9f, "weather_storm" } })
+                {
+                    ui.village.Weather.Force((float)w[0], (float)w[1]);
+                    Canvas.ForceUpdateCanvases();
+                    BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_" + (string)w[2] + ".png");
+                }
+                ui.village.Weather.Force(0f, 0f);
+            }
+            // Đẻ trứng (the pet), Quả cầu kênh khí (the rising ball), Tự phát nổ (the white blast), Biến hình (the great ape)
+            ui.village.DemoPlaceMain("moc_nhan", -330f);
+            ui.training.DemoPet(8);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_training_pet.png");
+            ui.training.Leave();
+            ui.village.DemoPlaceMain("moc_nhan", -330f);
+            ui.training.DemoBomb(1.6f);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_training_bomb.png");
+            ui.training.Leave();
+            ui.training.DemoFlash(0.45f);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_training_blast_a.png");
+            ui.training.DemoFlash(0.8f);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_training_blast_b.png");
+            ui.training.Leave();
+            ui.village.DemoPlaceMain("moc_nhan", -330f);
+            { Vector2 fa; int da; ulong ma; ui.village.PartyMember(0, out ma, out fa, out da); ui.training.DemoApe(ma, 3); }
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_training_ape.png");
+            ui.training.Leave();
             // the skills with a long cooldown, one shot each (what the player sees of them)
             foreach (uint sk in new uint[] { 6, 7, 8, 10, 11, 12, 13, 14, 18, 19, 20, 21, 22, 23 })
             {
@@ -313,6 +347,48 @@ namespace BattleBall.EditorTools
             ui.skills.scroll.verticalNormalizedPosition = 0f;
             Canvas.ForceUpdateCanvases();
             BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_skills_learned.png");
+
+            // Urôn's shop (docs 15.15): the shop on the left, the menu moved to the right, the popup of an item, then the popup of a skin of the bag on the right
+            ui.ShowDemo(all, 0);
+            ui.village.TeleportMain(2550f);
+            ui.DemoShop(FakeShop());
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_shop.png");
+            ui.shop.DemoTap(1566);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_shop_popup.png");
+            ui.popup.Hide();
+            ui.DemoOpenSkin(431);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_shop_bag_popup.png");
+            ui.popup.Hide();
+            ui.shop.Close();
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_shop_closed.png");
+        }
+
+        /// <summary>Made-up content of Urôn's shop (the server sends the real one: every skin that can be sold, tabs by race).</summary>
+        static ShopContent FakeShop()
+        {
+            var c = new ShopContent { NpcId = "uron", NpcName = "Urôn" };
+            var any = new ShopTab { Name = "Mọi tộc" };
+            foreach (var spec in new object[][] { new object[] { 885u, 100u, 3u }, new object[] { 1566u, 100u, 3u }, new object[] { 430u, 300u, 3u }, new object[] { 431u, 450u, 3u },
+                                                  new object[] { 432u, 600u, 3u }, new object[] { 433u, 800u, 3u }, new object[] { 434u, 1000u, 3u } })
+            {
+                var skin = new SkinInfo { CostumeId = (uint)spec[0], Name = "Cải trang", GenderId = (uint)spec[2], Kind = "SHOP" };
+                skin.Stats.Add(new StatLine { StatKey = "ATK_PCT", Value = 5, Text = "Sức đánh +5%" });
+                skin.Stats.Add(new StatLine { StatKey = "HP_PCT", Value = 5, Text = "HP +5%" });
+                any.Items.Add(new ShopItem { Skin = skin, GemPrice = (uint)spec[1] });
+            }
+            c.Tabs.Add(any);
+            var earth = new ShopTab { Name = "Trái Đất" };
+            var fusion = new SkinInfo { CostumeId = 1816, Name = "CT Hợp thể Trái Đất", GenderId = 3, Kind = "FUSION_FORM", FusionRace = "td", FusionMainOnly = true };
+            fusion.Stats.Add(new StatLine { StatKey = "ATK_PCT", Value = 100, Text = "Sức đánh +100%" });
+            fusion.Stats.Add(new StatLine { StatKey = "HP_PCT", Value = 100, Text = "HP +100%" });
+            earth.Items.Add(new ShopItem { Skin = fusion, GemPrice = 1200 });
+            c.Tabs.Add(earth);
+            c.Tabs.Add(new ShopTab { Name = "Xayda", Items = { new ShopItem { Skin = new SkinInfo { CostumeId = 435, Name = "Cải trang", GenderId = 2, Kind = "SHOP" }, GemPrice = 500 } } });
+            return c;
         }
 
         [System.Serializable] class AuraLayerFile { public int layer, frames; }

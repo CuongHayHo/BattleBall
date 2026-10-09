@@ -73,6 +73,16 @@ namespace BattleBall.Net
             return UsePicked(skillId, level, flying).poses;
         }
 
+        /// <summary>The poses of one paint (the great ape of Biến hình plays other paints for its skills: 105 for the punch, 106 for Antomic).</summary>
+        public static Picked UsePaint(int paint, bool flying)
+        {
+            Load();
+            PaintRow row;
+            if (!_paints.TryGetValue(paint, out row)) return new Picked { poses = new int[0], paint = -1 };
+            bool fly = flying && row.fly != null && row.fly.Length > 0;
+            return new Picked { poses = fly ? row.fly : row.stand, paint = paint, fly = fly };
+        }
+
         public static Picked UsePicked(uint skillId, uint level, bool flying)
         {
             Load();
@@ -113,7 +123,13 @@ namespace BattleBall.Net
             fxFrom = -1;
             paint = -1;
             fly = false;
-            int hold = Mathf.Max(1, Mathf.RoundToInt(seconds * FramesPerSecond));
+            // the paint of the skill (the throw) is timed so that its dart arrives when the charge ends, which is when the server strikes: the beam of Makankosappo
+            // leaves then, the ball of Quả cầu kênh khí needs about half a second to fly
+            var thrown = UsePicked(skillId, level, flying);
+            var arrow = BbSkillFxData.ArrowOf(thrown.paint, thrown.fly);
+            int lead = skillId == 10 || skillId == 11 ? Mathf.Max(0, arrow.frame) : 0;
+            float flight = skillId == 10 ? 0.45f : 0f;
+            int hold = Mathf.Max(1, Mathf.RoundToInt((seconds - flight) * FramesPerSecond) - lead);
             var list = new List<int>();
             switch (skillId)
             {
@@ -149,7 +165,9 @@ namespace BattleBall.Net
         public static int[] Monkey(uint level)
         {
             var list = new List<int>(Use(13, level, false));
-            for (int i = 0; i < Mathf.RoundToInt(1.2f * FramesPerSecond); i++) list.Add((int)NroPose.Charge_Ki);
+            // the server holds the character for 1.5 s (EffectSkillService.startUseSkillMonkey: timeUseSkillMonkey = 1500) before the body changes
+            int hold = Mathf.Max(0, Mathf.RoundToInt(1.5f * FramesPerSecond) - list.Count);
+            for (int i = 0; i < hold; i++) list.Add((int)NroPose.Charge_Ki);
             return list.ToArray();
         }
 

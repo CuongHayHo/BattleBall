@@ -230,6 +230,9 @@ def main():
     for npc_id, name, mob, costume, wx in (("moc_nhan", "Mộc nhân", 0, 0, 880.0), ("saibamen", "Saibamen", -1, 647, 1060.0)):
         npcs.append({"id": npc_id, "name": name, "costume": costume, "mob": mob, "x": wx, "talk": "", "action": "TrainingDummy"})
 
+    # Urôn sells every skin (owner request 2026-10-09, docs/architecture/BattleBallServer.md 15.15); costume 9020 is his Nro NPC look (parts 61, 62, 63)
+    npcs.append({"id": "uron", "name": "Urôn", "costume": 9020, "x": 1250.0, "talk": "", "action": "Shop"})
+
     spawn = 400.0
     # scenery images for every scale
     for n in SCALES:

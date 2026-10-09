@@ -115,6 +115,28 @@ namespace BattleBall.Net
                 run.speed[14] = 9f;
             }
             _runs.Add(run);
+            Sounds(skillId, seconds);
+        }
+
+        /// <summary>The sounds of an ultimate (Effect_End: the gong, then the beam, each ball, the jar), started now with their delays.</summary>
+        static void Sounds(uint skillId, float gong)
+        {
+            if (skillId == 24)
+            {
+                BbSfx.Play(BbSfx.Kamex10Gong, 0.8f);
+                BbSfx.Play(BbSfx.Kamex10Beam, 0.9f, gong);
+            }
+            else if (skillId == 25)
+            {
+                BbSfx.Play(BbSfx.DestroyGong, 0.8f);
+                for (int i = 0; i < 15; i++) BbSfx.Play(i == 14 ? BbSfx.DestroyLast : BbSfx.DestroyBall, 0.7f, gong + 0.01f + i * 0.08f);
+            }
+            else
+            {
+                BbSfx.Play(BbSfx.MafubaGong, 0.8f);
+                BbSfx.Play(BbSfx.MafubaOpen, 0.8f, gong);
+                BbSfx.Play(BbSfx.MafubaVortex, 0.8f, gong + 0.5f);
+            }
         }
 
         void Update()

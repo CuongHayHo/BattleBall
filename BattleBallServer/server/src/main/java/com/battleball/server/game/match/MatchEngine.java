@@ -601,6 +601,8 @@ public final class MatchEngine {
                 pet.x = f.x + 30;
                 pet.y = f.y;
                 pet.hpMax = pet.hp = Math.max(1, f.hpMax / 4);
+                int[] hatched = {8, 11, 32, 25, 43, 49, 50};                // the mob of the pet by level of the skill (Nro: SkillUtil.getTempMobMe)
+                pet.mobTemplateId = hatched[Math.max(0, Math.min(hatched.length, f.skillLevelBySlot.getOrDefault(slot, 1)) - 1)];
                 pet.expiresAt = now + (long) Json.num(p, "lifetimeMs", 120000);
                 pet.damagePct = Json.num(p, "petDamagePctOfAttack", 30);
                 pet.atk = f.atk;
@@ -1596,6 +1598,9 @@ public final class MatchEngine {
                     .setPartLeg(m.boss.leg()).setRace(m.boss.race() == null ? "" : m.boss.race());
         } else {
             b.setKind(EntityKind.PET);
+            if (e instanceof PetEntity pe) {
+                b.setMobTemplateId(pe.mobTemplateId);
+            }
         }
         return b.build();
     }

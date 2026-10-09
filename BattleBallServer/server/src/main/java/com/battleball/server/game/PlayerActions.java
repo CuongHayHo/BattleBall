@@ -41,7 +41,7 @@ public final class PlayerActions {
             case PLAYER_DATA_REQUEST, INVENTORY_REQUEST, BUY_SKIN_REQUEST, EQUIP_SKIN_REQUEST, UPGRADE_SKILL_REQUEST, BUY_MATERIAL_REQUEST,
                  ASSEMBLE_ITEM_REQUEST, EQUIP_ITEM_REQUEST, UNEQUIP_ITEM_REQUEST, SELL_ITEMS_REQUEST, UPGRADE_ITEM_REQUEST, BUY_SUPPORT_REQUEST,
                  EQUIP_SUPPORT_REQUEST, UNEQUIP_SUPPORT_REQUEST, CRAFT_REQUEST, BUY_POTARA_SHARDS_REQUEST, ASSEMBLE_POTARA_REQUEST,
-                 MAIL_LIST_REQUEST, MAIL_ACTION_REQUEST, NOTICE_LIST_REQUEST, DISCARD_SKIN_REQUEST, EQUIP_AURA_REQUEST -> true;
+                 MAIL_LIST_REQUEST, MAIL_ACTION_REQUEST, NOTICE_LIST_REQUEST, DISCARD_SKIN_REQUEST, EQUIP_AURA_REQUEST, SHOP_REQUEST -> true;
             default -> false;
         };
     }
@@ -68,6 +68,12 @@ public final class PlayerActions {
                 }
                 case NOTICE_LIST_REQUEST -> {
                     out.add(Envelope.newBuilder().setRequestId(rid).setNoticeList(mail.notices()).build());
+                    return out;
+                }
+                case SHOP_REQUEST -> {
+                    var shop = ShopService.content(data.get(), req.getShopRequest().getNpcId());
+                    out.add(shop != null ? Envelope.newBuilder().setRequestId(rid).setShopContent(shop).build()
+                            : Envelope.newBuilder().setRequestId(rid).setActionResult(ActionResult.newBuilder().setOk(false).setError(ActionError.NOT_FOUND).setMessage("this NPC sells nothing")).build());
                     return out;
                 }
                 case MAIL_ACTION_REQUEST -> {

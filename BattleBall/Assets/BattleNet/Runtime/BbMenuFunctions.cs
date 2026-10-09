@@ -47,6 +47,7 @@ namespace BattleBall.Net
         public Image[] scaleImages;
         public Text[] scaleLabels;
         public Text configStatus;
+        public Button soundButton, weatherButton;                 // sound and weather on or off
 
         [Header("Password form")]
         public GameObject passwordRoot;
@@ -81,6 +82,8 @@ namespace BattleBall.Net
             noticeButton.onClick.AddListener(() => OpenView(View.Notices));
             accountButton.onClick.AddListener(() => OpenView(View.Account));
             configButton.onClick.AddListener(() => OpenView(View.Config));
+            if (soundButton != null) soundButton.onClick.AddListener(() => { BbSfx.Enabled = !BbSfx.Enabled; RefreshToggles(); });
+            if (weatherButton != null) weatherButton.onClick.AddListener(() => { BbWeather.Enabled = !BbWeather.Enabled; RefreshToggles(); });
             for (int i = 0; i < scaleButtons.Length; i++)
             {
                 int scale = i + 1;
@@ -361,8 +364,15 @@ namespace BattleBall.Net
 
         int CurrentScale { get { return _demo ? _demoScale : BbAssetCache.Scale; } }
 
+        void RefreshToggles()
+        {
+            if (soundButton != null) soundButton.GetComponentInChildren<Text>().text = "Âm thanh: " + (BbSfx.Enabled ? "Bật" : "Tắt");
+            if (weatherButton != null) weatherButton.GetComponentInChildren<Text>().text = "Thời tiết: " + (BbWeather.Enabled ? "Bật" : "Tắt");
+        }
+
         void RefreshScaleButtons()
         {
+            RefreshToggles();
             for (int i = 0; i < scaleButtons.Length; i++)
             {
                 bool on = i + 1 == CurrentScale;
@@ -387,12 +397,12 @@ namespace BattleBall.Net
             BbAssetCache.SetUserScale(scale);
             try
             {
-                string url = BbSession.IsActive ? BbSession.Client.Connection.ServerInfo.AssetBaseUrl : "";
-                if (!string.IsNullOrEmpty(url))
+                string version = BbSession.IsActive ? BbSession.Client.Connection.ServerInfo.AssetVersion : "";
+                if (!string.IsNullOrEmpty(version))
                 {
                     configStatus.text = "Đang kiểm tra tài nguyên x" + scale + "...";
                     var updater = new BbAssetUpdater(BbAssetCache.DefaultRoot);
-                    await updater.UpdateAsync(url, BbSession.Client.Connection.ServerInfo.AssetVersion, scale, (done, total) =>
+                    await updater.UpdateAsync(BbSession.Client.Connection, version, scale, (done, total) =>
                     {
                         if (total > 0) configStatus.text = "Đang tải x" + scale + ": " + (done / 1048576f).ToString("F1") + " / " + (total / 1048576f).ToString("F1") + " MB";
                     }, CancellationToken.None);

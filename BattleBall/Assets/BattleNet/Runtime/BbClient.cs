@@ -91,6 +91,22 @@ namespace BattleBall.Net
             return a.ActionResult;
         }
 
+        /// <summary>What an NPC sells (the shop of the NPC with this id on the map); throws when the NPC sells nothing.</summary>
+        public async Task<ShopContent> ShopAsync(string npcId)
+        {
+            var answer = await Connection.RequestAsync(new Envelope { ShopRequest = new ShopRequest { NpcId = npcId } });
+            if (answer.PayloadCase == Envelope.PayloadOneofCase.ShopContent) return answer.ShopContent;
+            if (answer.PayloadCase == Envelope.PayloadOneofCase.ActionResult) throw new InvalidOperationException(answer.ActionResult.Message);
+            throw new InvalidOperationException("unexpected answer: " + BbConnection.Describe(answer));
+        }
+
+        /// <summary>Buys a skin with gems for the account (the character only decides which race may wear it); the server pushes a fresh snapshot on success.</summary>
+        public async Task<ActionResult> BuySkinAsync(ulong characterId, uint costumeId)
+        {
+            var a = await Ask(new Envelope { BuySkinRequest = new BuySkinRequest { CharacterId = characterId, CostumeId = costumeId } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
         public async Task<MailList> MailListAsync()
         {
             var a = await Ask(new Envelope { MailListRequest = new MailListRequest() }, Envelope.PayloadOneofCase.MailList);

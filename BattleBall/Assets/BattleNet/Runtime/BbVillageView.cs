@@ -42,6 +42,8 @@ namespace BattleBall.Net
             public BbCharacterView view;
             public Text label;
             public int costume;
+            public float lift;                   // canvas px the picture is raised above the feet (Quả cầu kênh khí: the character rises); the physics ignore it
+            public int look;                     // a look worn for a while (Biến hình: the great ape); 0 = the own costume
             public float x, y, vy;               // y: the feet, canvas pixels above the bottom of the world
             public int facing = 1;
             public bool grounded = true;
@@ -76,7 +78,7 @@ namespace BattleBall.Net
         readonly List<Actor> _actors = new List<Actor>();
         readonly List<GameObject> _npcObjects = new List<GameObject>();
         readonly Dictionary<string, Actor> _dummies = new Dictionary<string, Actor>();
-        float _inset, _camX = -1f, _camY, _groupX = -1f, _clock;
+        float _inset, _insetRight, _camX = -1f, _camY, _groupX = -1f, _clock;
         float _width = 1280f, _height = 720f;
 
         public BbMapChunk Map { get { return _map; } }
@@ -95,7 +97,15 @@ namespace BattleBall.Net
             _mapId = chunkId;
             _map = BbMaps.Provider.Load(chunkId);
             Build();
+            if (Weather == null && viewport != null)
+            {
+                Weather = GetComponent<BbWeather>();
+                if (Weather == null) Weather = gameObject.AddComponent<BbWeather>();
+                Weather.Attach(viewport);                    // sun, rain, day and night over the village
+            }
         }
+
+        public BbWeather Weather { get; private set; }
 
         /// <summary>Loads the map again (the pictures of another scale) and draws it; the characters are put back by the next SetCast.</summary>
         public void ReloadMap()
@@ -309,6 +319,7 @@ namespace BattleBall.Net
 
         // ---- the main character walks to a target by itself (training: a short-range skill needs the target close; the stick takes the control back)
         float _approachX, _approachStop;
+        float _lastFlySound;
         public bool Approaching { get; private set; }
         /// <summary>A training session is running: the AI characters walk to the dummy nearest to each of them in view.</summary>
         public bool AiHunt { get; set; }
@@ -327,6 +338,28 @@ namespace BattleBall.Net
             Approaching = false;
         }
 
+        /// <summary>The whole view shakes by this many canvas px (the explosion of Tự phát nổ).</summary>
+        public Vector2 ShakeOffset { get; set; }
+
+        /// <summary>A character of the party is raised by this many Nro px above the ground (only its picture).</summary>
+        public void SetLift(ulong characterId, float nroPx)
+        {
+            foreach (var a in _actors)
+                if (a.id == characterId && !Mathf.Approximately(a.lift, nroPx * UiScale)) { a.lift = nroPx * UiScale; Place(a); }
+        }
+
+        /// <summary>A character of the party wears this costume for a while (0 = its own again): the great ape of Biến hình.</summary>
+        public void SetLook(ulong characterId, int costumeId)
+        {
+            foreach (var a in _actors)
+            {
+                if (a.id != characterId || a.look == costumeId) continue;
+                a.look = costumeId;
+                a.view.Show(costumeId != 0 ? costumeId : a.costume);
+                PlaceLabel(a);
+            }
+        }
+
         /// <summary>The main character appears at this x (Dịch chuyển tức thời), standing on the ground there or keeping its height when it flies.</summary>
         public void TeleportMain(float x)
         {
@@ -342,7 +375,7 @@ namespace BattleBall.Net
         public List<string> VisibleDummyKeys()
         {
             var list = new List<KeyValuePair<float, string>>();
-            float left = Mathf.Max(0f, _camX) + _inset - 10f, right = Mathf.Max(0f, _camX) + _width + 10f;
+            float left = Mathf.Max(0f, _camX) + _inset - 10f, right = Mathf.Max(0f, _camX) + _width - _insetRight + 10f;
             foreach (var kv in _dummies) if (kv.Value.x >= left && kv.Value.x <= right) list.Add(new KeyValuePair<float, string>(kv.Value.x, kv.Key));
             list.Sort((a, b) => a.Key.CompareTo(b.Key));
             var keys = new List<string>();
@@ -358,6 +391,15 @@ namespace BattleBall.Net
             feet = Vector2.zero;
             height = 0f;
             return false;
+        }
+
+        /// <summary>The dummy is stunned for this long: its hurt frames (or the injured pose of its costume) go on.</summary>
+        public void StunDummy(string key, float seconds)
+        {
+            Actor a;
+            if (key == null || !_dummies.TryGetValue(key, out a)) return;
+            if (a.mob != null) a.mob.Stun(seconds);
+            else a.view.PlayAction(new[] { (int)NroRig.NroPose.Hit_Injured }, seconds);
         }
 
         /// <summary>The dummy was hit: the hurt frames of the mob, or the injured pose of the costume.</summary>
@@ -508,7 +550,7 @@ namespace BattleBall.Net
         /// <summary>Draws every character and NPC again from the sprites of the scale now in use (after the player changed it in the settings).</summary>
         public void RefreshArt()
         {
-            foreach (var a in _actors) { a.view.Show(a.costume); PlaceLabel(a); }
+            foreach (var a in _actors) { a.view.Show(a.look != 0 ? a.look : a.costume); PlaceLabel(a); }
             foreach (var go in _npcObjects)
             {
                 var view = go.GetComponentInChildren<BbCharacterView>(true);
@@ -524,9 +566,10 @@ namespace BattleBall.Net
         // ---------------------------------------------------------------------------------------------------------------- frame
 
         /// <summary>The width of the menu panel that covers the left of the screen: the view centres on the free part.</summary>
-        public void SetInset(float inset)
+        public void SetInset(float inset, float insetRight = 0f)
         {
             _inset = inset;
+            _insetRight = insetRight;              // a second panel on the right (the menu moves there while a shop is open)
         }
 
         /// <summary>For the screenshot tool: the main character this far from a training dummy (focused), the AI on both sides of it.</summary>
@@ -591,7 +634,8 @@ namespace BattleBall.Net
             }
 
             // up jumps; held up in the air it turns into flying: the stick then sets the height (up rises, down sinks, centre hovers) and the pace is faster
-            if (input.y > 0.6f && main.grounded) { main.vy = Jump; main.grounded = false; main.holdUp = 0f; }
+            bool wasGrounded = main.grounded;
+            if (input.y > 0.6f && main.grounded) { main.vy = Jump; main.grounded = false; main.holdUp = 0f; BbSfx.Play(BbSfx.Move, 0.2f); }
             if (!main.grounded && input.y > 0.6f) main.holdUp += dt; else if (!main.flying) main.holdUp = 0f;
             if (!main.grounded && !main.flying && main.holdUp >= FlyAfter) main.flying = true;
             float vx = input.x * Speed * (main.flying ? FlyBoost : 1f);
@@ -601,6 +645,9 @@ namespace BattleBall.Net
             // flying: the stick sets the height; with the stick let go the character sinks by itself and lands
             if (main.flying) Fly(main, input.sqrMagnitude < 0.0001f ? -SinkSpeed : Mathf.Abs(input.y) < 0.2f ? 0f : input.y * FlySpeed * (input.y < 0f ? DescentBoost : 1f), dt, g);
             else Walk(main, dt, g);
+            // the sounds of the main character's movement (Nro: SoundMn.charJump, charFall, charFly; there are no footsteps in Nro): the landing, the flight every 20 ticks
+            if (!wasGrounded && main.grounded) BbSfx.Play(BbSfx.Move, 0.1f);
+            if (main.flying && Time.unscaledTime - _lastFlySound > 0.67f) { _lastFlySound = Time.unscaledTime; BbSfx.Play(BbSfx.Fly, 0.2f); }
             bool mainRuns = Mathf.Abs(vx) > 5f;
             main.view.animSpeed = mainRuns ? MainRunAnimSpeed : MainAnimSpeed;
             main.view.SetState(AirState(main) ?? (mainRuns ? BbCharacterView.PoseState.Run : BbCharacterView.PoseState.Stand));
@@ -734,7 +781,7 @@ namespace BattleBall.Net
             foreach (var a in _dummies.Values) Place(a);
             if (_actors.Count > 0)
             {
-                float centre = _inset + (_width - _inset) * 0.5f;
+                float centre = _inset + (_width - _inset - _insetRight) * 0.5f;
                 float target = Mathf.Clamp(_actors[0].x - centre, 0f, Mathf.Max(0f, _map.Width - _width));
                 _camX = snap || _camX < 0f ? target : Mathf.Lerp(_camX, target, 1f - Mathf.Exp(-8f * dt));
                 float targetY = Mathf.Clamp(_actors[0].y - _height * 0.38f, 0f, Mathf.Max(0f, WorldHeight - _height));
@@ -742,12 +789,12 @@ namespace BattleBall.Net
             }
             else { _camX = 0f; _camY = 0f; }
             for (int i = 0; i < _layers.Count; i++)
-                _layers[i].anchoredPosition = new Vector2(-_camX * _layerParallax[i], -_camY * _layerParallax[i]);
+                _layers[i].anchoredPosition = new Vector2(-_camX * _layerParallax[i], -_camY * _layerParallax[i]) + ShakeOffset;
         }
 
         void Place(Actor a)
         {
-            a.root.anchoredPosition = new Vector2(a.x, a.y);
+            a.root.anchoredPosition = new Vector2(a.x, a.y + a.lift);
             a.view.transform.localScale = new Vector3(a.facing, 1f, 1f);
         }
 
