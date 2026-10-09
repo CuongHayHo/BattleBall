@@ -42,3 +42,8 @@ config.php
 Thumbs.db
 desktop.ini
 .claude/settings.local.json
+
+# ---- Analysis of the reference games (kept locally, not pushed) ----
+/docs/*/NroUnity.md
+/docs/*/Teamobi2026.md
+/docs/*/COMPARISON.md
