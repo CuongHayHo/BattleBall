@@ -32,6 +32,12 @@ public final class Entities {
         public long sleepUntil;
         public long chocolateUntil;
         public long shieldUntil;
+        /** The Trói of Xayda: who holds this entity (the rope breaks when that fighter moves, acts or is stopped). 0 = nobody. */
+        public int holdById;
+        /** Ma phong ba (Nro EffectSkillService.setIsBinh): sucked into the jar from {@code jarFrom} to {@code jarGatherEnd}, a jar until {@code jarUntil}. */
+        public long jarFrom;
+        public long jarGatherEnd;
+        public long jarUntil;
         // combat numbers
         public double atk;                     // base attack (a hit multiplies it by the skill %)
         public double armorReduction;          // 0..0.8 share of damage removed
@@ -53,7 +59,7 @@ public final class Entities {
         }
 
         public boolean canAct(long now) {
-            return alive && now >= stunUntil && now >= sleepUntil && now >= chocolateUntil;
+            return alive && now >= stunUntil && now >= sleepUntil && now >= chocolateUntil && now >= jarUntil;
         }
 
         public boolean canMove(long now) {
@@ -92,6 +98,11 @@ public final class Entities {
             if (now < buffUntil) {
                 m |= 64;
             }
+            if (now >= jarFrom && now < jarGatherEnd) {
+                m |= 1024;                       // being sucked into the jar
+            } else if (now >= jarGatherEnd && now < jarUntil) {
+                m |= 512;                        // a jar
+            }
             return m;
         }
     }
@@ -117,6 +128,34 @@ public final class Entities {
         }
     }
 
+    /**
+     * The part of an ultimate after its gong (Nro NewSkill, updateSkillSpecial): for {@code endsAt} the fighter stays where it is (the client paints the skill and
+     * takes no input) and every {@code tickMs} the skill hits everything in its rectangle, all of it from the point where the skill was started.
+     */
+    public static final class Channel {
+        public final StaticData.Skill skill;
+        public final StaticData.SkillLevel level;
+        public final long endsAt;
+        public long nextTickAt;
+        public final long tickMs;
+        public final double originX;
+        public final double originY;
+        public final double dirX;
+        public final double dirY;
+
+        public Channel(StaticData.Skill skill, StaticData.SkillLevel level, long startsAt, long endsAt, long tickMs, double originX, double originY, double dirX, double dirY) {
+            this.skill = skill;
+            this.level = level;
+            this.endsAt = endsAt;
+            this.nextTickAt = startsAt;
+            this.tickMs = tickMs;
+            this.originX = originX;
+            this.originY = originY;
+            this.dirX = dirX;
+            this.dirY = dirY;
+        }
+    }
+
     public static final class Fighter extends Entity {
         public final long characterId;
         public final String race;
@@ -129,10 +168,19 @@ public final class Entities {
         public final Map<Integer, Long> cooldownUntil = new HashMap<>();
         public final int costumeId;
         public Cast cast;
+        public Channel channel;
         public long regenUntil;
         public double regenPctPerSec;
+        /** Where the fighter was when the regeneration (Tái tạo năng lượng) started; moving away from it ends the skill (Nro PlayerService.playerMove). */
+        public double regenAtX;
+        public double regenAtY;
         public long hpBonusUntil;
         public long hpBonusAmount;
+        // Biến hình (Nro EffectSkill isMonkey): more max HP, more attack, a critical rate of 110; own fields so that Huýt sáo can run at the same time
+        public long monkeyUntil;
+        public long monkeyHpAdd;
+        public double monkeyAtkAdd;
+        public double monkeyCritBefore;
         public boolean nextHitCrit;
         public long nextHitCritUntil;
         // pet effect
@@ -143,6 +191,24 @@ public final class Entities {
         // bookkeeping for the result
         public long damageDealt;
         public int kills;
+
+        /** Display values of the armor stat (the menu shows them live) and the base for the buffs of the pet effect. */
+        public double armorStat;
+
+        @Override
+        public int effectMask(long now) {
+            int m = super.effectMask(now);
+            if (now < regenUntil) {
+                m |= 32;
+            }
+            if (cast != null || channel != null) {
+                m |= 256;                        // busy: gong, charge or the beam of an ultimate (the client takes no input)
+            }
+            if (now < monkeyUntil) {
+                m |= 2048;
+            }
+            return m;
+        }
 
         public Fighter(int id, String name, long characterId, String race, int level, boolean controlled, boolean fusion, long partnerCharacterId,
                        int costumeId, double radius, double hpRegenPctPerSec, double kiRegenPctPerSec) {

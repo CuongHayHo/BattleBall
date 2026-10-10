@@ -42,7 +42,7 @@ namespace BattleBall.Net
         static readonly string[] HudTitles = { "Trái Đất", "Xayda", "Namếc" };
         static readonly HashSet<uint> MeleeSkills = new HashSet<uint> { 0, 2, 4, 9, 17 };
         // skills that charge first: the server sends CAST_START with the duration, the poses start then (BbSkillPoses.Charge)
-        static readonly HashSet<uint> ChargeSkills = new HashSet<uint> { 10, 11, 14, 24, 25, 26 };
+        static readonly HashSet<uint> ChargeSkills = new HashSet<uint> { 10, 11, 13, 14, 24, 25, 26 };
         const uint MonkeySkill = 13, TeleportSkill = 20;
         const int MonkeyPunchPaint = 105, MonkeyAntomicPaint = 106;       // Nro Char.setSkillPaint: the great ape plays paint 105 for its punches and 106 for Antomic
 
@@ -433,6 +433,7 @@ namespace BattleBall.Net
                 if (village.DummyInfo(key, out at, out h)) req.Spots.Add(new TrainingSpot { Key = key, X = at.x / s, Y = at.y / s });
             }
             _phase = Phase.Starting;
+            _sessionPartner = partner;
             if (!_quiet) Say("Đang vào luyện tập...");
             try
             {
@@ -455,6 +456,7 @@ namespace BattleBall.Net
         void Begin(MatchStarted started, ulong mainCharacter)
         {
             _started = started;
+            _fusedSession = _sessionPartner != 0;
             _myCharacter = mainCharacter;
             _dummyKey.Clear();
             _dummyId.Clear();
@@ -548,7 +550,9 @@ namespace BattleBall.Net
             if (village != null)
             {
                 village.ShakeOffset = Vector2.zero;
-                foreach (var m in _characterOf.Values) { village.SetLook(m, 0); village.SetLift(m, 0f); }
+                foreach (var m in _characterOf.Values) { village.SetLook(m, 0); village.SetLift(m, 0f); village.SetLocked(m, false); village.StopAction(m); }
+                foreach (string key in village.DummyKeys) village.SetDummyDraw(key, true, null);
+                if (_ultimate != null) _ultimate.CancelAll();
             }
             _flashStart = float.MinValue;
             _phase = Phase.Idle;
@@ -626,6 +630,7 @@ namespace BattleBall.Net
         bool Engage(SkillSlot slot, bool manual)
         {
             if (village == null || _demo) return false;
+            if (village.IsLocked(_myCharacter)) return false;                    // busy or under an effect: the server would refuse, the poses must not start
             Vector2 foe = Vector2.zero, me;
             float h;
             int facing;
@@ -846,7 +851,7 @@ namespace BattleBall.Net
             return true;
         }
 
-        static readonly HashSet<uint> ServerProjectileSkills = new HashSet<uint> { 1, 3, 5, 11 };      // the skills whose dart is the projectile of the server
+        static readonly HashSet<uint> ServerProjectileSkills = new HashSet<uint> { 1, 3, 5 };      // the skills whose dart is the projectile of the server
         readonly Dictionary<ulong, float> _arrowAt = new Dictionary<ulong, float>();                    // when each character's last paint throws its dart
         readonly Dictionary<ulong, Vector2> _arrowHand = new Dictionary<ulong, Vector2>();              // and where its hand is (Nro px: dx, up)
 
@@ -1033,6 +1038,58 @@ namespace BattleBall.Net
             foreach (var d in f.Damages) OnDamage(d);
             foreach (var ef in f.Effects) OnEffect(ef);
             DrawProjectiles(f);
+            ApplyLocks();
+        }
+
+        /// <summary>
+        /// What the server holds, the client holds: a character that is busy (gong, charge, the beam of an ultimate), stunned, asleep, tied, chocolate or in the jar takes no
+        /// input and does not walk (Nro: Char.isLockMove and the effects on it); the AI also stand while they regenerate. The effect mask of the entity says it.
+        /// </summary>
+        void ApplyLocks()
+        {
+            if (village == null) return;
+            for (int i = 0; i < village.PartyCount; i++)
+            {
+                ulong id;
+                Vector2 feet;
+                int facing;
+                if (!village.PartyMember(i, out id, out feet, out facing)) continue;
+                uint entity;
+                EntityState st;
+                bool locked = false;
+                if (_phase == Phase.Active && _entityOf.TryGetValue(id, out entity) && _states.TryGetValue(entity, out st) && st.Alive)
+                {
+                    uint m = st.Effects;
+                    locked = (m & (1u | 2u | 4u | 16u | 256u | 512u | 1024u)) != 0 || (i != 0 && (m & 32u) != 0);
+                }
+                bool was = village.IsLocked(id);
+                village.SetLocked(id, locked);
+                if (locked && !was && i == 0) village.CancelApproach();
+            }
+        }
+
+        /// <summary>The live numbers of a character of the party (the menu shows them: HP 1.000 / 10.000, the attack and the critical rate with the buffs).</summary>
+        public struct Live
+        {
+            public ulong Hp, HpMax, Ki, KiMax, Atk, Armor;
+            public double CritRatePct;
+        }
+
+        /// <summary>The running session is a fusion: its controlled fighter carries the summed numbers of the main character and its partner (the partner is not a fighter).</summary>
+        public bool FusedSession { get { return _phase == Phase.Active && _fusedSession; } }
+        bool _fusedSession;
+        /// <summary>The character the running session is controlled by (0 outside a session).</summary>
+        public ulong SessionMainCharacter { get { return _phase == Phase.Active ? _myCharacter : 0; } }
+        ulong _sessionPartner;
+
+        public bool TryLive(ulong character, out Live live)
+        {
+            live = new Live();
+            uint entity;
+            EntityState st;
+            if (_phase != Phase.Active || !_entityOf.TryGetValue(character, out entity) || !_states.TryGetValue(entity, out st)) return false;
+            live.Hp = st.Hp; live.HpMax = st.HpMax; live.Ki = st.Ki; live.KiMax = st.KiMax; live.Atk = st.Atk; live.Armor = st.Armor; live.CritRatePct = st.CritRatePct;
+            return st.HpMax > 0;
         }
 
         void OnDamage(DamageEvent d)
@@ -1111,13 +1168,72 @@ namespace BattleBall.Net
             }
             ulong who;
             if (!_characterOf.TryGetValue(ef.SourceId, out who) || ef.SkillId == 0) return;
+            if (ef.Effect == Effect.CastEnd)
+            {
+                // a cast, a gong, a channel or a hold ended (done or broken): the poses and what they draw stop (the monkey is back to its own body)
+                if (ef.SkillId == 23)
+                {
+                    string heldKey;
+                    Vector2 heldAt;
+                    float heldH;
+                    if (_dummyKey.TryGetValue(ef.TargetId, out heldKey) && village.DummyInfo(heldKey, out heldAt, out heldH) && _fx != null)
+                        _fx.StopData(32, heldAt + new Vector2(0f, -24f * village.UiScale), 120f);
+                    return;
+                }
+                village.StopAction(who);
+                if (_fx != null) _fx.CancelCharacter(who);
+                if (_ultimate != null && ef.SkillId >= 24 && ef.SkillId <= 26) _ultimate.Cancel(who);
+                if (ef.SkillId == MonkeySkill)
+                {
+                    _looks.RemoveAll(c => c.character == who);
+                    village.SetLook(who, 0);
+                    _monkeyWindow.Remove(who);
+                }
+                return;
+            }
+            if (ef.Effect == Effect.UltimateBeam)
+            {
+                // the gong is over: the beam of Super Kamejoko / Cađíc goes through everything up to {length} Nro px away for the time the server hits
+                EnsureUltimate();
+                _ultimate.Release(who, ef.SkillId, ef.Length, ef.DurationMs / 1000f);
+                return;
+            }
+            if (ef.Effect == Effect.MafubaGather)
+            {
+                // Ma phong ba: this target is sucked into the jar (it spins into it, then is hidden), and comes out as a jar when the server says so
+                string jarKey;
+                if (_dummyKey.TryGetValue(ef.TargetId, out jarKey))
+                {
+                    EnsureUltimate();
+                    _ultimate.JarTarget(who, jarKey, ef.DurationMs / 1000f, ef.X * village.UiScale);
+                }
+                return;
+            }
+            if (ef.Effect == Effect.Jar)
+            {
+                string jarKey;
+                if (_dummyKey.TryGetValue(ef.TargetId, out jarKey))
+                {
+                    EnsureUltimate();
+                    _ultimate.JarTime(jarKey, ef.DurationMs / 1000f);
+                }
+                return;
+            }
+            if (ef.Effect == Effect.CastStart && ef.SkillId == MonkeySkill)
+            {
+                // Biến hình: the hold of 1.5 s (Nro isWaitMonkey: the character cannot move, the charge effects play); the body changes when the server says so
+                ShowSkill(who, MonkeySkill, AimX(who, ef), true);
+                EnsureFx();
+                _fx.PlayCharge(who, 13, ef.DurationMs / 1000f);
+                return;
+            }
             if (ef.Effect == Effect.CastStart)
             {
                 // the charge of every character, the controlled one too (the server knows how long it lasts); Thái Dương Hạ San has none (duration 0)
                 if (ef.DurationMs == 0)
                 {
                     if (ef.SkillId == 6 && ef.SourceId == _myId) _strobeStart = Time.unscaledTime;       // Thái dương hạ san: the screen blinks white
-                    if (ef.SourceId != _myId) ShowSkill(who, ef.SkillId, FocusX(), false);
+                    if (ef.SourceId != _myId) ShowSkill(who, ef.SkillId, AimX(who, ef), false);
                     return;
                 }
                 string race;
@@ -1125,7 +1241,7 @@ namespace BattleBall.Net
                 int fxFrom, paint;
                 bool fly;
                 int[] poses = BbSkillPoses.Charge(ef.SkillId, LevelOf(who, ef.SkillId), village.Airborne(who), race == "XAYDA", ef.DurationMs / 1000f, out fxFrom, out paint, out fly);
-                PlayPicked(who, ef.SkillId, poses, paint, fly, fxFrom, FocusX());
+                PlayPicked(who, ef.SkillId, poses, paint, fly, fxFrom, AimX(who, ef));
                 if (ef.SkillId == 10) { EnsureFx(); _fx.PlaySpiritBomb(who, ef.DurationMs / 1000f); }
                 if (ef.SkillId == 11 || ef.SkillId == 14) { EnsureFx(); _fx.PlayCharge(who, (int)ef.SkillId, ef.DurationMs / 1000f); }
                 if (ef.SkillId == 11) BbSfx.Play(BbSfx.NamekLazer, 0.6f, ef.DurationMs / 1000f);          // the beam leaves when the charge ends
@@ -1137,23 +1253,37 @@ namespace BattleBall.Net
                     Vector2 aim;
                     bool hasAim = UltimateTarget(who, out aim);
                     EnsureUltimate();
-                    _ultimate.Cast(who, ef.SkillId, ef.DurationMs / 1000f, hasAim, aim);
+                    _ultimate.Cast(who, ef.SkillId, ef.DurationMs / 1000f, hasAim, aim, Mathf.Abs(ef.DirX) > 0.05f ? (ef.DirX > 0f ? 1 : -1) : 0);
                 }
                 return;
             }
             if (ef.Effect == Effect.Buff && ef.SkillId == MonkeySkill)
             {
-                // Biến hình: after its poses (the wait of Nro) the character becomes the great ape of its level for the time of the skill
+                // Biến hình: the hold is over, the character becomes the great ape of its level for the time of the skill (the paint plays again, and again at the end)
                 uint level = LevelOf(who, MonkeySkill);
-                float wait = 1.5f;                          // the server holds the character for 1.5 s, then the body changes (and the paint plays again, and again at the end)
-                EnsureFx();
-                _fx.PlayCharge(who, 13, wait);
-                _looks.Add(new LookChange { character = who, costume = 9000 + (int)Math.Max(1u, Math.Min(7u, level)), at = Time.unscaledTime + wait, replay = true });
-                _looks.Add(new LookChange { character = who, costume = 0, at = Time.unscaledTime + wait + ef.DurationMs / 1000f, replay = true });
-                _monkeyWindow[who] = new Vector2(Time.unscaledTime + wait, Time.unscaledTime + wait + ef.DurationMs / 1000f);       // its skills change while it is the ape
+                float now = Time.unscaledTime;
+                _looks.RemoveAll(c => c.character == who);
+                _looks.Add(new LookChange { character = who, costume = 9000 + (int)Math.Max(1u, Math.Min(7u, level)), at = now, replay = true });
+                _looks.Add(new LookChange { character = who, costume = 0, at = now + ef.DurationMs / 1000f, replay = true });
+                _monkeyWindow[who] = new Vector2(now, now + ef.DurationMs / 1000f);       // its skills change while it is the ape
+                return;
             }
             // the other skills of the AI characters (shield, regeneration, the monkey, teleport, sleep...): their poses when the server reports them
             if (ef.SourceId != _myId) ShowSkill(who, ef.SkillId, FocusX(), false);
+        }
+
+        /// <summary>Where the character looks when a skill starts: the way the server aimed it (every character aims at its own target), else the focused dummy.</summary>
+        float AimX(ulong who, EffectEvent ef)
+        {
+            if (Mathf.Abs(ef.DirX) > 0.05f)
+                for (int i = 0; i < village.PartyCount; i++)
+                {
+                    ulong id;
+                    Vector2 feet;
+                    int facing;
+                    if (village.PartyMember(i, out id, out feet, out facing) && id == who) return feet.x + (ef.DirX > 0f ? 1000f : -1000f);
+                }
+            return FocusX();
         }
 
         float FocusX()
@@ -1268,6 +1398,10 @@ namespace BattleBall.Net
             int facing;
             if (!village.PartyMember(0, out main, out feet, out facing)) return;
             if (main != _myCharacter) { _pendingSlot = -1; Leave(); return; }                       // another main character: a new session is needed
+            // the earring was used or taken off while the session ran: the squad of the session is the old one (the partner would go on fighting beside the fused character);
+            // the session ends and the next one starts with the right squad (owner report 2026-10-10)
+            ulong partnerNow = menu != null && menu.FusionMainCharacterId == main ? menu.FusionSubCharacterId : 0;
+            if (partnerNow != _sessionPartner) { Leave(); return; }
             Vector2 foe;
             float h;
             bool inView = village.VisibleDummyKeys().Count > 0;

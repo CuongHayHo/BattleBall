@@ -254,6 +254,13 @@ namespace BattleBall.Net
             _charges.Add(new Charge { character = character, kind = kind, start = Time.unscaledTime, seconds = Mathf.Max(0.3f, seconds) });
         }
 
+        /// <summary>A skill of this character ended before its effects did (broken by a stun, a move, a death): what it was drawing stops, the character comes down.</summary>
+        public void CancelCharacter(ulong character)
+        {
+            _runs.RemoveAll(r => { if (r.character == character) { Clear(r); return true; } return false; });
+            _charges.RemoveAll(x => { if (x.character == character) { if (x.kind == 10) village.SetLift(character, 0f); return true; } return false; });
+        }
+
         /// <summary>Quả cầu kênh khí: the character rises 3 Nro px a tick for 20 ticks, then holds its arms up while effect 153 pulses over its head every 3 ticks.</summary>
         public void PlaySpiritBomb(ulong character, float seconds)
         {
@@ -430,6 +437,18 @@ namespace BattleBall.Net
             var d = LoadData(effectId);
             if (d == null || d.seq.Length == 0) return;
             _datas.Add(new DataPlay { id = effectId, data = d, origin = origin, start = Time.unscaledTime, until = Time.unscaledTime + seconds, loops = loops });
+        }
+
+        /// <summary>Takes away the running effects of this kind that started near this point (the rope of Trói when the holder lets go).</summary>
+        public void StopData(int effectId, Vector2 near, float radius)
+        {
+            for (int i = _datas.Count - 1; i >= 0; i--)
+            {
+                var p = _datas[i];
+                if (p.id != effectId || Vector2.Distance(p.origin, near) > radius) continue;
+                foreach (var img in p.images) if (img != null) BbFxKill.Go(img.gameObject);
+                _datas.RemoveAt(i);
+            }
         }
 
         void TickDatas()

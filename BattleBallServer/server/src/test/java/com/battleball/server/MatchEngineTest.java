@@ -3,7 +3,9 @@ package com.battleball.server;
 import com.battleball.proto.DamageEvent;
 import com.battleball.proto.Effect;
 import com.battleball.proto.MatchFrame;
+import com.battleball.proto.EntityState;
 import com.battleball.proto.MatchResult;
+import com.battleball.server.data.Json;
 import com.battleball.server.data.StaticData;
 import com.battleball.server.data.StaticDataLoader;
 import com.battleball.server.db.Database;
@@ -413,5 +415,229 @@ class MatchEngineTest {
         }
         assertTrue(e.finished());
         assertEquals(MatchResult.ABANDONED, e.outcome().result());
+    }
+
+    // ---- the skills as the original game does them (docs/architecture/BattleBallServer.md 15.17) ----
+    private static int slotOf(int skillId) {
+        return d.skills().get(skillId).slot();
+    }
+
+    private static MatchSetup.Dummy dummy(String key, double x, double y) {
+        return new MatchSetup.Dummy(key, key, 2_000_000_000L, 0, 0, 24, 0, x, y);
+    }
+
+    private static MatchEngine village(List<MatchSetup.SquadMember> squad, double arenaW, MatchSetup.Dummy... dummies) {
+        MatchSetup.Training tr = new MatchSetup.Training(arenaW, 800, List.of(dummies), 2000, 600_000_000L);
+        return new MatchEngine(new MatchSetup(0, d, null, squad, List.of(), List.of(), 0, new Random(5), tr));
+    }
+
+    /** The squad of the skill tests: the controlled character with these skills, two AI characters with none (they only stand). */
+    private static List<MatchSetup.SquadMember> soloSquad(String race, Map<Integer, Integer> skills) {
+        return List.of(member(1, race, 30, true, skills, 300, 1), member(2, "NAMEC", 30, false, Map.of(), 300, 1), member(3, "XAYDA", 30, false, Map.of(), 300, 1));
+    }
+
+    private static Entities.Dummy dummyOf(MatchEngine e, String key) {
+        return (Entities.Dummy) e.entities().stream().filter(x -> x instanceof Entities.Dummy dm && dm.key.equals(key)).findFirst().orElseThrow();
+    }
+
+    /** Steps {@code ticks} ticks, every one after {@code each} ran; returns the frames in order. */
+    private static List<MatchFrame> steps(MatchEngine e, int ticks, java.util.function.IntConsumer each) {
+        List<MatchFrame> out = new ArrayList<>();
+        for (int i = 0; i < ticks; i++) {
+            if (each != null) {
+                each.accept(i);
+            }
+            e.step();
+            out.add(e.buildFrame());
+        }
+        return out;
+    }
+
+    private static int maskOf(MatchFrame f, int entityId) {
+        return f.getStatesList().stream().filter(st -> st.getEntityId() == entityId).findFirst().orElseThrow().getEffects();
+    }
+
+    private static long hits(List<MatchFrame> frames, int skillId, int targetId) {
+        return frames.stream().flatMap(f -> f.getDamagesList().stream()).filter(x -> x.getSkillId() == skillId && x.getTargetId() == targetId && x.getAmount() > 0).count();
+    }
+
+    private static long events(List<MatchFrame> frames, Effect effect, int skillId) {
+        return frames.stream().flatMap(f -> f.getEffectsList().stream()).filter(x -> x.getEffect() == effect && x.getSkillId() == skillId).count();
+    }
+
+    @Test
+    void anUltimateBeamPiercesEveryTargetAndHitsOnEveryTickForTwoSeconds() {
+        // Super Kamejoko: a gong of 2 s, then every 250 ms for 2 s everything in the rectangle (Nro NewSkill), up to 2 chunks (3360 px) away, the target in focus included
+        MatchEngine e = village(soloSquad("EARTH", Map.of(24, 1)), 5000, dummy("a", 1400, 300), dummy("b", 3300, 300), dummy("off", 1800, 700));
+        Entities.Fighter me = e.controlledFighter();
+        Entities.Dummy a = dummyOf(e, "a"), b = dummyOf(e, "b"), off = dummyOf(e, "off");
+        e.submit(() -> e.reportPosition(1, 1000, 300, 1, 0));
+        e.step();
+        e.buildFrame();
+        e.submit(() -> e.useSkill(2, slotOf(24), a.id, 1, 0));
+        List<MatchFrame> frames = steps(e, 40 + 40 + 5, i -> e.submit(() -> e.reportPosition(10 + i, 1000 + 40, 300, 1, 0)));          // it tries to walk away all along
+        assertEquals(1000, frames.get(76).getStatesList().stream().filter(st -> st.getEntityId() == me.id).findFirst().orElseThrow().getX(), 1e-6,
+                "the caster stays where it started: the gong and the beam hold it");
+        assertTrue((maskOf(frames.get(10), me.id) & 256) != 0, "the caster is busy during the gong");
+        assertTrue((maskOf(frames.get(60), me.id) & 256) != 0, "and while the beam hits");
+        assertEquals(7, hits(frames, 24, a.id), "the target in focus is hit on every tick (250 ms for 2 s)");
+        assertEquals(7, hits(frames, 24, b.id), "and so is the one behind it, 2300 px away (the beam goes through)");
+        assertEquals(0, hits(frames, 24, off.id), "a dummy outside the width of the beam is not hit");
+        assertEquals(1, events(frames, Effect.ULTIMATE_BEAM, 24), "the client is told where the beam goes and for how long");
+        assertTrue((maskOf(frames.get(frames.size() - 1), me.id) & 256) == 0, "the caster is free when the beam ends");
+    }
+
+    @Test
+    void mafubaSuckedTargetsBecomeJarsAndTakeDamageWithoutDying() {
+        // Ma phong ba: gong 2 s, within 500 px everything is sucked in; 4 s later each target is a jar for 11 s and takes the caster's max HP x level % every 500 ms
+        MatchEngine e = village(soloSquad("NAMEC", Map.of(26, 1)), 5000, dummy("a", 1300, 300), dummy("b", 1400, 330), dummy("far", 2500, 300));
+        Entities.Fighter me = e.controlledFighter();
+        Entities.Dummy a = dummyOf(e, "a"), b = dummyOf(e, "b"), far = dummyOf(e, "far");
+        e.submit(() -> e.reportPosition(1, 1000, 300, 1, 0));
+        e.step();
+        e.buildFrame();
+        e.submit(() -> e.useSkill(2, slotOf(26), a.id, 1, 0));
+        List<MatchFrame> frames = steps(e, 40 + 80 + 230 + 10, null);
+        assertEquals(2, events(frames, Effect.MAFUBA_GATHER, 26), "the two targets in range are sucked into the jar");
+        assertEquals(2, events(frames, Effect.JAR, 26));
+        assertTrue((maskOf(frames.get(40 + 40), a.id) & 1024) != 0, "while it is sucked in (the 4 s after the gong) it is marked so");
+        assertTrue((maskOf(frames.get(40 + 80 + 40), a.id) & 512) != 0, "then it is a jar");
+        assertTrue((maskOf(frames.get(40 + 80 + 40), far.id) & (512 | 1024)) == 0, "a target out of range is untouched");
+        assertEquals(22, hits(frames, 26, a.id), "the jar hurts every 500 ms for 11 s");
+        assertEquals(22, hits(frames, 26, b.id));
+        assertEquals(0, hits(frames, 26, far.id));
+        long expected = Math.round(me.hpMax * 1 * 1 / 100.0);
+        long first = frames.stream().flatMap(f -> f.getDamagesList().stream()).filter(x -> x.getSkillId() == 26 && x.getTargetId() == a.id).findFirst().orElseThrow().getAmount();
+        assertEquals(expected, first, "the damage is the caster's max HP x the level of the skill in percent");
+        assertTrue((maskOf(frames.get(frames.size() - 1), a.id) & (512 | 1024)) == 0, "the jar is gone after 11 s");
+    }
+
+    @Test
+    void theMonkeyHoldsOneAndAHalfSecondThenRaisesHpAttackAndCriticalRateForAWhile() {
+        MatchEngine e = village(soloSquad("XAYDA", Map.of(13, 3)), 3000, dummy("a", 1400, 300));
+        Entities.Fighter me = e.controlledFighter();
+        StaticData.SkillLevel L = d.skills().get(13).level(3);
+        double hpPct = Json.num(L.params(), "hpBonusPct", 0), atkPct = Json.num(L.params(), "dameBonusRaw", 0);
+        long hpBefore = me.hpMax;
+        double atkBefore = me.atk, critBefore = me.critRatePct;
+        e.submit(() -> e.reportPosition(1, 1000, 300, 1, 0));
+        e.step();
+        e.buildFrame();
+        e.submit(() -> e.useSkill(2, slotOf(13), 0, 1, 0));
+        List<MatchFrame> frames = steps(e, 20, i -> e.submit(() -> e.reportPosition(10 + i, 1100, 300, 1, 0)));
+        assertEquals(1000, me.x, 1e-6, "the hold of the transformation keeps the character where it is");
+        assertEquals(hpBefore, me.hpMax, "the body changes only after the hold (1.5 s)");
+        assertTrue((maskOf(frames.get(5), me.id) & 256) != 0);
+        frames.addAll(steps(e, 20, null));
+        assertEquals(hpBefore + Math.round(hpBefore * hpPct / 100.0), me.hpMax, "max HP + (level + 3) x 10 %");
+        assertEquals(me.hpMax, me.hp, "the HP is doubled, up to the new maximum");
+        assertEquals(atkBefore * (1 + atkPct / 100.0), me.atk, atkBefore * 1e-6, "attack + (level + 3) %");
+        assertEquals(110, me.critRatePct, 1e-9, "the critical rate is 110 (always)");
+        EntityState st = frames.get(frames.size() - 1).getStatesList().stream().filter(x -> x.getEntityId() == me.id).findFirst().orElseThrow();
+        assertEquals(me.hpMax, st.getHpMax(), "the frame carries the live numbers for the menu");
+        assertEquals(Math.round(me.atk), st.getAtk());
+        assertEquals(100f, st.getCritRatePct(), 1e-3, "a rate above 100 counts as 100");
+        assertTrue((st.getEffects() & 2048) != 0, "marked as a monkey");
+        frames.addAll(steps(e, 20 * 82, null));                                                  // (3 + 5) x 10 s = 80 s
+        assertEquals(hpBefore, me.hpMax, "everything is back when the monkey ends");
+        assertEquals(atkBefore, me.atk, atkBefore * 1e-6);
+        assertEquals(critBefore, me.critRatePct, 1e-9);
+        assertTrue(events(frames, Effect.CAST_END, 13) >= 1, "the client is told the monkey ended");
+    }
+
+    @Test
+    void theRegenerationEndsWhenTheCharacterMoves() {
+        MatchEngine e = village(soloSquad("XAYDA", Map.of(8, 1)), 3000, dummy("a", 1900, 300));
+        Entities.Fighter me = e.controlledFighter();
+        e.submit(() -> e.reportPosition(1, 1000, 300, 1, 0));
+        e.step();
+        e.buildFrame();
+        me.hp = me.hpMax / 2;
+        me.ki = me.kiMax / 2;
+        long hp0 = me.hp;
+        double ki0 = me.ki;
+        e.submit(() -> e.useSkill(2, slotOf(8), 0, 1, 0));
+        List<MatchFrame> frames = steps(e, 40, i -> e.submit(() -> e.reportPosition(10 + i, 1000.4, 300, 1, 0)));          // standing (a rounding of the position is not a move)
+        assertTrue((maskOf(frames.get(30), me.id) & 32) != 0, "regenerating");
+        assertTrue(me.hp > hp0 && me.ki > ki0, "it heals the HP and the Ki (NPoint.update)");
+        e.submit(() -> e.reportPosition(99, 1060, 300, 1, 0));
+        frames = steps(e, 2, null);
+        assertTrue((maskOf(frames.get(1), me.id) & 32) == 0, "a move ends the regeneration (PlayerService.playerMove: stopCharge)");
+        assertEquals(1, events(frames, Effect.CAST_END, 8));
+    }
+
+    @Test
+    void theRopeBreaksWhenTheHolderMoves() {
+        MatchEngine e = village(soloSquad("XAYDA", Map.of(23, 1, 4, 1)), 3000, dummy("a", 1100, 300));
+        Entities.Dummy a = dummyOf(e, "a");
+        e.submit(() -> e.reportPosition(1, 1000, 300, 1, 0));
+        e.step();
+        e.buildFrame();
+        e.submit(() -> e.useSkill(2, slotOf(23), a.id, 1, 0));
+        List<MatchFrame> frames = steps(e, 30, i -> e.submit(() -> e.reportPosition(10 + i, 1000, 300, 1, 0)));
+        assertTrue((maskOf(frames.get(29), a.id) & 2) != 0, "held while the holder stands there");
+        e.submit(() -> e.reportPosition(99, 1080, 300, 1, 0));
+        frames = steps(e, 2, null);
+        assertTrue((maskOf(frames.get(1), a.id) & 2) == 0, "it lets go when the holder moves (Nro removeUseTroi)");
+        assertEquals(1, events(frames, Effect.CAST_END, 23));
+    }
+
+    @Test
+    void theSpiritBombLandsOnTheTargetNotOnTheCaster() {
+        // Quả cầu kênh khí: the circle is around the target the ball is thrown at (Nro: distance from plTarget / mobTarget), 4 s of charge
+        MatchEngine e = village(soloSquad("EARTH", Map.of(10, 1)), 5000, dummy("a", 1300, 300), dummy("near", 1500, 300), dummy("far", 2600, 300));
+        Entities.Fighter me = e.controlledFighter();
+        Entities.Dummy a = dummyOf(e, "a"), near = dummyOf(e, "near"), far = dummyOf(e, "far");
+        e.submit(() -> e.reportPosition(1, 500, 300, 1, 0));
+        e.step();
+        e.buildFrame();
+        e.submit(() -> e.useSkill(2, slotOf(10), a.id, 1, 0));
+        List<MatchFrame> frames = steps(e, 4 * 20 + 5, null);
+        assertEquals(1, hits(frames, 10, a.id), "the target is hit");
+        assertEquals(1, hits(frames, 10, near.id), "and the one 200 px from it, although both are far from the caster (800 and 1000 px)");
+        assertEquals(0, hits(frames, 10, far.id), "one outside the radius around the target is not");
+        assertEquals(500, me.x, 1e-6);
+    }
+
+    @Test
+    void theSleepAffectsOnlyTheTarget() {
+        MatchEngine e = village(soloSquad("EARTH", Map.of(22, 1)), 3000, dummy("a", 1100, 300), dummy("next", 1150, 300));
+        Entities.Dummy a = dummyOf(e, "a"), next = dummyOf(e, "next");
+        e.submit(() -> e.reportPosition(1, 1000, 300, 1, 0));
+        e.step();
+        e.buildFrame();
+        e.submit(() -> e.useSkill(2, slotOf(22), a.id, 1, 0));
+        List<MatchFrame> frames = steps(e, 5, null);
+        assertTrue((maskOf(frames.get(4), a.id) & 4) != 0, "the target sleeps");
+        assertTrue((maskOf(frames.get(4), next.id) & 4) == 0, "what stands next to it does not (Nro: Thôi miên has no area)");
+    }
+
+    @Test
+    void theTeleportStrikesWithACriticalHitAndStunsForHalfASecondPerLevelPlusOne() {
+        // Nro SkillService: setPos next to the target, playerAttackPlayer (always a critical hit), then the stun of (level + 1) x 500 ms
+        MatchEngine e = village(soloSquad("EARTH", Map.of(20, 3)), 3000, dummy("a", 1900, 300));
+        Entities.Dummy a = dummyOf(e, "a");
+        e.submit(() -> e.reportPosition(1, 1000, 300, 1, 0));
+        e.step();
+        e.buildFrame();
+        e.submit(() -> e.useSkill(2, slotOf(20), a.id, 1, 0));
+        List<MatchFrame> frames = steps(e, 5, null);
+        var hit = frames.stream().flatMap(f -> f.getDamagesList().stream()).filter(x -> x.getSkillId() == 20).findFirst().orElseThrow();
+        assertTrue(hit.getCrit() && hit.getAmount() > 0, "the teleport itself is a critical hit");
+        assertTrue((maskOf(frames.get(4), a.id) & 1) != 0, "and the target is stunned");
+        assertEquals(2000, Json.num(d.skills().get(20).level(3).params(), "stunMs", 0), 1e-9, "level 3: (3 + 1) x 500 ms");
+    }
+
+    @Test
+    void makankosappoHitsOnlyTheTargetItWasAimedAt() {
+        MatchEngine e = village(soloSquad("NAMEC", Map.of(11, 1)), 4000, dummy("a", 1400, 300), dummy("behind", 1900, 300));
+        Entities.Dummy a = dummyOf(e, "a"), behind = dummyOf(e, "behind");
+        e.submit(() -> e.reportPosition(1, 1000, 300, 1, 0));
+        e.step();
+        e.buildFrame();
+        e.submit(() -> e.useSkill(2, slotOf(11), a.id, 1, 0));
+        List<MatchFrame> frames = steps(e, 3 * 20 + 5, null);
+        assertEquals(1, hits(frames, 11, a.id), "the target in focus is hit after the charge of 3 s");
+        assertEquals(0, hits(frames, 11, behind.id), "what stands behind it is not (Nro: plTarget or mobTarget)");
     }
 }

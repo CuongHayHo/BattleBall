@@ -1201,7 +1201,7 @@ namespace BattleBall.Net
             earringIcon.sprite = sp;
             earringIcon.enabled = sp != null;
             earringIcon.color = Color.white;
-            bool onFusion = _pages.Count > 0 && _pages[_page].fusion;              // "Tách" only on the tab of the fusion form
+            bool onFusion = _fusionMain >= 0;                                      // the earring is in use for the whole account: "Tách" on every tab while it merges two characters
             earringSlotImage.sprite = BagCell;
             int needed = p != null && p.ShardsNeeded > 0 ? (int)p.ShardsNeeded : DefaultPotaraShards;
             earringCaption.text = onFusion ? "Tách" : owned ? "Dùng" : (p != null ? p.Fragments : 0) + "/" + needed;
@@ -1209,44 +1209,84 @@ namespace BattleBall.Net
             potaraText.text = _fusionMain >= 0 ? "Hợp thể: " + Titles[_fusionMain] + " (chủ) + " + Titles[_fusionSub] : "";
         }
 
+        /// <summary>
+        /// The earring is an item like a skin (owner request 2026-10-10): tapping it opens its popup. Not in use: "Sử dụng" for the planet of the open tab as the main character and
+        /// "Dùng cho X" for each other planet (the partner is chosen next). In use: "Tách", the same on every tab (it merges the characters of the whole account).
+        /// </summary>
         void OnEarring()
         {
-            if (_pages[_page].fusion) { SplitFusion(); return; }       // on the fusion tab the earring splits it; on any other tab it starts a fusion with that character as main
             var potara = _snapshot != null ? _snapshot.Potara : null;
             if (potara == null || !potara.Owned) { Toast("Chưa có Bông tai Potara"); return; }
-            int main = _pages[_page].main;
-            var ch = CharacterOf(Races[main]);
-            if (ch == null || ch.Level < FusionMinLevel()) { Toast("Nhân vật chủ cần đạt cấp " + FusionMinLevel()); return; }
-            var others = new List<int>();
-            for (int i = 0; i < Races.Length; i++) if (i != main) others.Add(i);
-            OpenChooser(main, others);
+            var resolver = NroSpriteResolver.Instance;
+            Sprite icon = resolver != null && potara.IconId > 0 ? resolver.ResolveSprite((int)potara.IconId, BbAssetCache.Scale) : null;
+            var specs = new List<BbPopup.ButtonSpec>();
+            var mains = new List<int>();
+            string lines, desc = "Hợp thể hai nhân vật: chỉ số cộng lại, nhân vật chủ giữ kỹ năng. Cả hai cần đạt cấp " + FusionMinLevel() + ". Dùng chung cho cả tài khoản: tách ở tab nào cũng được.";
+            bool fused = _fusionMain >= 0;
+            if (fused)
+            {
+                lines = "<color=#2E7D32>Đang dùng</color>\nHợp thể: " + Titles[_fusionMain] + " (chủ) + " + Titles[_fusionSub];
+                specs.Add(new BbPopup.ButtonSpec("Tách", true, true));
+            }
+            else
+            {
+                lines = "Chưa dùng";
+                int open = _pages[_page].main >= 0 ? _pages[_page].main : Mathf.Max(0, _lastRace);
+                var ordered = new List<int> { open };
+                for (int r = 0; r < Races.Length; r++) if (r != open) ordered.Add(r);
+                foreach (int r in ordered)
+                {
+                    var c = CharacterOf(Races[r]);
+                    bool ready = c != null && c.Level >= FusionMinLevel();
+                    specs.Add(new BbPopup.ButtonSpec(r == open ? "Sử dụng" : "Dùng cho\n" + Titles[r], ready, r == open));
+                    mains.Add(r);
+                }
+            }
+            popup.Show(icon, "Bông tai Potara", lines, desc, null, null, specs, i =>
+            {
+                popup.Hide();
+                if (fused) { SplitFusion(); return; }
+                int main = mains[i];
+                var others = new List<int>();
+                for (int r = 0; r < Races.Length; r++) if (r != main) others.Add(r);
+                OpenChooser(main, others);
+            });
         }
 
         readonly List<int> _choices = new List<int>();
+        int _chooserMain;
 
+        /// <summary>The second step of "Sử dụng" is a popup of the same kind as the first (owner remark 2026-10-10: the old chooser dialog looked out of place): one button per other planet.</summary>
         void OpenChooser(int main, List<int> candidates)  // all the other planets, so the player always sees the choice
         {
+            _chooserMain = main;
             _choices.Clear();
             _choices.AddRange(candidates);
-            chooserTitle.text = "Chọn hành tinh hợp thể với " + Titles[main] + " (chủ)";
-            for (int i = 0; i < chooserButtons.Length; i++)
+            var potara = _snapshot != null ? _snapshot.Potara : null;
+            var resolver = NroSpriteResolver.Instance;
+            Sprite icon = resolver != null && potara != null && potara.IconId > 0 ? resolver.ResolveSprite((int)potara.IconId, BbAssetCache.Scale) : null;
+            var specs = new List<BbPopup.ButtonSpec>();
+            bool first = true;
+            foreach (int r in candidates)
             {
-                bool used = i < candidates.Count;
-                chooserButtons[i].gameObject.SetActive(used);
-                if (!used) continue;
-                var partner = CharacterOf(Races[candidates[i]]);
-                bool ready = partner != null && partner.Level >= FusionMinLevel();
-                chooserButtons[i].interactable = ready;              // a planet whose character is below the level stays visible but cannot be chosen
-                chooserLabels[i].text = ready ? Titles[candidates[i]] : Titles[candidates[i]] + " (cần cấp " + FusionMinLevel() + ")";
-                chooserLabels[i].fontSize = ready ? 26 : 20;
+                var partner = CharacterOf(Races[r]);
+                bool ready = partner != null && partner.Level >= FusionMinLevel();      // a planet whose character is below the level stays visible but cannot be chosen
+                specs.Add(new BbPopup.ButtonSpec(ready ? Titles[r] : Titles[r] + "\n(cần cấp " + FusionMinLevel() + ")", ready, ready && first));
+                if (ready) first = false;
             }
-            chooserRoot.SetActive(true);
+            popup.Show(icon, "Bông tai Potara", "Chủ: " + Titles[main] + "\nChọn hành tinh hợp thể cùng", "Hợp thể " + Titles[main] + " (chủ) với hành tinh bạn chọn: chỉ số cộng lại, nhân vật chủ giữ kỹ năng.",
+                       null, null, specs, i =>
+                       {
+                           popup.Hide();
+                           if (i < _choices.Count) Fuse(_chooserMain, _choices[i], true);
+                       });
         }
 
+        /// <summary>The buttons of the old chooser dialog (no longer opened: the partner is chosen in a popup, OpenChooser) still call this.</summary>
         void OnChoose(int slot)
         {
             chooserRoot.SetActive(false);
-            if (slot < _choices.Count) Fuse(_pages[_page].main, _choices[slot], true);
+            if (slot < _choices.Count) Fuse(_chooserMain, _choices[slot], true);
         }
 
         /// <summary>The two characters become one tab; the main one is the character whose tab was open.</summary>
@@ -1291,8 +1331,45 @@ namespace BattleBall.Net
             _toastUntil = Time.unscaledTime + 1.8f;
         }
 
+        bool _liveShown;
+        float _liveAt;
+
+        /// <summary>
+        /// While a training session runs the four lines under the planet tabs are live (owner request 2026-10-10: "HP: 1000/10000"): the HP and the Ki now over their
+        /// maximum, the attack, the armor and the critical rate with the buffs on (the monkey raises the HP, the attack and the critical rate). The server's frame carries them.
+        /// </summary>
+        void RefreshLiveStats()
+        {
+            if (Time.unscaledTime < _liveAt) return;
+            _liveAt = Time.unscaledTime + 0.15f;
+            BbTraining.Live live = new BbTraining.Live();
+            bool have = false;
+            ProtoCharacter ch = null;
+            if (training != null && _pages.Count > 0 && _page < _pages.Count && _pages[_page].main >= 0)
+            {
+                ch = CharacterOf(Races[_pages[_page].main]);
+                have = ch != null && training.TryLive(ch.CharacterId, out live);
+                // a fused session has one fighter for the main character and its partner, carrying the sum: only the fusion tab shows it live; the tabs of the two
+                // characters keep their own figures (and the other way round when the session is not a fusion)
+                if (have && ch.CharacterId == training.SessionMainCharacter && training.FusedSession != _pages[_page].fusion) have = false;
+                if (have && _pages[_page].fusion && !training.FusedSession) have = false;
+            }
+            if (have)
+            {
+                headerText.text = "HP: " + Money(live.Hp) + " / " + Money(live.HpMax) + "\nKI: " + Money(live.Ki) + " / " + Money(live.KiMax) + "\nSức đánh: " + Money(live.Atk) +
+                                  "\nGiáp: " + Money(live.Armor) + ", Chí mạng: " + Percent(live.CritRatePct) + "%";
+                _liveShown = true;
+            }
+            else if (_liveShown)
+            {
+                _liveShown = false;
+                if (_pages.Count > 0) ShowPage(_page, false);                  // the session ended: the figures of the character itself again
+            }
+        }
+
         void Update()
         {
+            RefreshLiveStats();
             if (_fade < 1f)
             {
                 _fade = Mathf.Min(1f, _fade + Time.unscaledDeltaTime * 5f);

@@ -595,6 +595,10 @@ enum Effect {
   CAST_START = 10;                  // charging or gong before a skill (duration_ms)
   TELEPORT = 11;
   ENRAGE = 12;
+  CAST_END = 13;                    // a cast, a gong or a channel ended (finished or broken): the client stops the pose (skill_id, source_id)
+  MAFUBA_GATHER = 14;               // Ma phong ba: the target is sucked into the jar (target_id, source_id, duration_ms until it comes out as a jar, x, y = the jar)
+  JAR = 15;                         // Ma phong ba: the target is a jar for duration_ms (it takes damage every 500 ms and cannot act)
+  ULTIMATE_BEAM = 16;               // Super Kamejoko / Cađíc: the beam hits for duration_ms from x, y along dir; length and width of the rectangle
 }
 
 message EntityState {
@@ -608,7 +612,13 @@ message EntityState {
   uint64 ki = 8;
   uint64 ki_max = 9;
   bool alive = 10;
-  uint32 effects = 11;              // bit mask: 1 stun, 2 hold, 4 sleep, 8 shield, 16 chocolate, 32 regen, 64 buff, 128 enraged
+  uint32 effects = 11;              // bit mask: 1 stun, 2 hold, 4 sleep, 8 shield, 16 chocolate, 32 regen, 64 buff, 128 enraged,
+                                    // 256 busy (gong, charge or the beam of an ultimate: no input), 512 jar, 1024 being sucked into the jar, 2048 monkey
+  // the numbers of the fighter as they are now (buffs included): the menu shows them live (owner request 2026-10-10)
+  uint64 atk = 12;
+  uint64 armor = 13;
+  float crit_rate_pct = 14;
+  float crit_dmg_pct = 15;
 }
 
 message DamageEvent {

@@ -13,6 +13,7 @@ import com.battleball.server.data.Json;
 import com.battleball.server.data.StaticData;
 import com.battleball.server.game.StatCalculator;
 import com.battleball.server.game.match.Entities.Cast;
+import com.battleball.server.game.match.Entities.Channel;
 import com.battleball.server.game.match.Entities.Delayed;
 import com.battleball.server.game.match.Entities.Dummy;
 import com.battleball.server.game.match.Entities.Entity;
@@ -94,6 +95,29 @@ public final class MatchEngine {
     private final List<MatchOutcome.Kill> kills = new ArrayList<>();
     private int streak;
     private long lastKillAt = Long.MIN_VALUE / 2;
+
+    /** A target inside the jar of Ma phong ba: it takes damage every {@code tickMs} until {@code until} (Nro EffectSkin.updateMaPhongBa, MobEffectSkill). */
+    private static final class Jar {
+        final Entity victim;
+        final Entity owner;
+        final long damage;
+        long nextAt;
+        final long until;
+        final long tickMs;
+
+        Jar(Entity victim, Entity owner, long damage, long firstAt, long until, long tickMs) {
+            this.victim = victim;
+            this.owner = owner;
+            this.damage = damage;
+            this.nextAt = firstAt;
+            this.until = until;
+            this.tickMs = tickMs;
+        }
+    }
+
+    private final List<Jar> jars = new ArrayList<>();
+    /** How far a fighter may drift between two position reports before it counts as moving (Nro px; reports of a standing client differ by rounding only). */
+    private static final double MOVE_EPS = 2.0;
 
     /** A visible danger zone (boss ultimate): allies try to step out of it. */
     private record TelegraphArea(boolean rect, double x, double y, double dirX, double dirY, double length, double width, long until) {
@@ -236,12 +260,23 @@ public final class MatchEngine {
             return;
         }
         for (Fighter f : squad) {
-            if (f.id == entityId && !f.controlled && f.alive && f.canMove(now) && f.cast == null) {
-                f.x = clamp(x, 0, arenaW);
-                f.y = clamp(y, 0, arenaH);
+            if (f.id == entityId && !f.controlled && f.alive && f.canMove(now) && f.cast == null && f.channel == null) {
+                moveFighter(f, clamp(x, 0, arenaW), clamp(y, 0, arenaH));
                 normalizeInto(f, dx, dy);
             }
         }
+    }
+
+    /** A fighter moves: the skills that need it to stand still end (Nro PlayerService.playerMove: stopCharge, removeUseTroi). */
+    private void moveFighter(Fighter f, double nx, double ny) {
+        if (Math.hypot(nx - f.x, ny - f.y) > MOVE_EPS) {
+            if (now < f.regenUntil && Math.hypot(nx - f.regenAtX, ny - f.regenAtY) > MOVE_EPS) {
+                endRegen(f);
+            }
+            releaseHolds(f);
+        }
+        f.x = nx;
+        f.y = ny;
     }
 
     /** The controlled player moved: the position is taken as reported but kept inside the arena. */
@@ -249,11 +284,10 @@ public final class MatchEngine {
         lastSeq = Math.max(lastSeq, seq);
         lastInputAt = now;
         Fighter f = controlled;
-        if (f == null || !f.alive || !f.canMove(now) || f.cast != null) {
+        if (f == null || !f.alive || !f.canMove(now) || f.cast != null || f.channel != null) {
             return;
         }
-        f.x = clamp(x, 0, arenaW);
-        f.y = clamp(y, 0, arenaH);
+        moveFighter(f, clamp(x, 0, arenaW), clamp(y, 0, arenaH));
         normalizeInto(f, dx, dy);
     }
 
@@ -289,7 +323,8 @@ public final class MatchEngine {
         f.hp = Math.round(f.hpMax * rule("revive_hp_pct", 100) / 100.0);
         f.ki = f.kiMax;
         f.cast = null;
-        f.stunUntil = f.holdUntil = f.sleepUntil = f.chocolateUntil = 0;
+        f.stunUntil = f.holdUntil = f.sleepUntil = f.chocolateUntil = f.jarUntil = 0;
+        f.channel = null;
         f.shieldUntil = now + 3000;
         addEffect(Effect.SHIELD, f, f, 3000, 0);
         return true;
@@ -347,6 +382,7 @@ public final class MatchEngine {
             }
         }
         updateProjectiles(dt);
+        updateJars();
         telegraphs.removeIf(t -> t.until() <= now);
         if (training != null) {
             if (now - lastInputAt > training.idleEndMs()) {
@@ -394,6 +430,7 @@ public final class MatchEngine {
         f.kiMax = s.kiMax();
         f.ki = s.kiMax();
         f.atk = s.atk();
+        f.armorStat = s.armor();
         f.armorReduction = StatCalculator.armorReduction(d, s.armor());
         f.critRatePct = s.critRatePct();
         f.critDmgPct = s.critDmgPct();
@@ -421,7 +458,16 @@ public final class MatchEngine {
             heal(f, f.hpMax * f.hpRegenPctPerSec / 100.0 * dt);
         }
         if (now < f.regenUntil) {
-            heal(f, f.hpMax * f.regenPctPerSec / 100.0 * dt);
+            // Tái tạo năng lượng heals the HP and the Ki (NPoint.update); it ends when both are full, or when the fighter cannot act (EffectSkill.isHaveEffectSkill)
+            if (!f.canAct(now) || (f.hp >= f.hpMax && f.ki >= f.kiMax)) {
+                endRegen(f);
+            } else {
+                heal(f, f.hpMax * f.regenPctPerSec / 100.0 * dt);
+                f.ki = Math.min(f.kiMax, f.ki + f.kiMax * f.regenPctPerSec / 100.0 * dt);
+            }
+        }
+        if (f.monkeyUntil > 0 && now >= f.monkeyUntil) {
+            endMonkey(f);
         }
         if (f.hpBonusAmount > 0 && now >= f.hpBonusUntil) {
             f.hpMax -= f.hpBonusAmount;
@@ -441,9 +487,26 @@ public final class MatchEngine {
         if (now >= f.buffUntil) {
             f.buffArmorMult = 1.0;
         }
+        if (f.channel != null) {
+            Channel ch = f.channel;
+            if (!f.canAct(now)) {
+                breakChannel(f);                     // stun or sleep closes the skill (Nro updateSkillSpecial: closeSkillSpecial)
+            } else {
+                while (ch.nextTickAt <= now && ch.nextTickAt < ch.endsAt) {
+                    ultimateTick(f, ch);
+                    ch.nextTickAt += ch.tickMs;
+                }
+                if (now >= ch.endsAt) {
+                    f.channel = null;                // done: the busy bit goes away with it (CAST_END is only sent when a skill is broken)
+                }
+            }
+            return;
+        }
         if (f.cast != null) {
             if (!f.canAct(now)) {
+                Cast broken = f.cast;
                 f.cast = null;                       // stun or sleep breaks the cast
+                addEffect(Effect.CAST_END, f, f, 0, broken.skill.id());
             } else if (now >= f.cast.endsAt) {
                 Cast c = f.cast;
                 f.cast = null;
@@ -465,7 +528,7 @@ public final class MatchEngine {
     // ---------------------------------------------------------------------------------------------------------------- skills
 
     private boolean tryUseSkill(Fighter f, int slot, int targetId, double dx, double dy) {
-        if (!f.alive || !f.canAct(now) || f.cast != null) {
+        if (!f.alive || !f.canAct(now) || f.cast != null || f.channel != null) {
             return false;
         }
         StaticData.Skill sk = f.skillBySlot.get(slot);
@@ -491,10 +554,10 @@ public final class MatchEngine {
         double len = Math.hypot(ndx, ndy);
         ndx /= len == 0 ? 1 : len;
         ndy /= len == 0 ? 1 : len;
-        if (!startSkill(f, sk, L, slot, target, ndx, ndy, kiCost, allKi)) {
-            return false;
-        }
-        return true;
+        // using any skill ends the regeneration (stopCharge) and lets go of what the fighter holds (removeUseTroi), before the skill itself (SkillService.useSkill)
+        endRegen(f);
+        releaseHolds(f);
+        return startSkill(f, sk, L, slot, target, ndx, ndy, kiCost, allKi);
     }
 
     private boolean startSkill(Fighter f, StaticData.Skill sk, StaticData.SkillLevel L, int slot, Entity target, double dx, double dy, double kiCost, boolean allKi) {
@@ -592,6 +655,8 @@ public final class MatchEngine {
                 pay(f, slot, cd, kiCost, allKi);
                 f.regenUntil = now + (long) (rule("regen_skill_s", 15) * 1000);
                 f.regenPctPerSec = Json.num(p, "regenPctPerSec", 4);
+                f.regenAtX = f.x;
+                f.regenAtY = f.y;
                 addEffect(Effect.REGEN, f, f, (int) (rule("regen_skill_s", 15) * 1000), id);
                 return true;
             }
@@ -612,17 +677,14 @@ public final class MatchEngine {
                 spawnBuf.add(spawnProto(pet));
                 return true;
             }
-            case 13 -> {                                                                   // Biến hình: more HP for a while (Biến hình only adds HP, CONFIRMED)
-                if (f.hpBonusAmount > 0) {
-                    return false;
+            case 13 -> {                                                                   // Biến hình: a hold of 1.5 s, then the monkey (finishCast)
+                if (now < f.monkeyUntil) {
+                    return false;                                                          // already a monkey (Nro: the skill does nothing then)
                 }
                 pay(f, slot, cd, kiCost, allKi);
-                long add = Math.round(f.hpMax * Json.num(p, "hpBonusPct", 40) / 100.0);
-                f.hpBonusAmount = add;
-                f.hpMax += add;
-                f.hp += add;
-                f.hpBonusUntil = now + (long) Json.num(p, "durationMs", 60000);
-                addEffect(Effect.BUFF, f, f, (int) Json.num(p, "durationMs", 60000), id);
+                long castMs = (long) Json.num(p, "castMs", 1500);
+                beginCast(f, sk, L, castMs, target, f.dirX, f.dirY);
+                addEffect(Effect.CAST_START, f, f, (int) castMs, id);
                 return true;
             }
             case 19 -> {                                                                   // Khiên năng lượng
@@ -674,6 +736,7 @@ public final class MatchEngine {
             case 20 -> {                                                                   // Dịch chuyển tức thời: appear next to the target, stun it, the next hit is a crit
                 f.x = t.x - f.dirX * (f.radius + t.radius + 4);
                 f.y = t.y - f.dirY * (f.radius + t.radius + 4);
+                hit(f, t, f.atk, id, false, true, false);                                   // Nro: the teleport itself strikes (the base attack, always a critical hit), then the stun
                 long ms = (long) Json.num(p, "stunMs", 1000);
                 stun(t, ms);
                 f.nextHitCrit = Json.bool(p, "alwaysCrit");
@@ -687,21 +750,20 @@ public final class MatchEngine {
                 t.chocolateUntil = now + eff;
                 addEffect(Effect.CHOCOLATE, f, t, (int) eff, id);
             }
-            case 22 -> {                                                                   // Thôi miên: everything near the target falls asleep
+            case 22 -> {                                                                   // Thôi miên: the target falls asleep (Nro: the target only, no area)
                 long ms = (long) Json.num(p, "sleepMs", 5000);
-                double radius = L.radiusPx() == null ? 200 : L.radiusPx();
-                for (Entity e : enemiesOf(f)) {
-                    if (e == t || t.distance(e) <= radius) {
-                        long eff = controlMs(e, ms);
-                        e.sleepUntil = now + eff;
-                        addEffect(Effect.SLEEP, f, e, (int) eff, id);
-                    }
-                }
+                long eff = controlMs(t, ms);
+                t.sleepUntil = now + eff;
+                addEffect(Effect.SLEEP, f, t, (int) eff, id);
             }
-            case 23 -> {                                                                   // Trói: the target cannot move
+            case 23 -> {                                                                   // Trói: the target cannot move while the caster stands there (Nro setUseTroi)
                 long ms = (long) Json.num(p, "holdMs", 5000);
+                if (t instanceof Fighter tf && tf.cast != null) {
+                    break;                                                                 // a fighter that is charging cannot be tied (SkillService: prepareQCKK, prepareLaze, prepareTuSat)
+                }
                 long eff = controlMs(t, ms);
                 t.holdUntil = now + eff;
+                t.holdById = f.id;
                 addEffect(Effect.HOLD, f, t, (int) eff, id);
             }
             default -> {
@@ -722,50 +784,47 @@ public final class MatchEngine {
         Map<String, Object> p = L.params();
         int id = c.skill.id();
         switch (id) {
-            case 24, 25 -> {
-                double length = L.lengthPx() == null ? 200 : L.lengthPx();
-                double width = L.widthPx() == null ? 60 : L.widthPx();
-                double base = f.atk * pct(L) / 100.0;
-                for (Entity e : enemiesOf(f)) {
-                    if (inRect(f.x, f.y, c.dirX, c.dirY, length, width, e)) {
-                        hit(f, e, base, id, false, false, false);
-                    }
-                }
+            case 24, 25 -> {                                                               // the beam: every tickMs for activeMs it hits everything in the rectangle (Nro NewSkill)
+                long active = (long) Json.num(p, "activeMs", 2000);
+                long tickMs = Math.max(TICK_MS, (long) Json.num(p, "tickMs", 250));
+                Channel ch = new Channel(c.skill, L, now, now + active, tickMs, f.x, f.y, c.dirX, c.dirY);
+                ch.nextTickAt = now + tickMs;
+                f.channel = ch;
+                EffectEvent.Builder ev = EffectEvent.newBuilder().setEffect(Effect.ULTIMATE_BEAM).setSourceId(f.id).setTargetId(f.id).setDurationMs((int) active)
+                        .setX((float) f.x).setY((float) f.y).setDirX((float) c.dirX).setDirY((float) c.dirY)
+                        .setLength((float) (L.lengthPx() == null ? 200 : L.lengthPx())).setWidth((float) (L.widthPx() == null ? 60 : L.widthPx())).setSkillId(id);
+                effectBuf.add(ev.build());
             }
-            case 11 -> {
+            case 11 -> {                                                                   // Makankosappo: the laser hits the target it was aimed at, nothing else (Nro: plTarget or mobTarget)
                 double length = L.lengthPx() == null ? 2000 : L.lengthPx();
-                double width = L.widthPx() == null ? 48 : L.widthPx();
                 double base = c.kiAtCast * (L.damagePctMaxKi() == null ? 70 : L.damagePctMaxKi()) / 100.0;
-                for (Entity e : enemiesOf(f)) {
-                    if (inRect(f.x, f.y, c.dirX, c.dirY, length, width, e)) {
-                        hit(f, e, base, id, false, false, false);
-                    }
+                Entity aim = c.targetId == 0 ? null : find(c.targetId);
+                if (aim == null || !aim.alive || aim.team == f.team) {
+                    aim = nearestEnemy(f, length);
+                }
+                if (aim != null && f.distance(aim) <= length + aim.radius) {
+                    hit(f, aim, base, id, false, false, false);
                 }
             }
-            case 26 -> {
-                double radius = L.radiusPx() == null ? 500 : L.radiusPx();
-                long ms = (long) Json.num(p, "trapMs", 4000);
-                for (Entity e : enemiesOf(f)) {
-                    double ax = e.x - f.x;
-                    double ay = e.y - f.y;
-                    double dist = Math.hypot(ax, ay);
-                    boolean front = dist < 1e-6 || (ax * c.dirX + ay * c.dirY) / dist >= -0.01;
-                    if (dist <= radius + e.radius && front) {
-                        long eff = controlMs(e, ms);
-                        e.holdUntil = now + eff;
-                        e.stunUntil = Math.max(e.stunUntil, now + eff);
-                        addEffect(Effect.HOLD, f, e, (int) eff, id);
-                    }
-                }
-            }
-            case 10 -> {                                                                   // 10% of the target's HP plus 10 x the caster's attack
+            case 26 -> mafuba(f, c, L, id);
+            case 10 -> {                                                                   // 10% of the HP of each victim plus 10 x the caster's attack, around the target the ball lands on
                 double radius = L.radiusPx() == null ? 380 : L.radiusPx();
+                Entity aim = c.targetId == 0 ? null : find(c.targetId);
+                if (aim == null || !aim.alive || aim.team == f.team) {
+                    aim = nearestEnemy(f, 1e9);
+                }
+                if (aim == null) {
+                    break;
+                }
+                double ax = aim.x;
+                double ay = aim.y;
                 for (Entity e : enemiesOf(f)) {
-                    if (f.distance(e) <= radius + e.radius) {
+                    if (Math.hypot(e.x - ax, e.y - ay) <= radius + e.radius) {
                         hit(f, e, e.hp * 0.10 + 10 * f.atk, id, false, false, false);
                     }
                 }
             }
+            case 13 -> startMonkey(f, L);
             case 14 -> {                                                                   // Tự phát nổ: damage = the caster's current HP, ignores armor, halved against bosses; the caster dies
                 double radius = L.radiusPx() == null ? 430 : L.radiusPx();
                 double divisor = Json.num(p, "vsBossDamageDivisor", 2);
@@ -780,6 +839,146 @@ public final class MatchEngine {
             }
             default -> {
             }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------- the ultimates, the monkey, what a move ends
+
+    /** One tick of the beam of Super Kamejoko or Cađíc liên hoàn chưởng: everything in the rectangle, the one in focus and what lies behind it as well. */
+    private void ultimateTick(Fighter f, Channel ch) {
+        int id = ch.skill.id();
+        if (id != 24 && id != 25) {
+            return;
+        }
+        double length = ch.level.lengthPx() == null ? 200 : ch.level.lengthPx();
+        double width = ch.level.widthPx() == null ? 60 : ch.level.widthPx();
+        double base = f.atk * pct(ch.level) / 100.0;
+        for (Entity e : enemiesOf(f)) {
+            if (inRect(ch.originX, ch.originY, ch.dirX, ch.dirY, length, width, e)) {
+                hit(f, e, base, id, false, false, false);
+            }
+        }
+    }
+
+    /**
+     * Ma phong ba (Nro SkillService.updateSkillSpecial, EffectSkillService.finishUseMafuba): when the gong ends everything within the range is pulled into the jar
+     * (the client shows the targets spinning into it); gatherMs later each of them is a jar for jarMs, taking the caster's max HP x level % every tickMs (never
+     * to death), unable to act the whole time.
+     */
+    private void mafuba(Fighter f, Cast c, StaticData.SkillLevel L, int id) {
+        Map<String, Object> p = L.params();
+        double radius = L.radiusPx() == null ? 500 : L.radiusPx();
+        long active = (long) Json.num(p, "activeMs", 2000);
+        long gather = (long) Json.num(p, "gatherMs", 4000);
+        long jarMs = (long) Json.num(p, "jarMs", 11000);
+        long tickMs = Math.max(TICK_MS, (long) Json.num(p, "tickMs", 500));
+        long perTick = Math.max(1, Math.round(f.hpMax * Json.num(p, "hpPctPerLevel", 1) * Math.max(1, f.skillLevelBySlot.getOrDefault(c.skill.slot(), 1)) / 100.0));
+        double jx = clamp(f.x + c.dirX / Math.max(1e-6, Math.hypot(c.dirX, c.dirY)) * Json.num(p, "jarDistancePx", 75), 0, arenaW);
+        double jy = f.y;
+        Channel hold = new Channel(c.skill, L, now, now + active, active, f.x, f.y, c.dirX, c.dirY);          // the caster stays in the pose while the jar works (no ticks)
+        f.channel = hold;
+        for (Entity e : enemiesOf(f)) {
+            if (f.distance(e) > radius + e.radius) {
+                continue;
+            }
+            long jar = controlMs(e, jarMs);
+            e.jarFrom = now;
+            e.jarGatherEnd = now + gather;
+            e.jarUntil = now + gather + jar;
+            if (e instanceof Fighter ef) {
+                ef.cast = null;
+                ef.channel = null;
+            }
+            effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.MAFUBA_GATHER).setSourceId(f.id).setTargetId(e.id).setDurationMs((int) gather).setX((float) jx).setY((float) jy)
+                    .setSkillId(id).build());
+            effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.JAR).setSourceId(f.id).setTargetId(e.id).setDurationMs((int) (gather + jar)).setX((float) e.x).setY((float) e.y)
+                    .setLength((float) gather).setSkillId(id).build());
+            jars.add(new Jar(e, f, perTick, now + gather, now + gather + jar, tickMs));
+        }
+    }
+
+    private void updateJars() {
+        for (Iterator<Jar> it = jars.iterator(); it.hasNext(); ) {
+            Jar j = it.next();
+            if (!j.victim.alive || now >= j.until) {
+                it.remove();
+                continue;
+            }
+            while (j.nextAt <= now) {
+                long amount = Math.min(j.damage, Math.max(0, j.victim.hp - 1));          // the jar hurts but never kills (Nro: hp - 1 for a mob, hp - 100 for a player)
+                j.nextAt += j.tickMs;
+                if (amount <= 0) {
+                    continue;
+                }
+                if (j.victim.shielded(now)) {
+                    damageBuf.add(DamageEvent.newBuilder().setSourceId(j.owner.id).setTargetId(j.victim.id).setAbsorbed(true).setSkillId(26).build());
+                    continue;
+                }
+                j.victim.hp -= amount;
+                damageBuf.add(DamageEvent.newBuilder().setSourceId(j.owner.id).setTargetId(j.victim.id).setAmount(amount).setSkillId(26).build());
+                if (j.owner instanceof Fighter sf) {
+                    sf.damageDealt += amount;
+                }
+            }
+        }
+    }
+
+    /** Biến hình (Nro EffectSkillService.setIsMonkey, NPoint): max HP + (level + 3) x 10 %, the HP now doubled, attack + (level + 3) %, a critical rate of 110. */
+    private void startMonkey(Fighter f, StaticData.SkillLevel L) {
+        Map<String, Object> p = L.params();
+        long add = Math.round(f.hpMax * Json.num(p, "hpBonusPct", 40) / 100.0);
+        f.monkeyHpAdd = add;
+        f.hpMax += add;
+        f.hp = Math.min(f.hpMax, f.hp * 2);
+        f.monkeyAtkAdd = f.atk * Json.num(p, "dameBonusRaw", 4) / 100.0;
+        f.atk += f.monkeyAtkAdd;
+        f.monkeyCritBefore = f.critRatePct;
+        f.critRatePct = Json.num(p, "critRatePct", 110);
+        long ms = (long) Json.num(p, "durationMs", 60000);
+        f.monkeyUntil = now + ms;
+        addEffect(Effect.BUFF, f, f, (int) ms, 13);
+    }
+
+    private void endMonkey(Fighter f) {
+        if (f.monkeyUntil == 0) {
+            return;
+        }
+        f.hpMax -= f.monkeyHpAdd;
+        f.hp = Math.min(f.hp, f.hpMax);
+        f.atk -= f.monkeyAtkAdd;
+        f.critRatePct = f.monkeyCritBefore;
+        f.monkeyHpAdd = 0;
+        f.monkeyAtkAdd = 0;
+        f.monkeyUntil = 0;
+        addEffect(Effect.CAST_END, f, f, 0, 13);
+    }
+
+    /** Tái tạo năng lượng ends (a move, another skill, a stun, full HP and Ki): the client takes the pose off. */
+    private void endRegen(Fighter f) {
+        if (now < f.regenUntil) {
+            f.regenUntil = 0;
+            addEffect(Effect.CAST_END, f, f, 0, 8);
+        }
+    }
+
+    /** What a fighter holds with Trói lets go (Nro removeUseTroi): it moved, used a skill, was stopped or died. */
+    private void releaseHolds(Entity holder) {
+        for (Entity e : entities) {
+            if (e.holdById == holder.id) {
+                e.holdById = 0;
+                if (now < e.holdUntil) {
+                    e.holdUntil = now;
+                    addEffect(Effect.CAST_END, holder, e, 0, 23);
+                }
+            }
+        }
+    }
+
+    private void breakChannel(Fighter f) {
+        if (f.channel != null) {
+            int id = f.channel.skill.id();
+            f.channel = null;
+            addEffect(Effect.CAST_END, f, f, 0, id);
         }
     }
 
@@ -911,8 +1110,12 @@ public final class MatchEngine {
         }
         victim.alive = false;
         victim.hp = 0;
+        releaseHolds(victim);
         if (victim instanceof Fighter f) {
             f.cast = null;
+            f.channel = null;
+            f.regenUntil = 0;
+            endMonkey(f);
             if (training != null) {
                 delayed.add(new Delayed(now + training.reviveAfterMs(), () -> standUp(f), null));     // training: back on its feet after a moment
             }
@@ -931,7 +1134,8 @@ public final class MatchEngine {
         f.hp = f.hpMax;
         f.ki = f.kiMax;
         f.cast = null;
-        f.stunUntil = f.holdUntil = f.sleepUntil = f.chocolateUntil = 0;
+        f.stunUntil = f.holdUntil = f.sleepUntil = f.chocolateUntil = f.jarUntil = 0;
+        f.channel = null;
         spawnBuf.add(spawnProto(f));
     }
 
@@ -1120,7 +1324,7 @@ public final class MatchEngine {
             case 7 -> squad.stream().anyMatch(o -> (!o.alive || ratio(o) < 0.6) && f.distance(o) <= (L.radiusPx() == null ? 130 : L.radiusPx()) + 40);
             case 8 -> ratio(f) < 0.7 && now >= f.regenUntil;
             case 12 -> bossAlive && dist <= 600;
-            case 13 -> bossAlive && f.hpBonusAmount == 0;
+            case 13 -> bossAlive && now >= f.monkeyUntil;
             case 19 -> ratio(f) < 0.5 || telegraphs.stream().anyMatch(t -> inTelegraph(t, f));
             case 21 -> bossAlive && squad.stream().filter(o -> o.alive).count() > 1 && f.hpBonusAmount == 0;
             case 18, 22, 23 -> bossAlive && (target instanceof Dummy || target instanceof Monster m && m.kind == MonsterKind.BOSS)
@@ -1566,8 +1770,14 @@ public final class MatchEngine {
     private void stun(Entity e, long ms) {
         e.stunUntil = Math.max(e.stunUntil, now + controlMs(e, ms));
         if (e instanceof Fighter f) {
+            if (f.cast != null) {
+                addEffect(Effect.CAST_END, f, f, 0, f.cast.skill.id());
+            }
             f.cast = null;
+            breakChannel(f);
+            endRegen(f);
         }
+        releaseHolds(e);
     }
 
     /** Control effects on a boss are shortened (balance_config match_rules boss_control_factor / boss_control_max_ms). */
@@ -1579,8 +1789,12 @@ public final class MatchEngine {
     }
 
     private void addEffect(Effect effect, Entity src, Entity target, int durationMs, int skillId) {
-        effectBuf.add(EffectEvent.newBuilder().setEffect(effect).setSourceId(src.id).setTargetId(target.id).setDurationMs(durationMs)
-                .setX((float) target.x).setY((float) target.y).setSkillId(skillId).build());
+        EffectEvent.Builder b = EffectEvent.newBuilder().setEffect(effect).setSourceId(src.id).setTargetId(target.id).setDurationMs(durationMs)
+                .setX((float) target.x).setY((float) target.y).setSkillId(skillId);
+        if (effect == Effect.CAST_START) {
+            b.setDirX((float) src.dirX).setDirY((float) src.dirY);               // the way the skill is aimed: the client turns the character (and draws the beam) that way
+        }
+        effectBuf.add(b.build());
     }
 
     // ---------------------------------------------------------------------------------------------------------------- messages
@@ -1622,7 +1836,9 @@ public final class MatchEngine {
                 .setElapsedS((int) (now / 1000)).setRevivesLeft(Math.max(0, revivesLeft())).setKillStreak(streak).setAckSeq(lastSeq);
         for (Entity e : entities) {
             b.addStates(EntityState.newBuilder().setEntityId(e.id).setX((float) e.x).setY((float) e.y).setDirX((float) e.dirX).setDirY((float) e.dirY)
-                    .setHp(Math.max(0, e.hp)).setHpMax(e.hpMax).setKi((long) e.ki).setKiMax((long) e.kiMax).setAlive(e.alive).setEffects(effectMask(e)));
+                    .setHp(Math.max(0, e.hp)).setHpMax(e.hpMax).setKi((long) e.ki).setKiMax((long) e.kiMax).setAlive(e.alive).setEffects(effectMask(e))
+                    .setAtk(Math.round(e.atk)).setArmor(Math.round(e instanceof Fighter ff ? ff.armorStat * (now < ff.buffUntil ? ff.buffArmorMult : 1.0) : 0))
+                    .setCritRatePct((float) e.effectiveCritRate(now)).setCritDmgPct((float) e.critDmgPct));
         }
         for (Projectile p : projectiles) {
             b.addProjectiles(ProjectileState.newBuilder().setProjectileId(p.id).setOwnerId(p.owner.id).setX((float) p.x).setY((float) p.y)

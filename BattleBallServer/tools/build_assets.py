@@ -45,7 +45,7 @@ FIXED_TIME = (2026, 1, 1, 0, 0, 0)
 # icons the menus need besides the costumes: the Potara earring (Nro item 1819, icon 15614) and its shard (item 1820, icon 15613); see V025__potara_items_nro_ids.sql.
 # 11569, 11572, 15412: the book materials #301 to #303 (the mailbox shows the picture of a gift).
 # 728: the portrait of Urôn (the NPC shop shows it at the top, like the avatar of an NPC in Nro).
-EXTRA_ICON_IDS = (15614, 15613, 11569, 11572, 15412, 728)
+EXTRA_ICON_IDS = (15614, 15613, 11569, 11572, 15412, 728, 11166, 11167, 11168, 11169, 11170, 11171, 11172)      # the last seven: the jar of Ma phong ba (parts 1218 to 1220)
 # the skill buttons of the village training (skill_template.icon_id of the 25 skills, docs/architecture/BattleBallServer.md 15.12)
 SKILL_ICON_IDS = (539, 540, 717, 724, 720, 716, 711, 723, 722, 718, 2248, 3778, 3780, 3784, 3783, 3781, 3782, 3779, 11162, 11193, 11194)
 

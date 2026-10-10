@@ -97,6 +97,14 @@ namespace BattleBall.Net
 
         public bool Acting { get { return _action != null; } }
 
+        /// <summary>Takes the action off now (the skill ended or was broken before its poses were over).</summary>
+        public void StopAction()
+        {
+            if (_action == null) return;
+            _action = null;
+            if (HasCostume) Place();
+        }
+
         /// <summary>Standing (breathing), running (the five Run poses of the Nro table in turn) or in the air; the map uses it for the characters that walk.</summary>
         public void SetState(PoseState state)
         {

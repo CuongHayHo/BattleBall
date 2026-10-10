@@ -435,3 +435,8 @@ Hiện tại (CONFIRMED, người dùng chốt): mất kết nối thì hủy tr
 ## Cập nhật 2026-10-09: cửa hàng NPC (CONFIRMED, người dùng chốt)
 
 `ShopRequest{npc_id}` (payload 65, cần đăng nhập) trả `ShopContent{npc_id, npc_name, tabs[]{name, items[]{skin: SkinInfo, gem_price}}}` (66), hoặc `ActionResult` NOT_FOUND khi NPC không bán gì. Mua một cải trang dùng `BuySkinRequest` (không có message mua riêng của cửa hàng); máy chủ kiểm lại mọi điều kiện, và gửi `PlayerDataSnapshot` mới khi thành công. Cơ chế: `docs/architecture/BattleBallServer.md` 15.15.
+
+### Cập nhật 2026-10-10: gồng, bình Ma phong ba, chỉ số thời gian thực (CONFIRMED)
+
+- `Effect` thêm `CAST_END = 13` (một cast, gồng, kênh hoặc dây trói kết thúc sớm: máy khách dừng tư thế; `skill_id`, `source_id`, và `target_id` với dây trói), `MAFUBA_GATHER = 14` (mục tiêu bị hút vào bình, `duration_ms` đến lúc thành bình, `x, y` điểm đặt bình), `JAR = 15` (mục tiêu là cái bình trong `duration_ms`, tính từ lúc nhả chiêu) và `ULTIMATE_BEAM = 16` (chùm của Super Kamejoko hoặc Cađíc: `x, y, dir`, `length`, `width`, `duration_ms` thời gian gây sát thương).
+- `EntityState.effects` thêm bit 256 (bận: gồng, tụ lực, chùm tuyệt kỹ), 512 (là cái bình), 1024 (đang bị hút vào bình), 2048 (khỉ); máy khách khoá nhân vật theo các bit này. `EntityState` thêm `atk = 12`, `armor = 13`, `crit_rate_pct = 14`, `crit_dmg_pct = 15` (số liệu hiện tại, đã tính buff) cho menu.

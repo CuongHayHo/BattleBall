@@ -19,6 +19,7 @@ namespace BattleBall.Net
         public BbVillageView village;
 
         const float TickSeconds = 1f / 30f;
+        const float DefaultBeam = 3360f;          // 2 chunks of the village map (1680 Nro px each), the reach of the ultimates (owner request 2026-10-10)
         const float Chest = 18f;                  // Nro px above the feet where the beam and the sparks are centred (Effect_End counts from the character's centre)
 
         struct SheetInfo
@@ -71,7 +72,9 @@ namespace BattleBall.Net
             public int gong;                      // ticks of the charge
             public bool hasTarget;
             public float targetX, targetY;        // feet of the target when the skill was used (canvas px)
-            public float beamLength;              // Nro px
+            public float beamLength = DefaultBeam;              // Nro px (the server tells the real figure when the gong ends: Release)
+            public int dir;                                     // the way the server aimed it (1 right, -1 left, 0 = the way the character faces)
+            public int activeTicks = 60;                        // ticks the beam hits for (the server: 2 s)
             public float[] spreadX, spreadY, speed;      // the energy balls of Cađíc: where each one lands (Nro px around the target) and how fast it flies
             public readonly List<Image> pool = new List<Image>();
             public int used;
@@ -84,21 +87,11 @@ namespace BattleBall.Net
         readonly List<Run> _runs = new List<Run>();
 
         /// <summary>An ultimate starts charging now: {@code seconds} of charge, then the skill itself. {@code target} is the feet of the enemy it is aimed at.</summary>
-        public void Cast(ulong character, uint skillId, float seconds, bool hasTarget, Vector2 target)
+        public void Cast(ulong character, uint skillId, float seconds, bool hasTarget, Vector2 target, int dir = 0)
         {
             if (skillId < 24 || skillId > 26) return;
             _runs.RemoveAll(r => { if (r.character == character) { Clear(r); return true; } return false; });
-            var run = new Run { character = character, skill = skillId, start = Time.unscaledTime, gong = Mathf.RoundToInt(seconds * 30f), hasTarget = hasTarget, targetX = target.x, targetY = target.y };
-            float scale = Mathf.Max(0.1f, village.UiScale);
-            ulong id;
-            Vector2 feet;
-            int facing;
-            for (int i = 0; i < village.PartyCount; i++)
-                if (village.PartyMember(i, out id, out feet, out facing) && id == character)
-                {
-                    run.beamLength = hasTarget ? Mathf.Clamp(Mathf.Abs(target.x - feet.x) / scale + 30f, 120f, 900f) : 500f;
-                    break;
-                }
+            var run = new Run { dir = dir, character = character, skill = skillId, start = Time.unscaledTime, gong = Mathf.RoundToInt(seconds * 30f), hasTarget = hasTarget, targetX = target.x, targetY = target.y };
             if (skillId == 25)
             {
                 var rnd = new System.Random((int)(character * 31 + 7));
@@ -116,6 +109,111 @@ namespace BattleBall.Net
             }
             _runs.Add(run);
             Sounds(skillId, seconds);
+        }
+
+        /// <summary>The gong is over (the server's ULTIMATE_BEAM): the beam goes {@code lengthNro} Nro px and hits for {@code seconds}, through everything in its way.</summary>
+        public void Release(ulong character, uint skillId, float lengthNro, float seconds)
+        {
+            foreach (var r in _runs)
+                if (r.character == character && r.skill == skillId)
+                {
+                    if (lengthNro > 100f) r.beamLength = lengthNro;
+                    if (seconds > 0.2f) r.activeTicks = Mathf.RoundToInt(seconds * 30f);
+                }
+        }
+
+        /// <summary>The ultimate of this character is broken (a stun): what it draws goes away.</summary>
+        public void Cancel(ulong character)
+        {
+            _runs.RemoveAll(r => { if (r.character == character) { Clear(r); return true; } return false; });
+        }
+
+        public void CancelAll()
+        {
+            foreach (var r in _runs) Clear(r);
+            _runs.Clear();
+            foreach (var j in _jars) EndJar(j);
+            _jars.Clear();
+        }
+
+        // ---- the targets of Ma phong ba (Effect_End.updListObj_Mafuba, then the jar costume of the server's setIsBinh): they spin into the jar, vanish, and are jars for 11 s
+
+        sealed class JarT
+        {
+            public ulong caster;
+            public string key;
+            public float start;                   // Time.unscaledTime when the gong ended
+            public float gather;                  // seconds until it is a jar (the server's 4 s)
+            public float until;                   // seconds from start until it is itself again (0 = not told yet)
+            public float jarX;                    // where the server put the jar (canvas px): which side of the caster it is on
+            public int rank;                      // its place among the targets of the same skill: they sit evenly around the vortex
+            public int count;
+        }
+
+        readonly List<JarT> _jars = new List<JarT>();
+        const int SuckStart = 14, Sucking = 44;                                                      // Effect_End: the stars start to turn at tick 14, the radius 90 shrinks to 0
+
+        /// <summary>This target (a training dummy) is sucked into the jar of {@code caster}: it spins in over {@code gatherSeconds}, is hidden, then drawn as a jar.</summary>
+        public void JarTarget(ulong caster, string key, float gatherSeconds, float jarX)
+        {
+            _jars.RemoveAll(x => { if (x.key == key) { EndJar(x); return true; } return false; });
+            var j = new JarT { caster = caster, key = key, start = Time.unscaledTime, gather = gatherSeconds, jarX = jarX };
+            int same = 0;
+            foreach (var o in _jars) if (o.caster == caster && Mathf.Abs(o.start - j.start) < 0.3f) same++;
+            j.rank = same;
+            _jars.Add(j);
+            foreach (var o in _jars) if (o.caster == caster && Mathf.Abs(o.start - j.start) < 0.3f) o.count = same + 1;
+        }
+
+        /// <summary>How long the target stays in the jar world in all (gather and jar): after it the dummy is itself again.</summary>
+        public void JarTime(string key, float totalSeconds)
+        {
+            foreach (var j in _jars) if (j.key == key) j.until = totalSeconds;
+        }
+
+        void EndJar(JarT j)
+        {
+            if (village == null) return;
+            village.SetDummyJar(j.key, false);
+            village.SetDummyDraw(j.key, true, null);
+        }
+
+        void TickJars()
+        {
+            if (_jars.Count == 0) return;
+            float s = village.UiScale;
+            for (int i = _jars.Count - 1; i >= 0; i--)
+            {
+                var j = _jars[i];
+                float t = Time.unscaledTime - j.start;
+                if ((j.until > 0f && t >= j.until) || t > 40f) { EndJar(j); _jars.RemoveAt(i); continue; }
+                ulong id;
+                Vector2 feet = Vector2.zero, own;
+                int facing = 1;
+                float h;
+                bool found = false;
+                for (int k = 0; k < village.PartyCount && !found; k++) found = village.PartyMember(k, out id, out feet, out facing) && id == j.caster;
+                if (!found || !village.DummyInfo(j.key, out own, out h)) continue;
+                int dir = j.jarX >= feet.x ? 1 : -1;
+                int tick = Mathf.FloorToInt(t * 30f);
+                if (tick < SuckStart) { village.SetDummyDraw(j.key, true, null); continue; }
+                if (tick < SuckStart + Sucking)
+                {
+                    // spinning in: the angle speeds up by 2 degrees a tick up to 40, the radius (90 Nro px) shrinks by 2 a tick; the targets are spread evenly around the vortex
+                    int n = tick - SuckStart + 1;
+                    float turned = n <= 20 ? n * (n + 1f) : 420f + 40f * (n - 20);
+                    float radius = Mathf.Max(0f, 90f - 2f * n);
+                    float angle = (25f + j.rank * (360f / Mathf.Max(1, j.count)) - turned) * Mathf.Deg2Rad;
+                    float wispH = Info[24].h / (float)Info[24].n;
+                    Vector2 vortex = Nro(feet, dir, 75f, -12f) + new Vector2(0f, (wispH + 50f - 19f) * s);
+                    village.SetDummyDraw(j.key, true, vortex + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius * s - new Vector2(0f, 20f * s));
+                    continue;
+                }
+                if (t < j.gather) { village.SetDummyDraw(j.key, false, null); continue; }          // inside the jar of the skill, out of sight
+                // the target is a jar (Nro: the outfit of the parts 1218 to 1220), on its own feet, until the server says it is itself again
+                village.SetDummyJar(j.key, true);
+                village.SetDummyDraw(j.key, true, null);
+            }
         }
 
         /// <summary>The sounds of an ultimate (Effect_End: the gong, then the beam, each ball, the jar), started now with their delays.</summary>
@@ -154,6 +252,7 @@ namespace BattleBall.Net
         public void Tick()
         {
             if (village == null || village.WorldLayer == null) return;
+            TickJars();
             for (int i = _runs.Count - 1; i >= 0; i--)
             {
                 var r = _runs[i];
@@ -166,7 +265,7 @@ namespace BattleBall.Net
                 int tick = Mathf.FloorToInt((Time.unscaledTime - r.start) / TickSeconds);
                 r.used = 0;
                 r.beamUsed = 0;
-                Draw(r, tick, feet, facing >= 0 ? 1 : -1);
+                Draw(r, tick, feet, r.dir != 0 ? r.dir : facing >= 0 ? 1 : -1);
                 for (int k = r.used; k < r.pool.Count; k++) if (r.pool[k] != null) r.pool[k].enabled = false;
                 for (int k = r.beamUsed; k < r.beamPool.Count; k++) if (r.beamPool[k] != null) r.beamPool[k].enabled = false;
                 if (r.beamRoot != null) r.beamRoot.gameObject.SetActive(r.beamUsed > 0);
@@ -253,15 +352,15 @@ namespace BattleBall.Net
 
         void DrawBeam(Run r, int k, Vector2 feet, int dir)
         {
-            const int Hold = 36;
             int[] grow = { 0, 0, 0, 1, 1, 1 };
             int[] fade = { 2, 2, 2, 3, 3, 3 };
+            int Hold = Mathf.Max(6, r.activeTicks - fade.Length);                  // it hits for the time the server says, then fades
             int frame;
             if (k < Hold) frame = grow[k % 6];
             else if (k - Hold < fade.Length) frame = fade[k - Hold];
             else { r.done = true; return; }
             float s = village.UiScale;
-            float w = Mathf.Min(r.beamLength, 20f * (k + 1));
+            float w = Mathf.Min(r.beamLength, Mathf.Max(20f, r.beamLength / 24f) * (k + 1));          // 20 px a tick in Nro; a longer beam is as fast as it must be to be across in 0.8 s
             float h = Info[11].h / (float)Info[11].n;
             if (r.beamRoot == null)
             {
@@ -364,7 +463,7 @@ namespace BattleBall.Net
             const int Sucking = 44;                  // ticks the vortex pulls (Nro: 90 and a radius shrinking by 1; here by 2)
             const int Hold = 130;                    // the jar is closed until here (the server holds the targets 4 s)
             float s = village.UiScale;
-            Vector2 jar = Nro(feet, 1, 0f, -12f);
+            Vector2 jar = Nro(feet, dir, 75f, -12f);               // the server's jar point: 75 Nro px in front of the caster (NewSkill._xObjTaget = 75)
             float wispH = Info[24].h / (float)Info[24].n;
             float h = wispH + 50f - 19f;             // the height of the vortex above the jar (Nro: h)
             Vector2 vortex = jar + new Vector2(0f, h * s);

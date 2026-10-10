@@ -243,6 +243,168 @@ namespace BattleBall.Net
             }
         }
 
+        /// <summary>
+        /// The skills that gather power (owner request 2026-10-10): while they last the character must not walk (the scenario pushes the stick all the time and logs where it is),
+        /// the ultimates go through every target, Ma phong ba turns the targets into jars, Biến hình changes the numbers of the menu.
+        /// </summary>
+        async Task Learn(BbClient client, string race, params uint[] skills)
+        {
+            BattleBall.Proto.CharacterInfo ch = null;
+            foreach (var c in client.Snapshot.Characters) if (c.Race == race) ch = c;
+            foreach (uint skill in skills)
+            {
+                var r = await client.UpgradeSkillAsync(ch.CharacterId, skill);
+                Log(race + ": learn skill " + skill + ": " + r.Ok + " " + r.Error);
+                client.Pump();
+            }
+            await Wait(0.5f);
+        }
+
+        async Task Gong(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            // 1. Super Kamejoko of Trái Đất
+            menu.DemoSelect(0);
+            await Wait(2.5f);
+            village.TeleportMain(1500f);
+            await WaitFor(() => training.Active, 10f);
+            training.Focus("moc_nhan");
+            await Wait(1.5f);
+            Log("kame: " + Where(village));
+            training.DebugUse(24);
+            await ObserveWalking("kame", 6.5f, village, 0.3f, 1.0f, 2.2f, 2.5f, 3.0f, 3.6f, 4.2f, 5.0f);
+            await Wait(1.5f);
+            // 2. Ma phong ba of Namếc: the two dummies are within 500 px (learned only now: the AI of the same race would have used it first)
+            await Learn(client, "NAMEC", 26);
+            menu.DemoSelect(2);
+            await Wait(2.5f);
+            village.TeleportMain(2050f);
+            await WaitFor(() => training.Active, 10f);
+            training.Focus("moc_nhan");
+            await Wait(1.5f);
+            Log("mafuba: " + Where(village));
+            training.DebugUse(26);
+            _pushSeconds = 1.0f;
+            await ObserveWalking("mafuba", 22f, village, 0.5f, 2.3f, 2.8f, 3.4f, 4.0f, 4.8f, 5.6f, 6.3f, 7.5f, 9f, 12f, 16f, 18.5f, 20f);
+            await Wait(1f);
+            // 3. Biến hình of Xayda: the numbers of the menu
+            await Learn(client, "XAYDA", 13);
+            menu.DemoSelect(1);
+            await Wait(2.5f);
+            village.TeleportMain(1850f);
+            await WaitFor(() => training.Active, 10f);
+            training.Focus("moc_nhan");
+            menu.SetPanelOpen(true, true);
+            await Wait(1.5f);
+            _pushSeconds = 1000f;
+            Log("monkey before: " + menu.headerText.text.Replace("\n", " | "));
+            training.DebugUse(13);
+            await ObserveWalking("monkey", 5f, village, 0.3f, 1.0f, 1.6f, 2.2f, 3.5f);
+            Log("monkey after: " + menu.headerText.text.Replace("\n", " | "));
+            menu.SetPanelOpen(false, true);
+        }
+
+        /// <summary>
+        /// The live numbers of the menu with a fusion (owner request 2026-10-10): the session of a fused character has one fighter carrying the sum; the fusion tab shows it live,
+        /// the tabs of the two characters keep their own figures. The run logs the header of every tab before, during and after the session.
+        /// </summary>
+        async Task Fusion(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            await Learn(client, "EARTH", 1);                                   // the action brings the snapshot with the level 50 and the earring the run put in the database
+            menu.SetPanelOpen(true, true);
+            // a session that started before the fusion: using the earring must end it (the partner would go on fighting beside the fused character)
+            menu.DemoSelect(0);
+            village.TeleportMain(1850f);
+            await WaitFor(() => training.Active, 10f);
+            training.Focus("moc_nhan");
+            await Wait(2f);
+            Log("before the fusion: session active " + training.Active + ", fused " + training.FusedSession);
+            menu.DemoSelect(1);
+            await Wait(0.3f);
+            menu.DemoEarring();                                                // the popup of the earring on another planet's tab (not in use yet)
+            await Wait(0.6f);
+            Shoot("earring_unfused");
+            menu.popup.Hide();
+            menu.DemoFuse(0, 2);                                               // Trái Đất is the main character, Namếc its partner
+            await Wait(0.3f);
+            Log("just after the fusion: session active " + training.Active);
+            await WaitFor(() => training.Active && training.FusedSession, 12f);
+            Log("a while after: session active " + training.Active + ", fused " + training.FusedSession);
+            menu.DemoSelect(1);
+            await Wait(0.3f);
+            menu.DemoEarring();                                                // in use: "Tách" on a tab of another planet too
+            await Wait(0.6f);
+            Shoot("earring_fused");
+            menu.popup.Hide();
+            await Wait(0.5f);
+            string[] names = { "Trái Đất", "Xayda", "Namếc", "Hợp thể" };
+            for (int page = 0; page < 4; page++)
+            {
+                menu.DemoSelect(page);
+                await Wait(0.4f);
+                Log("static " + names[page] + ": " + menu.headerText.text.Replace("\n", " | "));
+            }
+            menu.DemoSelect(0);                                                // the main character's own tab: the session starts for the fusion
+            village.TeleportMain(1850f);
+            await WaitFor(() => training.Active, 10f);
+            training.Focus("moc_nhan");
+            await Wait(1.5f);
+            Log("session fused: " + training.FusedSession);
+            for (int page = 0; page < 4; page++)
+            {
+                menu.DemoSelect(page);
+                await Wait(0.6f);
+                Log("live " + names[page] + ": " + menu.headerText.text.Replace("\n", " | "));
+                if (page == 3) Shoot("fusion_tab");
+            }
+        }
+
+        /// <summary>The three ultimates used by the three characters at once (the AI use theirs by themselves), the main one on the right of the dummy so that its beam goes left.</summary>
+        async Task Ultimates(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            await Learn(client, "XAYDA", 25);
+            await Learn(client, "NAMEC", 26);
+            menu.DemoSelect(1);                                                  // Xayda is the main character
+            await Wait(2.5f);
+            village.TeleportMain(2100f);                                         // right of the first dummy (1936): the target is on its left
+            await WaitFor(() => training.Active, 10f);
+            training.Focus("moc_nhan");
+            await Wait(1.2f);
+            Log("ult: " + Where(village));
+            training.DebugUse(25);
+            _pushSeconds = 1.0f;
+            await ObserveWalking("ult", 25f, village, 0.3f, 2.2f, 2.6f, 3.0f, 3.6f, 4.4f, 5.5f, 7f, 9f, 12f, 15f, 20f);
+        }
+
+        /// <summary>Like Observe, but the stick is pushed to the right all the time: a character that is held must not move, and the log says where the main one is.</summary>
+        float _pushSeconds = 1000f;
+
+        async Task ObserveWalking(string name, float seconds, BbVillageView village, params float[] shotsAt)
+        {
+            float start = Time.realtimeSinceStartup, nextLog = 0f;
+            int shot = 0;
+            Log("--- " + name);
+            ulong id;
+            Vector2 feet;
+            int facing;
+            while (Time.realtimeSinceStartup - start < seconds)
+            {
+                float t = Time.realtimeSinceStartup - start;
+                if (t >= nextLog)
+                {
+                    nextLog += 0.25f;
+                    village.PartyMember(0, out id, out feet, out facing);
+                    var sb = new StringBuilder("t=" + t.ToString("0.00") + " main x=" + Mathf.RoundToInt(feet.x) + " locked=" + village.IsLocked(id) + " header: " +
+                                               (_menu != null ? _menu.headerText.text.Replace("\n", " | ") : ""));
+                    Log(sb.ToString());
+                }
+                if (shot < shotsAt.Length && t >= shotsAt[shot]) { Shoot(name + "_" + shotsAt[shot].ToString("0.0")); shot++; }
+                if (t < _pushSeconds) village.Tick(new Vector2(1f, 0f), Time.unscaledDeltaTime);                 // the stick, over the stick of the real joystick (zero in this run)
+                await Task.Yield();
+            }
+        }
+
+        BbMenuUi _menu;
+
         /// <summary>Biến hình alone (the server refuses it while another bonus of HP, e.g. the whistle, is on).</summary>
         async Task AuditMonkey(BbMenuUi menu, BbTraining training, BbVillageView village)
         {
@@ -304,9 +466,9 @@ namespace BattleBall.Net
             if (!await WaitFor(() => File.Exists(go), 300f)) throw new Exception("nobody put the gold on the account");
             BattleBall.Proto.CharacterInfo earth = null;
             foreach (var c in client.Snapshot.Characters) if (c.Race == "EARTH") earth = c;
-            bool beams = Arg("-bbScenario", "") == "beams";
-            bool earthRun = Arg("-bbScenario", "") != "auditXayda" && Arg("-bbScenario", "") != "auditMonkey" && !beams, xaydaRun = Arg("-bbScenario", "") != "auditEarth" && !beams;
-            foreach (uint skill in beams ? new uint[] { 1 } : earthRun ? new uint[] { 1, 1, 1, 10, 24, 6, 9 } : new uint[0])
+            bool beams = Arg("-bbScenario", "") == "beams", gong = Arg("-bbScenario", "") == "gong" || Arg("-bbScenario", "") == "fusion" || Arg("-bbScenario", "") == "ult";
+            bool earthRun = Arg("-bbScenario", "") != "auditXayda" && Arg("-bbScenario", "") != "auditMonkey" && !beams && !gong, xaydaRun = Arg("-bbScenario", "") != "auditEarth" && !beams && !gong;
+            foreach (uint skill in gong ? new uint[] { 10, 24 } : beams ? new uint[] { 1 } : earthRun ? new uint[] { 1, 1, 1, 10, 24, 6, 9 } : new uint[0])
             {
                 var r = await client.UpgradeSkillAsync(earth.CharacterId, skill);
                 Log("learn/raise skill " + skill + ": " + r.Ok + " " + r.Error);
@@ -314,19 +476,22 @@ namespace BattleBall.Net
             }
             BattleBall.Proto.CharacterInfo xayda = null;
             foreach (var c in client.Snapshot.Characters) if (c.Race == "XAYDA") xayda = c;
-            foreach (uint skill in beams ? new uint[] { 5 } : Arg("-bbScenario", "") == "auditMonkey" ? new uint[] { 13 } : xaydaRun ? new uint[] { 13, 14, 21, 23 } : new uint[0])
+            foreach (uint skill in gong ? new uint[0] : beams ? new uint[] { 5 } : Arg("-bbScenario", "") == "auditMonkey" ? new uint[] { 13 } : xaydaRun ? new uint[] { 13, 14, 21, 23 } : new uint[0])
             {
                 var r = await client.UpgradeSkillAsync(xayda.CharacterId, skill);
                 Log("Xayda: learn skill " + skill + ": " + r.Ok + " " + r.Error);
                 client.Pump();
             }
-            if (beams)
+            if (beams || gong)
             {
                 BattleBall.Proto.CharacterInfo namek = null;
                 foreach (var c in client.Snapshot.Characters) if (c.Race == "NAMEC") namek = c;
-                var r = await client.UpgradeSkillAsync(namek.CharacterId, 3);
-                Log("Namek: learn skill 3: " + r.Ok + " " + r.Error);
-                client.Pump();
+                if (!gong)
+                {
+                    var r = await client.UpgradeSkillAsync(namek.CharacterId, 3u);
+                    Log("Namek: learn skill 3: " + r.Ok + " " + r.Error);
+                    client.Pump();
+                }
             }
             await WaitFor(() => { client.Pump(); return false; }, 0.5f);
             client.EventReceived += OnServer;
@@ -342,9 +507,13 @@ namespace BattleBall.Net
             Log("menu scene up: " + Where(village));
 
             _training = training;
+            _menu = menu;
             string scenario = Arg("-bbScenario", "");
             if (scenario == "shop") { await ShopRun(menu, village); return; }
             if (scenario == "beams") { await Beams(menu, training, village); return; }
+            if (scenario == "gong") { await Gong(menu, training, village, client); return; }
+            if (scenario == "ult") { await Ultimates(menu, training, village, client); return; }
+            if (scenario == "fusion") { await Fusion(menu, training, village, client); return; }
             if (scenario == "auditEarth") { await AuditEarth(menu, training, village); return; }
             if (scenario == "auditMonkey") { await AuditMonkey(menu, training, village); return; }
             if (scenario == "auditXayda") { await AuditXayda(menu, training, village); return; }

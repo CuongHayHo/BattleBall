@@ -18,6 +18,10 @@ namespace BattleBall.Net
         [Tooltip("Sprite scale to download and draw: 2, 3 or 4 (x4 is the sharpest, 38,7 MB of costume sprites instead of 16 MB for x2); 0 = decided once per device from its resolution and memory")]
         public int assetScale = 3;
 
+        [Header("Performance")]
+        [Tooltip("Frames a second (Android runs at 30 when nothing is set). 60 is smooth and kind to the battery; 90 or 120 only for phones whose screen runs that fast.")]
+        public int targetFrameRate = 60;
+
         [Header("Development")]
         [Tooltip("Accept the self-signed certificate of the development server. Only honoured in the Editor and in Development Builds; release builds always validate the certificate.")]
         public bool acceptAnyCertificate = true;

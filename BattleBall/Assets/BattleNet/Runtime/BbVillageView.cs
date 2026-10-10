@@ -53,6 +53,8 @@ namespace BattleBall.Net
             public float runUntil;
             public float holdUp;                 // seconds the stick has been held up in the air: long enough and the character flies
             public BbMobView mob;                // a training dummy drawn as an Nro mob (Mộc nhân)
+            public bool jar;                     // a dummy that is the jar of Ma phong ba (the costume of the parts 1218 to 1220)
+            public bool locked;                  // the server holds it (gong, charge, beam, stun, sleep, rope, jar): it takes no input and does not walk
         }
 
         // Speed: the walk of all three, doubled twice (owner requests 2026-10-08: 300, 600, now 1200); the AI follow at Speed * 1.15
@@ -341,6 +343,54 @@ namespace BattleBall.Net
         /// <summary>The whole view shakes by this many canvas px (the explosion of Tự phát nổ).</summary>
         public Vector2 ShakeOffset { get; set; }
 
+        /// <summary>
+        /// The server holds this character (the effect mask of its entity: busy casting, stunned, asleep, held, in the jar): the stick and the walk of the AI do nothing and
+        /// it stays where it is, the way the Nro client locks the character while it charges (Char.isLockMove) or is under an effect.
+        /// </summary>
+        public void SetLocked(ulong characterId, bool locked)
+        {
+            foreach (var a in _actors) if (a.id == characterId) a.locked = locked;
+        }
+
+        public bool IsLocked(ulong characterId)
+        {
+            foreach (var a in _actors) if (a.id == characterId) return a.locked;
+            return false;
+        }
+
+        /// <summary>A character of the party stops the poses it is playing (the skill ended or was broken).</summary>
+        public void StopAction(ulong characterId)
+        {
+            foreach (var a in _actors) if (a.id == characterId) a.view.StopAction();
+        }
+
+        /// <summary>
+        /// A dummy is drawn somewhere else for a while (sucked into the jar of Ma phong ba: spinning around it, then hidden); {@code at} null puts it back on its feet.
+        /// Its place for the game (the arrow, the damage numbers) does not change.
+        /// </summary>
+        public void SetDummyDraw(string key, bool visible, Vector2? at)
+        {
+            Actor a;
+            if (key == null || !_dummies.TryGetValue(key, out a)) return;
+            a.root.gameObject.SetActive(visible);
+            if (!visible) return;
+            if (at.HasValue) a.root.anchoredPosition = at.Value; else Place(a);
+        }
+
+        /// <summary>The costume of the jar of Ma phong ba (catalog entry made by SourceData/tools/add_jar_costume.py from the parts 1218, 1219, 1220 of Nro).</summary>
+        public const int JarCostume = 9101;
+
+        /// <summary>A dummy is the jar of Ma phong ba (its mob or costume is replaced by the jar costume of Nro, standing) or itself again.</summary>
+        public void SetDummyJar(string key, bool jar)
+        {
+            Actor a;
+            if (key == null || !_dummies.TryGetValue(key, out a) || a.jar == jar) return;
+            a.jar = jar;
+            if (a.mob != null) a.mob.gameObject.SetActive(!jar);
+            a.view.Show(jar ? JarCostume : a.costume);
+            if (jar) a.view.SetState(BbCharacterView.PoseState.Stand);
+        }
+
         /// <summary>A character of the party is raised by this many Nro px above the ground (only its picture).</summary>
         public void SetLift(ulong characterId, float nroPx)
         {
@@ -625,6 +675,8 @@ namespace BattleBall.Net
             _clock += dt;
             var main = _actors[0];
             StickHeld = input.sqrMagnitude > 0.04f;
+            bool mainLocked = main.locked;
+            if (mainLocked) { input = Vector2.zero; Approaching = false; StickHeld = false; }
             if (Approaching)
             {
                 float toGo = _approachX - main.x;
@@ -643,7 +695,7 @@ namespace BattleBall.Net
             if (Mathf.Abs(input.x) > 0.05f) main.facing = input.x > 0f ? 1 : -1;
             float g = GroundAt(main.x);
             // flying: the stick sets the height; with the stick let go the character sinks by itself and lands
-            if (main.flying) Fly(main, input.sqrMagnitude < 0.0001f ? -SinkSpeed : Mathf.Abs(input.y) < 0.2f ? 0f : input.y * FlySpeed * (input.y < 0f ? DescentBoost : 1f), dt, g);
+            if (main.flying) Fly(main, mainLocked ? 0f : input.sqrMagnitude < 0.0001f ? -SinkSpeed : Mathf.Abs(input.y) < 0.2f ? 0f : input.y * FlySpeed * (input.y < 0f ? DescentBoost : 1f), dt, g);
             else Walk(main, dt, g);
             // the sounds of the main character's movement (Nro: SoundMn.charJump, charFall, charFly; there are no footsteps in Nro): the landing, the flight every 20 ticks
             if (!wasGrounded && main.grounded) BbSfx.Play(BbSfx.Move, 0.1f);
@@ -658,6 +710,15 @@ namespace BattleBall.Net
             for (int i = 1; i < _actors.Count; i++)
             {
                 var a = _actors[i];
+                if (a.locked)
+                {
+                    // held by the server (a gong, a charge, a beam, an effect on it): it stands where it is, in the air too, and comes down only if it was falling
+                    a.running = false;
+                    a.view.animSpeed = 1f;
+                    if (!a.flying && !a.climbing) Walk(a, dt, GroundAt(a.x));
+                    a.view.SetState(AirState(a) ?? BbCharacterView.PoseState.Stand);
+                    continue;
+                }
                 Actor foe = null;
                 if (inView != null)
                 {

@@ -1,5 +1,5 @@
 {
-  "totalCostumes": 362,
+  "totalCostumes": 363,
   "costumes": [
     {
       "id": 196,
@@ -6627,6 +6627,24 @@
       "dyHead": -3,
       "charHeight": 41,
       "hpBarOffsetY": 49
+    },
+    {
+      "id": 9101,
+      "name": "Bình Ma phong ba",
+      "gender": 2,
+      "genderName": "Xayda",
+      "iconId": 11166,
+      "headPartId": 1218,
+      "bodyPartId": 1219,
+      "legPartId": 1220,
+      "bodyGroup": "Jar",
+      "bodyGroupId": 5,
+      "isHeadOnly": false,
+      "isMultiFrameHead": false,
+      "headCyclePartIds": [],
+      "dyHead": 0,
+      "charHeight": 40,
+      "hpBarOffsetY": 30
     }
   ]
 }

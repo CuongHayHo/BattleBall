@@ -12,8 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5e1f7e6126550074ba6db1374a5a3185, type: 3}
   m_Name: BbConfig
   m_EditorClassIdentifier: 
-  gameHost: 127.0.0.1
+  gameHost: 192.168.100.81
   gamePort: 7443
   serverName: BattleBall
   assetScale: 3
+  targetFrameRate: 60
   acceptAnyCertificate: 1

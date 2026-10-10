@@ -289,12 +289,21 @@ namespace BattleBall.EditorTools
             edge.raycastTarget = false;
 
             // the orange triangle on the left edge of the screen opens the folded panel (the menu button of Nro, a quarter of the way down; hidden while the panel is open)
-            var toggle = Image("PanelToggle", root, "nro_menu_arrow", false);
+            // the picture is small (as in Nro) but the touch area is a strip of 120 x 260 canvas px along the edge: a thumb finds it at once (owner report 2026-10-10:
+            // "menu hơi khó mở" on a phone); the picture is a child that takes no touch
+            var toggle = Image("PanelToggle", root, "white", false);
+            toggle.color = new Color(1f, 1f, 1f, 0f);
             var tr0 = toggle.rectTransform;
             tr0.anchorMin = tr0.anchorMax = new Vector2(0f, 0.75f);
             tr0.pivot = new Vector2(0f, 0.5f);
-            tr0.sizeDelta = new Vector2(G(14), G(30));
+            tr0.sizeDelta = new Vector2(120f, 260f);
             tr0.anchoredPosition = Vector2.zero;
+            var arrow = Image("Arrow", toggle.transform, "nro_menu_arrow", false);
+            arrow.rectTransform.anchorMin = arrow.rectTransform.anchorMax = new Vector2(0f, 0.5f);
+            arrow.rectTransform.pivot = new Vector2(0f, 0.5f);
+            arrow.rectTransform.sizeDelta = new Vector2(G(14), G(30));
+            arrow.rectTransform.anchoredPosition = Vector2.zero;
+            arrow.raycastTarget = false;
             ui.panelToggle = toggle.gameObject.AddComponent<Button>();
             ui.panelToggle.targetGraphic = toggle;
             ui.panelToggleRect = tr0;
