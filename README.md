@@ -2,7 +2,7 @@
 
 Game hack & slash chơi đơn cho Android: đội 3 nhân vật (1 người chơi điều khiển + 2 nhân vật AI), đánh quái dồn dập, boss theo khu vực, phó bản và hệ thống trang bị. Máy chủ giữ dữ liệu người chơi và duyệt kết quả trận đấu.
 
-> **Trạng thái: đang phát triển, chưa chơi được một trận hoàn chỉnh.** Server đã có đủ nền tảng (tài khoản, kinh tế, trận đấu 20 Hz). Client mới có màn đăng nhập, làng tân thủ và huấn luyện với mộc nhân. Chưa có đường vào trận đấu từ giao diện.
+> **Trạng thái: đang phát triển, chưa chơi được một trận hoàn chỉnh.** Server đã có đủ nền tảng (tài khoản, kinh tế, đồ trang bị, GEN, trận đấu 20 Hz). Client có màn đăng nhập, làng tân thủ với các NPC (cửa hàng, nâng cấp đồ), huấn luyện với mộc nhân. Chưa có đường vào trận đấu từ giao diện.
 
 ## Cấu trúc repo
 
@@ -17,23 +17,29 @@ Game hack & slash chơi đơn cho Android: đội 3 nhân vật (1 người chơ
 **Server** (`BattleBallServer/server/`): Java 21, Netty, TLS, Protobuf, MariaDB.
 - Đăng ký, đăng nhập, đổi mật khẩu; một kho đồ dùng chung cho cả tài khoản.
 - Dữ liệu tĩnh (kỹ năng, quái, boss, phó bản, vật phẩm, aura) nạp từ DB, có thể nạp lại khi đang chạy.
-- Kinh tế: học và nâng kỹ năng bằng vàng, chế tạo, trang bị, hợp thể, thư và thông báo.
+- Kinh tế: học và nâng kỹ năng bằng vàng, chế tạo, thư và thông báo, mua cải trang bằng đá quý.
+- Đồ trang bị: ba bộ (Thần Linh, Hủy Diệt, Thiên Sứ) cho từng hành tinh (45 món), mặc đúng hành tinh và đúng cấp, nâng cấp bằng đá, đổi mảnh lấy món, bán. Chỉ số mặc đồ cập nhật ngay cả trong phiên huấn luyện đang chạy, kể cả khi hợp thể.
+- GEN: 13 bộ kích hoạt như game gốc (đủ số món cùng bộ thì kỹ năng mạnh hơn); mỗi món có nhiều dòng GEN, đổi ngẫu nhiên bằng đá GEN, mở thêm ô bằng đá mở ô.
+- Hợp thể bằng Bông tai Potara; tài nguyên game gửi qua chính kết nối game (không dùng HTTP).
 - Trận đấu có thẩm quyền ở server, tick 20 Hz, có phần thưởng, nhật ký trận và cho phép vào lại khi mất kết nối.
 - Phiên huấn luyện với mộc nhân trong làng.
-- Có kiểm thử tự động. Các kiểm thử cần DB chỉ chạy khi đặt `BB_TEST_DB_URL`.
+- Có 87 kiểm thử tự động. Các kiểm thử cần DB chỉ chạy khi đặt `BB_TEST_DB_URL`.
 
-**Cơ sở dữ liệu** (`BattleBallServer/db/migrations/`): các migration đánh số `V001`, `V002`, ... Đã kiểm chứng trên MariaDB 10.4; chưa thử trên 10.6 trở lên.
+**Cơ sở dữ liệu** (`BattleBallServer/db/migrations/`): các migration đánh số `V001` đến `V039`, tự áp dụng khi server khởi động. Đã kiểm chứng trên MariaDB 10.4; chưa thử trên 10.6 trở lên.
 
 **Web** (`BattleBallServer/web/`, `admin/`): trang đăng ký bằng PHP (có captcha) và trang quản trị chỉnh dữ liệu tĩnh. Sao chép `config.sample.php` thành `config.php` rồi điền cấu hình riêng.
 
 **Client** (`BattleBall/Assets/`):
-- `BattleNet`: tầng mạng (Protobuf, TLS, đăng ký/đăng nhập) và giao diện menu: làng tân thủ, bảng nhân vật và túi đồ, tab Aura, tab Kỹ năng, tab Chức năng (thư, thông báo, tài khoản), huấn luyện với mộc nhân (đánh thường, kỹ năng, số sát thương, thanh máu mục tiêu, khung HP/KI của đội).
-- `NroMannequin`: công cụ xem trước bộ trang phục. Hình ảnh trang phục được tải từ server qua HTTP, không nằm trong client.
+- `BattleNet`: tầng mạng (Protobuf, TLS, đăng ký/đăng nhập, tải tài nguyên qua kết nối game) và giao diện menu: làng tân thủ, bảng nhân vật và túi (xem skin hoặc xem đồ và đá), tab Aura, tab Kỹ năng, tab Chức năng (thư, thông báo, tài khoản).
+- NPC trong làng: Urôn bán cải trang, Bunma bán đồ và đá, Bà Hạt Mít nâng cấp đồ, đổi GEN và mở ô GEN (bỏ đồ và đá vào bảng của bà), Cui (cổng phó bản, chức năng chưa có), hai mục tiêu huấn luyện. Focus tự chọn mục tiêu hoặc NPC gần nhất; nút nắm đấm nói chuyện với NPC đang focus.
+- Huấn luyện với mộc nhân: kỹ năng có hình, số sát thương, thanh máu mục tiêu, khung HP/KI của đội, tự động dùng kỹ năng.
+- `NroMannequin`: công cụ xem trước bộ trang phục. Hình ảnh trang phục tải từ server qua kết nối game, không nằm trong client.
 
 ## Chưa có
 
 - Đường vào trận đấu từ giao diện, và lối chơi trong trận (boss, phó bản).
-- Hình ảnh kỹ năng (giai đoạn 2 của phần huấn luyện).
+- Đá chỉ số, đá pha lê và các chức năng khác của Bà Hạt Mít (ép sao, pha lê hóa) chưa có luật; GEN chưa có nguồn rơi; mảnh đồ Hủy Diệt và Thiên Sứ chưa có nơi rơi.
+- Chưa thử trên điện thoại cho các phần mới (đồ, GEN, NPC).
 - Máy chủ chạy thật: hiện chỉ chạy cục bộ để phát triển.
 
 ## Chạy thử cục bộ (Windows)
