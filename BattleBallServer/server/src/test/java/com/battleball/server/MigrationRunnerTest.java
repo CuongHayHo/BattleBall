@@ -31,7 +31,7 @@ class MigrationRunnerTest {
         try (TestDb t = TestDb.create(); Database db = new Database(t.url, t.user, t.password, 2)) {
             try (Connection c = db.connection()) {
                 assertTrue(count(c, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()") >= 40);
-                assertEquals(221, count(c, "SELECT COUNT(*) FROM skin_template"));
+                assertEquals(353, count(c, "SELECT COUNT(*) FROM skin_template"));
                 long files;
                 try (var s = Files.list(t.migrationsDir())) {
                     files = s.filter(p -> p.getFileName().toString().matches("V\\d+__.+\\.sql")).count();

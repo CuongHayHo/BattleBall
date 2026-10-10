@@ -30,8 +30,9 @@ from collections import Counter, defaultdict
 HERE = os.path.dirname(os.path.abspath(__file__))
 TABLES = os.path.normpath(os.path.join(HERE, "..", "tables", "json"))
 SEEDDIR = os.path.normpath(os.path.join(HERE, "..", "tables", "seed"))
-CATALOG = os.path.normpath(os.path.join(HERE, "..", "..", "Assets", "NroMannequin", "Data", "CostumeCatalog.json"))
-USER_CSV = os.path.join(SEEDDIR, "skin_user_edit_round2.csv")   # latest export of skin_browser.html
+# the full 414 NRO costumes (the client catalog keeps only the ones in use, plus looks that are not NRO costumes)
+CATALOG = os.path.normpath(os.path.join(HERE, "..", "tables", "backup", "CostumeCatalog_full414.json"))
+USER_CSV = os.path.join(SEEDDIR, "skin_user_edit_round3.csv")   # round 2 export of skin_browser.html with the hidden 3-part skins put back (restore_hidden_skins.py, 2026-10-10)
 STAT_CAT = os.path.join(SEEDDIR, "skin_stat_catalog.json")
 OUT = os.path.join(SEEDDIR, "skin_pricing.json")
 VERSION = 3

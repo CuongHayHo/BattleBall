@@ -145,6 +145,8 @@ namespace BattleBall.Net
                     nextLog += 0.1f;
                     var sb = new StringBuilder("t=" + t.ToString("0.0") + " darts:");
                     foreach (var d in FindObjectsOfType<BbDart>()) sb.Append(' ').Append(d.name).Append('@').Append(d.DebugHead);
+                    foreach (var im in village.WorldLayer.GetComponentsInChildren<Image>())
+                        if (im.enabled && (im.name == "SkillFx" || im.name == "SkillHit" || im.name == "Head" || im.name == "HeadBorder" || im.name == "Tail" || im.name == "Spark" || im.name == "Projectile")) sb.Append(' ').Append(im.name).Append(':').Append(im.sprite != null ? im.sprite.name : "-").Append('@').Append(Mathf.RoundToInt(im.rectTransform.anchoredPosition.x)).Append(',').Append(Mathf.RoundToInt(im.rectTransform.anchoredPosition.y));
                     if (_training != null && _training.DebugFlashOn) sb.Append(" WHITE");
                     sb.Append(" | server:").Append(_serverNote);
                     Log(sb.ToString());
@@ -221,6 +223,26 @@ namespace BattleBall.Net
             Shoot("shop_closed");
         }
 
+        /// <summary>The beam of each planet (Kamejoko, Masenko, Antomic): where the dart is next to the hand of the character, the body and the target (owner remark 2026-10-10: it came out of the feet).</summary>
+        async Task Beams(BbMenuUi menu, BbTraining training, BbVillageView village)
+        {
+            int[] mains = { 0, 2, 1 };                                       // Trái Đất, Namếc, Xayda
+            uint[] skills = { 1, 3, 5 };
+            for (int i = 0; i < 3; i++)
+            {
+                menu.DemoSelect(mains[i]);
+                await Wait(2.5f);
+                village.TeleportMain(1720f);
+                await WaitFor(() => training.Active, 10f);
+                training.Focus("moc_nhan");
+                await Wait(1.5f);
+                Log("beam " + skills[i] + ": " + Where(village));
+                training.DebugUse(skills[i]);
+                await Observe("beam" + skills[i], 2.0f, village, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f);
+                await Wait(1.5f);
+            }
+        }
+
         /// <summary>Biến hình alone (the server refuses it while another bonus of HP, e.g. the whistle, is on).</summary>
         async Task AuditMonkey(BbMenuUi menu, BbTraining training, BbVillageView village)
         {
@@ -282,8 +304,9 @@ namespace BattleBall.Net
             if (!await WaitFor(() => File.Exists(go), 300f)) throw new Exception("nobody put the gold on the account");
             BattleBall.Proto.CharacterInfo earth = null;
             foreach (var c in client.Snapshot.Characters) if (c.Race == "EARTH") earth = c;
-            bool earthRun = Arg("-bbScenario", "") != "auditXayda" && Arg("-bbScenario", "") != "auditMonkey", xaydaRun = Arg("-bbScenario", "") != "auditEarth";
-            foreach (uint skill in earthRun ? new uint[] { 1, 1, 1, 10, 24, 6, 9 } : new uint[0])
+            bool beams = Arg("-bbScenario", "") == "beams";
+            bool earthRun = Arg("-bbScenario", "") != "auditXayda" && Arg("-bbScenario", "") != "auditMonkey" && !beams, xaydaRun = Arg("-bbScenario", "") != "auditEarth" && !beams;
+            foreach (uint skill in beams ? new uint[] { 1 } : earthRun ? new uint[] { 1, 1, 1, 10, 24, 6, 9 } : new uint[0])
             {
                 var r = await client.UpgradeSkillAsync(earth.CharacterId, skill);
                 Log("learn/raise skill " + skill + ": " + r.Ok + " " + r.Error);
@@ -291,10 +314,18 @@ namespace BattleBall.Net
             }
             BattleBall.Proto.CharacterInfo xayda = null;
             foreach (var c in client.Snapshot.Characters) if (c.Race == "XAYDA") xayda = c;
-            foreach (uint skill in Arg("-bbScenario", "") == "auditMonkey" ? new uint[] { 13 } : xaydaRun ? new uint[] { 13, 14, 21, 23 } : new uint[0])
+            foreach (uint skill in beams ? new uint[] { 5 } : Arg("-bbScenario", "") == "auditMonkey" ? new uint[] { 13 } : xaydaRun ? new uint[] { 13, 14, 21, 23 } : new uint[0])
             {
                 var r = await client.UpgradeSkillAsync(xayda.CharacterId, skill);
                 Log("Xayda: learn skill " + skill + ": " + r.Ok + " " + r.Error);
+                client.Pump();
+            }
+            if (beams)
+            {
+                BattleBall.Proto.CharacterInfo namek = null;
+                foreach (var c in client.Snapshot.Characters) if (c.Race == "NAMEC") namek = c;
+                var r = await client.UpgradeSkillAsync(namek.CharacterId, 3);
+                Log("Namek: learn skill 3: " + r.Ok + " " + r.Error);
                 client.Pump();
             }
             await WaitFor(() => { client.Pump(); return false; }, 0.5f);
@@ -313,6 +344,7 @@ namespace BattleBall.Net
             _training = training;
             string scenario = Arg("-bbScenario", "");
             if (scenario == "shop") { await ShopRun(menu, village); return; }
+            if (scenario == "beams") { await Beams(menu, training, village); return; }
             if (scenario == "auditEarth") { await AuditEarth(menu, training, village); return; }
             if (scenario == "auditMonkey") { await AuditMonkey(menu, training, village); return; }
             if (scenario == "auditXayda") { await AuditXayda(menu, training, village); return; }

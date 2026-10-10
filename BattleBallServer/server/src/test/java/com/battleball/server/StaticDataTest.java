@@ -42,7 +42,7 @@ class StaticDataTest {
         try (TestDb t = TestDb.create(); Database db = new Database(t.url, t.user, t.password, 2)) {
             StaticDataStore store = new StaticDataStore(new StaticDataLoader(db));
             StaticData d = store.get();
-            assertEquals(221, d.skins().size());
+            assertEquals(353, d.skins().size());
             assertEquals(51, d.stats().size());
             assertTrue(d.statEnabled("ATK_PCT"));
             assertEquals("Sức đánh +100%", d.statText("ATK_PCT", 100));

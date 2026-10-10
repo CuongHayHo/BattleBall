@@ -660,7 +660,12 @@ namespace BattleBall.Net
             d._dart = dart;
             d._scale = uiScale;
             var rt = (RectTransform)go.transform;
+            // a point at the origin of the world layer: the pictures are anchored to the bottom left corner of this rect, which is 100 x 100 and centred when left alone
+            // (owner remark 2026-10-10: the beams came out of the feet, 50 px low and 50 px behind)
             rt.anchorMin = rt.anchorMax = Vector2.zero;
+            rt.pivot = Vector2.zero;
+            rt.sizeDelta = Vector2.zero;
+            rt.anchoredPosition = Vector2.zero;
             d._headBorder = d.NewImage("HeadBorder");
             d._head = d.NewImage("Head");
             return d;
