@@ -28,6 +28,12 @@ public final class PlayerActions {
     private final StaticDataStore data;
     private final EconomyService economy;
     private final MailService mail;
+    private volatile java.util.function.LongConsumer statsChanged = id -> { };
+
+    /** Called (on the DB executor) after an action that can change the figures of a character; the match manager updates a running training session with it. */
+    public void onStatsChanged(java.util.function.LongConsumer listener) {
+        this.statsChanged = listener;
+    }
 
     public PlayerActions(Database db, StaticDataStore data, EconomyService economy) {
         this.db = db;
@@ -41,7 +47,8 @@ public final class PlayerActions {
             case PLAYER_DATA_REQUEST, INVENTORY_REQUEST, BUY_SKIN_REQUEST, EQUIP_SKIN_REQUEST, UPGRADE_SKILL_REQUEST, BUY_MATERIAL_REQUEST,
                  ASSEMBLE_ITEM_REQUEST, EQUIP_ITEM_REQUEST, UNEQUIP_ITEM_REQUEST, SELL_ITEMS_REQUEST, UPGRADE_ITEM_REQUEST, BUY_SUPPORT_REQUEST,
                  EQUIP_SUPPORT_REQUEST, UNEQUIP_SUPPORT_REQUEST, CRAFT_REQUEST, BUY_POTARA_SHARDS_REQUEST, ASSEMBLE_POTARA_REQUEST,
-                 MAIL_LIST_REQUEST, MAIL_ACTION_REQUEST, NOTICE_LIST_REQUEST, DISCARD_SKIN_REQUEST, EQUIP_AURA_REQUEST, SHOP_REQUEST -> true;
+                 MAIL_LIST_REQUEST, MAIL_ACTION_REQUEST, NOTICE_LIST_REQUEST, DISCARD_SKIN_REQUEST, EQUIP_AURA_REQUEST, SHOP_REQUEST, SHOP_BUY_REQUEST,
+                 REROLL_GEN_REQUEST, UNLOCK_GEN_SLOT_REQUEST -> true;
             default -> false;
         };
     }
@@ -71,10 +78,25 @@ public final class PlayerActions {
                     return out;
                 }
                 case SHOP_REQUEST -> {
-                    var shop = ShopService.content(data.get(), req.getShopRequest().getNpcId());
+                    var shop = ShopService.content(data.get(), req.getShopRequest().getNpcId(), topLevel(accountId));
                     out.add(shop != null ? Envelope.newBuilder().setRequestId(rid).setShopContent(shop).build()
                             : Envelope.newBuilder().setRequestId(rid).setActionResult(ActionResult.newBuilder().setOk(false).setError(ActionError.NOT_FOUND).setMessage("this NPC sells nothing")).build());
                     return out;
+                }
+                case SHOP_BUY_REQUEST -> {
+                    var q = req.getShopBuyRequest();
+                    long buyer = topCharacter(accountId);
+                    if (buyer == 0) {
+                        r = ActionResult.newBuilder().setOk(false).setError(ActionError.NOT_FOUND).setMessage("no character").build();
+                    } else if (!ShopService.sells(data.get(), q.getNpcId(), q.getKind(), q.getTemplateId())) {
+                        r = ShopService.notOnSale();
+                    } else if (q.getKind().equals("GEAR")) {
+                        r = economy.buyGear(accountId, buyer, q.getTemplateId());
+                    } else if (q.getKind().equals("EXCHANGE")) {
+                        r = economy.assembleItem(accountId, buyer, q.getTemplateId());
+                    } else {
+                        r = economy.buyMaterial(accountId, buyer, q.getTemplateId(), q.getQuantity());
+                    }
                 }
                 case MAIL_ACTION_REQUEST -> {
                     var q = req.getMailActionRequest();
@@ -117,6 +139,8 @@ public final class PlayerActions {
                     r = economy.sellItems(accountId, q.getCharacterId(), q.getItemIdsList(), q.getDestroy());
                 }
                 case UPGRADE_ITEM_REQUEST -> r = economy.upgradeItem(accountId, req.getUpgradeItemRequest().getCharacterId(), req.getUpgradeItemRequest().getItemId());
+                case REROLL_GEN_REQUEST -> r = economy.rerollGen(accountId, req.getRerollGenRequest().getCharacterId(), req.getRerollGenRequest().getItemId(), req.getRerollGenRequest().getLineNo());
+                case UNLOCK_GEN_SLOT_REQUEST -> r = economy.unlockGenSlot(accountId, req.getUnlockGenSlotRequest().getCharacterId(), req.getUnlockGenSlotRequest().getItemId());
                 case BUY_SUPPORT_REQUEST -> r = economy.buySupport(accountId, req.getBuySupportRequest().getCharacterId(), req.getBuySupportRequest().getSupportId());
                 case EQUIP_SUPPORT_REQUEST -> r = economy.equipSupport(accountId, req.getEquipSupportRequest().getCharacterId(), req.getEquipSupportRequest().getInstanceId());
                 case UNEQUIP_SUPPORT_REQUEST -> r = economy.unequipSupport(accountId, req.getUnequipSupportRequest().getCharacterId(), req.getUnequipSupportRequest().getSlot());
@@ -134,6 +158,11 @@ public final class PlayerActions {
             out.add(Envelope.newBuilder().setRequestId(rid).setActionResult(r).build());
             if (r.getOk()) {
                 out.add(snapshotEnvelope(accountId, 0));
+                switch (req.getPayloadCase()) {
+                    case EQUIP_ITEM_REQUEST, UNEQUIP_ITEM_REQUEST, UPGRADE_ITEM_REQUEST, REROLL_GEN_REQUEST, UNLOCK_GEN_SLOT_REQUEST, EQUIP_SKIN_REQUEST, EQUIP_AURA_REQUEST, EQUIP_SUPPORT_REQUEST, UNEQUIP_SUPPORT_REQUEST,
+                         DISCARD_SKIN_REQUEST -> statsChanged.accept(accountId);
+                    default -> { }
+                }
             }
         } catch (SQLException | RuntimeException e) {
             LOG.error("player action failed", e);
@@ -150,6 +179,26 @@ public final class PlayerActions {
             int cap = (int) Json.num(d.balanceObj("potara"), "daily_cap", 20);
             return Envelope.newBuilder().setRequestId(rid).setPlayerDataSnapshot(
                     PlayerRepository.toProto(d, p, cap).toBuilder().setUnreadMail(MailService.unread(c, accountId))).build();
+        }
+    }
+
+    /** The account's highest character (the one a shop prices and buys for): its level counts in the gold of a win. 0 when the account has none. */
+    private long topCharacter(long accountId) throws SQLException {
+        try (Connection c = db.connection(); PreparedStatement ps = c.prepareStatement(
+                "SELECT character_id FROM game_character WHERE account_id = ? ORDER BY level DESC, character_id LIMIT 1")) {
+            ps.setLong(1, accountId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : 0;
+            }
+        }
+    }
+
+    private int topLevel(long accountId) throws SQLException {
+        try (Connection c = db.connection(); PreparedStatement ps = c.prepareStatement("SELECT MAX(level) FROM game_character WHERE account_id = ?")) {
+            ps.setLong(1, accountId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Math.max(1, rs.getInt(1)) : 1;
+            }
         }
     }
 

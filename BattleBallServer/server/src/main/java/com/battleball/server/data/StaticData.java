@@ -51,11 +51,11 @@ public record StaticData(
     }
 
     public record ItemTemplate(int id, String key, String slot, String name, int tier, String baseStatKey, double baseValue, int piecesNeeded,
-                               int minLevel, boolean enabled) {
+                               int minLevel, boolean enabled, int iconId, String note, String race) {
     }
 
     public record Material(int id, String key, String kind, String name, Integer itemTemplateId, String buyCurrency, Double priceWins,
-                           Integer priceFixed, boolean enabled) {
+                           Integer priceFixed, boolean enabled, int iconId, String note) {
     }
 
     public record PetEffect(String statKey, double value, int intervalS, int durationS) {
@@ -100,6 +100,19 @@ public record StaticData(
 
     public record MonsterStat(String classKey, String tier, double ttkSeconds, long hp, double atkMin, double atkMax, double armorMin,
                               double armorMax, Double actionGapS) {
+    }
+
+    /**
+     * The piece whose fragments make this piece. Every set of gear exists once for each planet, but its fragments are one kind per piece of the set (as the fragments of Nro are for any
+     * gender): they are filed under the Trái Đất piece of the same slot and tier.
+     */
+    public ItemTemplate fragmentRoot(ItemTemplate t) {
+        for (ItemTemplate o : items.values()) {
+            if (o.slot().equals(t.slot()) && o.tier() == t.tier() && o.race().equals("EARTH")) {
+                return o;
+            }
+        }
+        return t;
     }
 
     // ---- balance helpers ----

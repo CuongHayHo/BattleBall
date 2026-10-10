@@ -269,9 +269,8 @@ public final class MatchStarter {
         return b.build();
     }
 
-    /** One member of the squad; {@code unlearnedLevel} above 0 (training) makes the skills of the race it has not learned usable at that level. */
-    private static MatchSetup.SquadMember member(StaticData d, PlayerRepository.CharacterData ch, PlayerRepository.CharacterData partner, boolean controlled,
-                                                 int unlearnedLevel) {
+    /** The figures of a fighter: the character's own, or for a fusion the sum of the main character (with its fusion skin) and its partner. */
+    static StatCalculator.CharacterStats figures(StaticData d, PlayerRepository.CharacterData ch, PlayerRepository.CharacterData partner) {
         boolean fused = partner != null;
         StatCalculator.CharacterStats s = PlayerRepository.stats(d, ch, fused);
         if (fused) {
@@ -283,6 +282,31 @@ public final class MatchStarter {
                     Math.min(100.0, s.critRatePct() + p.critRatePct()), s.critDmgPct() + p.critDmgPct(), s.dodgePct() + p.dodgePct(),
                     Math.max(s.hpRegenPctPerSec(), p.hpRegenPctPerSec()), Math.max(s.kiRegenPctPerSec(), p.kiRegenPctPerSec()), other);
         }
+        return s;
+    }
+
+    /** The figures every fighter of a running session should have now (character id to figures), from the player as the database holds it. */
+    public static Map<Long, StatCalculator.CharacterStats> currentFigures(StaticData d, PlayerRepository.PlayerData player, MatchSetup setup) {
+        Map<Long, StatCalculator.CharacterStats> out = new HashMap<>();
+        for (MatchSetup.SquadMember m : setup.squad()) {
+            PlayerRepository.CharacterData ch = player.character(m.characterId());
+            if (ch == null) {
+                continue;
+            }
+            PlayerRepository.CharacterData partner = m.partnerCharacterId() == 0 ? null : player.character(m.partnerCharacterId());
+            if (m.partnerCharacterId() != 0 && partner == null) {
+                continue;
+            }
+            out.put(m.characterId(), figures(d, ch, partner));
+        }
+        return out;
+    }
+
+    /** One member of the squad; {@code unlearnedLevel} above 0 (training) makes the skills of the race it has not learned usable at that level. */
+    private static MatchSetup.SquadMember member(StaticData d, PlayerRepository.CharacterData ch, PlayerRepository.CharacterData partner, boolean controlled,
+                                                 int unlearnedLevel) {
+        boolean fused = partner != null;
+        StatCalculator.CharacterStats s = figures(d, ch, partner);
         StaticData.PetEffect pet = null;
         PlayerRepository.EquipRef petRef = ch.equipment().get("SUPPORT_1");
         if (petRef != null && petRef.supportInstanceId() != null) {

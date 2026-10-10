@@ -44,6 +44,7 @@ namespace BattleBall.Net
         // skills that charge first: the server sends CAST_START with the duration, the poses start then (BbSkillPoses.Charge)
         static readonly HashSet<uint> ChargeSkills = new HashSet<uint> { 10, 11, 13, 14, 24, 25, 26 };
         const uint MonkeySkill = 13, TeleportSkill = 20;
+        const float UltimateWindow = 2f;          // seconds the ultimates keep the character in its attack pose after the gong (the server: activeMs 2000, V035)
         const int MonkeyPunchPaint = 105, MonkeyAntomicPaint = 106;       // Nro Char.setSkillPaint: the great ape plays paint 105 for its punches and 106 for Antomic
 
         Phase _phase;
@@ -64,6 +65,8 @@ namespace BattleBall.Net
         uint _selectedSlot;                       // the skill "in focus": the one the player pressed last (the punch at first)
         int _pendingSlot = -1;                    // a skill waiting for the session or for the walk to the target
         float _pendingAt, _sayUntil, _lastFireAt = -100f;
+        const float SkillGapSeconds = 0.5f;          // as the server's skill_gap_ms: the least time between two skills of one character
+        bool _mineFlying;                            // a projectile of the controlled character is still in the air (the next skill waits for it)
         Button _autoButton;
         Image _autoImage, _autoRing;
         Text _autoLabel;
@@ -341,6 +344,9 @@ namespace BattleBall.Net
 
         public bool Active { get { return _phase == Phase.Active; } }
         public string FocusKey { get { return _focusKey; } }
+        public bool AutoOn { get { return _auto; } }
+        public void DebugFist() { ToggleAuto(); }
+        public void DebugCycle() { CycleFocus(); }
 
         void Start()
         {
@@ -373,13 +379,79 @@ namespace BattleBall.Net
         {
             EnsureBuilt();
             _focusKey = key;
-            if (village != null) village.CombatTarget = key;
-            if (start && _phase == Phase.Idle && !_demo) StartSession();
+            bool npc = village != null && village.IsNpc(key);
+            if (village != null) village.CombatTarget = npc ? null : key;                // the AI walk to a dummy, not to an NPC
+            if (start && !npc && _phase == Phase.Idle && !_demo) StartSession();
+            _pendingNpc = null;
             Refresh();
         }
 
-        /// <summary>The nearest target in view becomes the focus (nothing in view: false).</summary>
-        bool AutoFocusNearest(bool start)
+        /// <summary>The focus rests on an NPC (the fist then talks to it instead of switching the automatic use of skills).</summary>
+        bool FocusIsNpc { get { return _focusKey != null && village != null && village.IsNpc(_focusKey); } }
+
+        string _pendingNpc;                                                             // the player pressed the fist far from the NPC: the character walks there, then it talks
+        const float NpcReach = 230f;                                                    // canvas px: how close the character must stand to talk (about 100 Nro px)
+
+        /// <summary>
+        /// Owner request 2026-10-10: the focus goes to the nearest target or NPC in view by itself (no tap needed) and is only reset when the player moves the character with the stick;
+        /// once the stick is let go the nearest one is focused again. While the automatic use of skills is on only the dummies are chosen.
+        /// </summary>
+        void UpdateFocus()
+        {
+            if (_demo || village == null) return;
+            EnsureBuilt();
+            if (village.StickHeld)
+            {
+                _pendingNpc = null;
+                if (_focusKey != null) { _focusKey = null; village.CombatTarget = null; }
+                return;
+            }
+            if (_focusKey != null)
+            {
+                Vector2 at;
+                float h;
+                var keys = village.VisibleTargetKeys();
+                if (keys.Contains(_focusKey) && village.TargetInfo(_focusKey, out at, out h)) return;       // still there
+                _focusKey = null;                                                                           // out of view (the village was scrolled by something else)
+                village.CombatTarget = null;
+            }
+            AutoFocusNearest(false, _auto);
+        }
+
+        /// <summary>The fist with an NPC in focus: talk to it, walking up to it first when it is far.</summary>
+        void TalkToFocus()
+        {
+            var npc = village.NpcOf(_focusKey);
+            Vector2 at, me;
+            float h;
+            int facing;
+            ulong id;
+            if (npc == null || !village.TargetInfo(_focusKey, out at, out h) || !village.PartyMember(0, out id, out me, out facing)) return;
+            if (Mathf.Abs(at.x - me.x) <= NpcReach) { _pendingNpc = null; Interact(npc); return; }
+            _pendingNpc = _focusKey;
+            village.ApproachTo(at.x, NpcReach * 0.6f);
+        }
+
+        void UpdatePendingNpc()
+        {
+            if (_pendingNpc == null || village == null) return;
+            var npc = village.NpcOf(_pendingNpc);
+            Vector2 at, me;
+            float h;
+            int facing;
+            ulong id;
+            if (npc == null || village.StickHeld || !village.TargetInfo(_pendingNpc, out at, out h) || !village.PartyMember(0, out id, out me, out facing)) { _pendingNpc = null; return; }
+            if (Mathf.Abs(at.x - me.x) <= NpcReach || !village.Approaching) { _pendingNpc = null; village.CancelApproach(); if (Mathf.Abs(at.x - me.x) <= NpcReach * 1.5f) Interact(npc); }
+        }
+
+        void Interact(NpcSpec npc)
+        {
+            village.CancelApproach();
+            if (menu != null) menu.InteractNpc(npc);
+        }
+
+        /// <summary>The nearest target in view becomes the focus (nothing in view: false). {@code dummiesOnly}: a skill needs an enemy, so the NPCs do not count.</summary>
+        bool AutoFocusNearest(bool start, bool dummiesOnly = false)
         {
             ulong id;
             Vector2 me, at;
@@ -388,9 +460,10 @@ namespace BattleBall.Net
             if (village == null || !village.PartyMember(0, out id, out me, out facing)) return false;
             string best = null;
             float bestDistance = float.MaxValue;
-            foreach (string key in village.VisibleDummyKeys())
+            foreach (string key in village.VisibleTargetKeys())
             {
-                if (!village.DummyInfo(key, out at, out h)) continue;
+                if (dummiesOnly && village.IsNpc(key)) continue;
+                if (!village.TargetInfo(key, out at, out h)) continue;
                 float d = Mathf.Abs(at.x - me.x);
                 if (d < bestDistance) { bestDistance = d; best = key; }
             }
@@ -399,10 +472,10 @@ namespace BattleBall.Net
             return true;
         }
 
-        /// <summary>The focus button: the next target in view, from left to right (the nearest when none is focused).</summary>
+        /// <summary>The focus button: the next target or NPC in view, from left to right (the nearest when none is focused).</summary>
         public void CycleFocus()
         {
-            var keys = village != null ? village.VisibleDummyKeys() : new List<string>();
+            var keys = village != null ? village.VisibleTargetKeys() : new List<string>();
             if (keys.Count == 0) { Toast("Không có mục tiêu trong tầm nhìn"); return; }
             int at = _focusKey == null ? -1 : keys.IndexOf(_focusKey);
             if (at < 0) { AutoFocusNearest(true); return; }
@@ -524,6 +597,13 @@ namespace BattleBall.Net
 
         float _leftAt = -100f, _noTargetSince = -1f;
         bool _quiet;
+        /// <summary>Ends the session without a word and starts the next one at once with the squad and the figures as they are now (the server replaces the old session).</summary>
+        void Restart()
+        {
+            Stop();
+            _quiet = true;
+            StartSession();
+        }
 
         /// <summary>
         /// Owner request 2026-10-09: the AI characters fight what is in view of the player without any help from him. A training session starts by itself when a dummy
@@ -563,6 +643,7 @@ namespace BattleBall.Net
             foreach (var d in _darts.Values) if (d != null) Kill(d.gameObject);
             _darts.Clear();
             _launches.Clear();
+            _mineFlying = false;
             foreach (var fl in _floating) if (fl.text != null) Kill(fl.text.gameObject);
             _floating.Clear();
             _seenProjectiles.Clear();
@@ -587,6 +668,7 @@ namespace BattleBall.Net
 
         void ToggleAuto()
         {
+            if (FocusIsNpc) { TalkToFocus(); return; }                                // with an NPC in focus the fist talks to it
             _auto = !_auto;
             if (!_auto) { _pendingSlot = -1; if (village != null) village.CancelApproach(); }
             Toast(_auto ? "Tự động dùng kỹ năng: BẬT" : "Tự động dùng kỹ năng: TẮT");
@@ -640,7 +722,7 @@ namespace BattleBall.Net
             bool hasFoe = _focusKey != null && village.DummyInfo(_focusKey, out foe, out h);
             if (!hasFoe && needsTarget)
             {
-                if (!AutoFocusNearest(false)) { if (manual) Toast("Không có mục tiêu trong tầm nhìn"); return false; }
+                if (!AutoFocusNearest(false, true)) { if (manual) Toast("Không có mục tiêu trong tầm nhìn"); return false; }
                 hasFoe = village.DummyInfo(_focusKey, out foe, out h);
             }
             village.PartyMember(0, out id, out me, out facing);
@@ -666,6 +748,13 @@ namespace BattleBall.Net
                 if (manual) { _pendingSlot = (int)slot.Slot; _pendingAt = Time.unscaledTime; }
                 return false;
             }
+            // one skill at a time, in the order they were pressed (Nro: nothing starts while the paint of the last skill plays or its dart flies; the server
+            // keeps the same gap): a press made too early waits for its turn
+            if (village.IsActing(_myCharacter) || _mineFlying || Time.unscaledTime - _lastFireAt < SkillGapSeconds)
+            {
+                if (manual) { _pendingSlot = (int)slot.Slot; _pendingAt = Time.unscaledTime; }
+                return false;
+            }
             if (!SkillReady(slot, manual ? 0f : 0.12f)) return false;
             Fire(slot, hasFoe, foe);
             return true;
@@ -682,7 +771,7 @@ namespace BattleBall.Net
             if (dir == 0f) dir = facing;
             _lastFireAt = Time.unscaledTime;
             BbSession.Client.Send(new Envelope { UseSkillRequest = new UseSkillRequest { Seq = ++_seq, Slot = slot.Slot, TargetId = target, DirX = dir, DirY = 0f } });
-            Debug.Log("[SkillFx] fire slot " + slot.Slot + " skill " + slot.SkillId + " level " + slot.Level + " target " + target);
+            Debug.Log("[SkillFx] fire slot " + slot.Slot + " skill " + slot.SkillId + " level " + slot.Level + " target " + target + " at " + Time.unscaledTime.ToString("0.00", CultureInfo.InvariantCulture));
             // what the player sees at once (the server decides the hit): the pose and the cooldown
             SetCooldown(_myCharacter, slot.SkillId, Time.unscaledTime + slot.CooldownMs / 1000f);
             if (!ChargeSkills.Contains(slot.SkillId)) ShowSkill(_myCharacter, slot.SkillId, hasFoe ? foe.x : float.NaN, true);
@@ -1240,7 +1329,7 @@ namespace BattleBall.Net
                 _races.TryGetValue(who, out race);
                 int fxFrom, paint;
                 bool fly;
-                int[] poses = BbSkillPoses.Charge(ef.SkillId, LevelOf(who, ef.SkillId), village.Airborne(who), race == "XAYDA", ef.DurationMs / 1000f, out fxFrom, out paint, out fly);
+                int[] poses = BbSkillPoses.Charge(ef.SkillId, LevelOf(who, ef.SkillId), village.Airborne(who), race == "XAYDA", ef.DurationMs / 1000f, out fxFrom, out paint, out fly, ef.SkillId >= 24 && ef.SkillId <= 26 ? UltimateWindow : 0f);
                 PlayPicked(who, ef.SkillId, poses, paint, fly, fxFrom, AimX(who, ef));
                 if (ef.SkillId == 10) { EnsureFx(); _fx.PlaySpiritBomb(who, ef.DurationMs / 1000f); }
                 if (ef.SkillId == 11 || ef.SkillId == 14) { EnsureFx(); _fx.PlayCharge(who, (int)ef.SkillId, ef.DurationMs / 1000f); }
@@ -1300,9 +1389,11 @@ namespace BattleBall.Net
             if (world == null) return;
             float s = village.UiScale;
             var alive = new HashSet<uint>();
+            bool mineInAir = false;
             foreach (var p in f.Projectiles)
             {
                 alive.Add(p.ProjectileId);
+                if (p.OwnerId == _myId) mineInAir = true;
                 Image img;
                 if (!_projectiles.TryGetValue(p.ProjectileId, out img) || img == null)
                 {
@@ -1355,6 +1446,7 @@ namespace BattleBall.Net
                     _launches.Remove(p.ProjectileId);
                 }
             }
+            _mineFlying = mineInAir;
             var gone = new List<uint>();
             foreach (var kv in _projectiles) if (!alive.Contains(kv.Key)) gone.Add(kv.Key);
             foreach (uint id in gone)
@@ -1384,6 +1476,8 @@ namespace BattleBall.Net
             if (village != null && _phase == Phase.Active) UpdatePets(dt);
             UpdateStuns();
             AutoSession();
+            UpdateFocus();
+            UpdatePendingNpc();
             if (village != null) UpdateFlash();
             DriveCombat();
             if (_sayUntil > 0f && Time.unscaledTime > _sayUntil) { _sayUntil = 0f; if (_status != null) _status.text = ""; }
@@ -1401,7 +1495,7 @@ namespace BattleBall.Net
             // the earring was used or taken off while the session ran: the squad of the session is the old one (the partner would go on fighting beside the fused character);
             // the session ends and the next one starts with the right squad (owner report 2026-10-10)
             ulong partnerNow = menu != null && menu.FusionMainCharacterId == main ? menu.FusionSubCharacterId : 0;
-            if (partnerNow != _sessionPartner) { Leave(); return; }
+            if (partnerNow != _sessionPartner) { Restart(); return; }
             Vector2 foe;
             float h;
             bool inView = village.VisibleDummyKeys().Count > 0;
@@ -1459,11 +1553,19 @@ namespace BattleBall.Net
             if (!on && (!_demo || _previewDemo)) EnsurePreviewSkills();
             bool showSkills = _buttons.Count > 0 && !(menu != null && menu.BlocksCombatUi) && (on || _phase == Phase.Starting || _phase == Phase.Idle);
             _skillRoot.gameObject.SetActive(showSkills);
-            Vector2 at;
-            float h;
+            Vector2 at = Vector2.zero;
+            float h = 0f;
             bool arrow = foe != null && village != null && village.DummyInfo(_focusKey, out at, out h);
+            bool npcArrow = !arrow && _focusKey != null && village != null && village.IsNpc(_focusKey) && village.TargetInfo(_focusKey, out at, out h);
             if (_arrow == null) NewArrow();                                       // the map was drawn again (it destroys the world layer and what lies on it)
-            _arrow.gameObject.SetActive(arrow);
+            _arrow.gameObject.SetActive(arrow || npcArrow);
+            if (npcArrow)
+            {
+                _arrowImage.sprite = _arrows != null ? _arrows[9] : null;
+                if (_arrow.parent != village.WorldLayer) _arrow.SetParent(village.WorldLayer, false);
+                _arrow.anchoredPosition = at + new Vector2(0f, h + 38f);                // above the name of the NPC
+                _arrow.SetAsLastSibling();
+            }
             if (foe != null)
             {
                 double ratio = foe.HpMax > 0 ? (double)foe.Hp / foe.HpMax : 0.0;

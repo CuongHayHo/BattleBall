@@ -22,7 +22,7 @@ namespace BattleBall.Net
     /// panel is closed with its X and opened again with the orange triangle on the left edge of the screen. Everything is read from the PlayerDataSnapshot the server pushed.
     /// The hierarchy is built by BattleBall/Build Login Scene.
     /// </summary>
-    public sealed class BbMenuUi : MonoBehaviour
+    public sealed partial class BbMenuUi : MonoBehaviour
     {
         [Header("Panel header")]
         public Image portrait;
@@ -80,6 +80,7 @@ namespace BattleBall.Net
         public BbMenuAuras auras;
         public BbTraining training;              // the training dummies of the village (docs 15.12)
         public BbMenuSkills skills;              // the Kỹ năng tab: the skills of the three characters, raised with gold
+        public BbSmithPanel smith;               // what Bà Hạt Mít does for the gear: upgrade, change a GEN line, open a GEN line (docs 15.22); stands where the shop stands
         public BbShopPanel shop;                 // the shop of an NPC (Urôn): stands on the left while this panel moves to the right (docs 15.15)
 
         [Header("Fusion partner chooser")]
@@ -139,14 +140,16 @@ namespace BattleBall.Net
             }
             panelToggle.onClick.AddListener(() => SetPanelOpen(true, false));
             if (closeButton != null) closeButton.onClick.AddListener(() => SetPanelOpen(false, false));
-            village.NpcTapped = OnNpc;
+            village.NpcTapped = spec => { if (training != null) training.Focus(spec.Id); else OnNpc(spec); };      // a tap on an NPC focuses it; the fist button talks to it (owner request 2026-10-10)
             if (auras != null) auras.Tapped = OnAuraTapped;
-            if (shop != null) { shop.menu = this; shop.Closed = OnShopClosed; }
+            if (shop != null) { shop.menu = this; shop.Closed = OnShopClosed; shop.Warm(); }
+            if (smith != null) { smith.menu = this; smith.Closed = OnShopClosed; }
             WirePopupSide();
             _panelOpen = PlayerPrefs.GetInt(KeyPanel, 1) != 0;
             SetPanelOpen(_panelOpen, true);
             earringSlot.onClick.AddListener(OnEarring);
             skinSlotButton.onClick.AddListener(OnWornSkin);
+            WireGear();
             bagPrev.onClick.AddListener(() => ChangeBagPage(-1));
             bagNext.onClick.AddListener(() => ChangeBagPage(1));
             for (int i = 0; i < bagButtons.Length; i++)
@@ -195,6 +198,8 @@ namespace BattleBall.Net
             ShowPage(_page, false);
             if (functions != null) functions.Refresh(snapshot);
             if (shop != null && shop.IsOpen) shop.OnSnapshot(snapshot);
+            if (smith != null && smith.IsOpen) smith.OnSnapshot(snapshot);
+            OnSnapshotGear();
         }
 
         /// <summary>For the screenshot tool: build the page without a session.</summary>
@@ -271,6 +276,24 @@ namespace BattleBall.Net
         public void DemoFuse(int main, int sub)
         {
             Fuse(main, sub, false);
+        }
+
+        /// <summary>For the play run: the fusion and the split the way the earring does them (with the effects of the Nro client).</summary>
+        public void DemoFuseWithEffect(int main, int sub)
+        {
+            Fuse(main, sub, true);
+        }
+
+        /// <summary>For the play run: the effects of the fusion dance (Nro type 4) on the main character; the menu state does not change.</summary>
+        public void DemoDance(int main)
+        {
+            var c = CharacterOf(Races[main]);
+            if (c != null) FusionFx.Play(BbFusionFx.Kind.Dance, c.CharacterId);
+        }
+
+        public void DemoSplit()
+        {
+            SplitFusion();
         }
 
         /// <summary>The sprite scale changed: forget the sprites cut at the old scale and draw everything again.</summary>
@@ -485,9 +508,10 @@ namespace BattleBall.Net
             {
                 FillSlots(ch, gearSlots, gearLabels, GearKeys);
                 FillSlots(ch, supportSlots, supportLabels, SupportKeys);
+                FillGearSlots(ch);
             }
-            bagText.text = "Hành trang: " + (_snapshot != null ? _snapshot.BagCount : 0) + " / 2.000";
-            bonusText.text = BonusSummary(ch, partner, pg.fusion);
+            bagText.text = (bagModeButton != null ? "Túi: " : "Hành trang: ") + (_snapshot != null ? _snapshot.BagCount : 0) + " / 2.000";
+            bonusText.text = BonusSummary(ch, partner, pg.fusion) + GenSummary(ch);
 
             // the fusion form looks like the fusion skin; the ordinary skins of the main and the partner do not change its look (owner decision 2026-10-08)
             int worn = 0, wornFusion = 0;
@@ -613,28 +637,56 @@ namespace BattleBall.Net
                 cast.Add(new BbVillageView.ActorSpec { Id = ch.CharacterId, Name = Titles[i], CostumeId = DisplayCostume(ch, false), Main = false });
             }
             village.SetCast(cast);
+            if (Application.isPlaying) FusionFx.SetFused(fused ? main.CharacterId : 0);          // not in the screenshot tool, which builds the menu outside play mode
         }
+
+        BbFusionFx _fusionFx;
+
+        public BbFusionFx FusionEffects { get { return FusionFx; } }
+
+        /// <summary>The fusion effects (merging, splitting, the aura of the merged form), made when first needed under the training layer so that the buttons stay on top.</summary>
+        BbFusionFx FusionFx
+        {
+            get
+            {
+                if (_fusionFx != null) return _fusionFx;
+                var parent = training != null ? training.transform : transform;
+                var go = new GameObject("FusionFx", typeof(RectTransform), typeof(BbFusionFx));
+                go.transform.SetParent(parent, false);
+                _fusionFx = go.GetComponent<BbFusionFx>();
+                _fusionFx.village = village;
+                _fusionFx.menu = this;
+                return _fusionFx;
+            }
+        }
+
+        /// <summary>The player talks to the NPC in focus (the fist button): its dialog, its shop or its panel opens.</summary>
+        public void InteractNpc(NpcSpec npc) { OnNpc(npc); }
 
         void OnNpc(NpcSpec npc)
         {
             if (npc.Action == NpcAction.Shop && shop != null) { OpenShop(npc); return; }
+            if (npc.Action == NpcAction.Smith && smith != null) { OpenSmithMenu(npc); return; }
             var specs = new List<BbPopup.ButtonSpec>();
             if (npc.Action == NpcAction.DungeonGate) specs.Add(new BbPopup.ButtonSpec("Chọn phó bản", false, false));
+            popup.centerOnScreen = true;
             popup.Show(null, npc.Name, "", npc.Talk, null, null, specs, null);
         }
 
         /// <summary>True while the panel, a popup (an NPC talking, an item) or the function list is open: the combat buttons stay hidden then (owner request 2026-10-09).</summary>
         public bool BlocksCombatUi
         {
-            get { return _panelOpen || popup.IsOpen || chooserRoot.activeSelf || (functions != null && functions.IsOpen) || (shop != null && shop.IsOpen); }
+            get { return _panelOpen || popup.IsOpen || chooserRoot.activeSelf || (functions != null && functions.IsOpen) || (shop != null && shop.IsOpen) || (smith != null && smith.IsOpen); }
         }
 
         /// <summary>Folds the panel away to the left (the village fills the screen, the X of the panel) or brings it back (the triangle); the choice is remembered.</summary>
-        public void SetPanelOpen(bool open, bool immediate)
+        public bool PanelOpen { get { return _panelOpen; } }
+
+        public void SetPanelOpen(bool open, bool immediate, bool remember = true)
         {
             _panelOpen = open;
             panelToggle.gameObject.SetActive(!open);
-            if (!_demo && !_dockRight) PlayerPrefs.SetInt(KeyPanel, open ? 1 : 0);        // beside a shop the panel is open on purpose: keep what the player chose
+            if (remember && !_demo && !_dockRight) PlayerPrefs.SetInt(KeyPanel, open ? 1 : 0);        // beside a shop the panel is open on purpose: keep what the player chose
             if (immediate) { _panelX = open ? 0f : -PanelWidth; ApplyPanelX(); }
         }
 
@@ -649,7 +701,7 @@ namespace BattleBall.Net
         public void ApplyInsets()
         {
             float menuW = Mathf.Clamp(PanelWidth + _panelX, 0f, PanelWidth);
-            float shopW = shop != null ? shop.VisibleWidth : 0f;
+            float shopW = Mathf.Max(shop != null ? shop.VisibleWidth : 0f, smith != null ? smith.VisibleWidth : 0f);
             village.SetInset(_dockRight ? shopW : Mathf.Max(menuW, shopW), _dockRight ? menuW : 0f);
         }
 
@@ -696,6 +748,42 @@ namespace BattleBall.Net
         {
             popup.areaLeftProvider = () => _dockRight ? Mathf.Max(0f, ((RectTransform)popup.root.transform).rect.width - PanelWidth) : 0f;
         }
+
+        /// <summary>Tap on Bà Hạt Mít: she asks what to do (as the menu of the NPC in Nro); the choice opens her panel on the left and moves the player's panel to the right.</summary>
+        void OpenSmithMenu(NpcSpec npc)
+        {
+            var specs = new List<BbPopup.ButtonSpec>
+            {
+                new BbPopup.ButtonSpec("Nâng cấp\ntrang bị", true, true),
+                new BbPopup.ButtonSpec("Đổi\nGEN", true, false),
+                new BbPopup.ButtonSpec("Mở ô\nGEN", true, false),
+            };
+            WirePopupSide();
+            popup.centerOnScreen = true;
+            popup.Show(null, npc.Name, "", "Ta có thể giúp gì cho ngươi ?", null, null, specs, i =>
+            {
+                popup.Hide();
+                OpenSmith(i == 0 ? BbSmithPanel.Mode.Upgrade : i == 1 ? BbSmithPanel.Mode.Reroll : BbSmithPanel.Mode.Unlock, false);
+            });
+        }
+
+        void OpenSmith(BbSmithPanel.Mode mode, bool immediate)
+        {
+            if (shop != null && shop.IsOpen) shop.Close();
+            WirePopupSide();
+            popup.Hide();
+            if (!_dockRight) _savedOpen = _panelOpen;
+            SetDock(true);
+            SetPanelOpen(true, immediate);
+            if (!_gearMode) ToggleGearMode();                                     // the bag shows the pieces and the stones
+            smith.Open(mode, _snapshot, immediate);
+        }
+
+        /// <summary>For the screenshot tool: what Bà Hạt Mít asks when she is tapped.</summary>
+        public void DemoSmithMenu() { OpenSmithMenu(new NpcSpec { Id = "shop", Name = "Bà Hạt Mít" }); }
+
+        /// <summary>For the screenshot tool: open the panel of Bà Hạt Mít.</summary>
+        public void DemoSmith(BbSmithPanel.Mode mode) { OpenSmith(mode, true); }
 
         void ShowShop(ShopContent content, bool immediate)
         {
@@ -863,6 +951,7 @@ namespace BattleBall.Net
             for (int i = 0; i < bagSlotImages.Length; i++)
                 bagSlotImages[i].sprite = i == _selectedCell && cellSelected != null ? cellSelected : BagCell;
             skinSlotImage.sprite = _selectedCell == SkinSlotCell && cellSelected != null ? cellSelected : _wornHere > 0 ? slotFilled : slotEmpty;
+            ApplyGearSelection();
         }
 
         /// <summary>
@@ -945,6 +1034,8 @@ namespace BattleBall.Net
         /// <summary>The slots after the earring show the skins of the account that nobody wears (picture of the costume), fourteen to a page, in the same order on every tab.</summary>
         void FillBag(ProtoCharacter ch)
         {
+            if (bagModeLabel != null) bagModeLabel.text = _gearMode ? "Xem skin" : "Xem đồ";
+            if (_gearMode) { FillGearBag(ch); return; }
             _bagSkins.Clear();
             if (_snapshot != null)
             {
@@ -981,6 +1072,7 @@ namespace BattleBall.Net
         /// <summary>Tap on a skin of the bag: the popup with its name, bonuses and description, and one button for every character who may use it.</summary>
         void OnBagSkin(int slot)
         {
+            if (_gearMode) { OnBagGear(slot); return; }
             int index = _bagPage * BagPerPage() + slot;
             if (_snapshot == null || index >= _bagSkins.Count) return;
             ShowSkinPopup(_bagSkins[index], false);
@@ -1292,6 +1384,8 @@ namespace BattleBall.Net
         /// <summary>The two characters become one tab; the main one is the character whose tab was open.</summary>
         void Fuse(int main, int sub, bool announce)
         {
+            var mainCharacter = CharacterOf(Races[main]);
+            if (announce && mainCharacter != null) FusionFx.Play(true, mainCharacter.CharacterId);      // the character vanishes in the white blinking, the Potara effect rises
             _fusionMain = main;
             _fusionSub = sub;
             RebuildPages();
@@ -1305,6 +1399,7 @@ namespace BattleBall.Net
         {
             int main = _fusionMain;
             var ch = main >= 0 ? CharacterOf(Races[main]) : null;
+            if (ch != null) FusionFx.Play(false, ch.CharacterId);                  // splitting blinks the same way, without the effect
             bool wearsFusionSkin = false;
             if (ch != null) foreach (var e in ch.Equipment) if (e.Slot == "FUSION_SKIN" && e.CostumeId != 0) wearsFusionSkin = true;
             Unfuse(true);
@@ -1367,8 +1462,48 @@ namespace BattleBall.Net
             }
         }
 
+        bool _outsideDown;
+        Vector2 _outsideAt;
+        float _outsideTime;
+
+        /// <summary>
+        /// A tap on the village outside the panel folds the panel away (owner request 2026-10-10), the same as its X. It does not count when the touch lands on something that
+        /// takes touches itself (the stick, an NPC, a button), when the finger moved (a drag, a swipe) or when a popup, the shop or the functions window is open.
+        /// </summary>
+        void HandleOutsideTap()
+        {
+            if (!_panelOpen || _dockRight || popup.IsOpen || chooserRoot.activeSelf || (shop != null && shop.IsOpen) || (smith != null && smith.IsOpen) || (functions != null && functions.IsOpen)) { _outsideDown = false; return; }
+            if (Input.GetMouseButtonDown(0))
+            {
+                var cam = GetComponent<Canvas>().worldCamera;
+                _outsideDown = !RectTransformUtility.RectangleContainsScreenPoint(panelRect, Input.mousePosition, cam) && !OverTouchTarget(Input.mousePosition);
+                _outsideAt = Input.mousePosition;
+                _outsideTime = Time.unscaledTime;
+            }
+            else if (_outsideDown && Input.GetMouseButtonUp(0))
+            {
+                _outsideDown = false;
+                if (((Vector2)Input.mousePosition - _outsideAt).magnitude < Screen.height * 0.03f && Time.unscaledTime - _outsideTime < 0.5f) SetPanelOpen(false, false);
+            }
+        }
+
+        static readonly List<UnityEngine.EventSystems.RaycastResult> _hits = new List<UnityEngine.EventSystems.RaycastResult>();
+
+        /// <summary>True when something under this screen point handles touches: a button or other control, or the stick.</summary>
+        static bool OverTouchTarget(Vector2 screen)
+        {
+            if (UnityEngine.EventSystems.EventSystem.current == null) return false;
+            var data = new UnityEngine.EventSystems.PointerEventData(UnityEngine.EventSystems.EventSystem.current) { position = screen };
+            _hits.Clear();
+            UnityEngine.EventSystems.EventSystem.current.RaycastAll(data, _hits);
+            foreach (var h in _hits)
+                if (h.gameObject != null && (h.gameObject.GetComponentInParent<Selectable>() != null || h.gameObject.GetComponentInParent<BbJoystick>() != null)) return true;
+            return false;
+        }
+
         void Update()
         {
+            HandleOutsideTap();
             RefreshLiveStats();
             if (_fade < 1f)
             {

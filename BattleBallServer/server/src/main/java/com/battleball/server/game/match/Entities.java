@@ -169,6 +169,8 @@ public final class Entities {
         public final int costumeId;
         public Cast cast;
         public Channel channel;
+        /** One skill at a time: until this moment the fighter is still doing the last skill (its animation) and starts no other (the Nro client refuses while the paint plays). */
+        public long actionUntil;
         public long regenUntil;
         public double regenPctPerSec;
         /** Where the fighter was when the regeneration (Tái tạo năng lượng) started; moving away from it ends the skill (Nro PlayerService.playerMove). */
@@ -186,14 +188,24 @@ public final class Entities {
         // pet effect
         public StaticData.PetEffect pet;
         public long nextPetAt;
-        public final double hpRegenPctPerSec;
-        public final double kiRegenPctPerSec;
+        public double hpRegenPctPerSec;
+        public double kiRegenPctPerSec;
         // bookkeeping for the result
         public long damageDealt;
         public int kills;
 
         /** Display values of the armor stat (the menu shows them live) and the base for the buffs of the pet effect. */
         public double armorStat;
+        /** The figures the fighter has now without any temporary effect (a refresh while a session runs moves everything by the difference to these). */
+        public com.battleball.server.game.StatCalculator.CharacterStats base;
+
+        /**
+         * What the GEN sets worn by this fighter add to one skill (docs 15.21): {@code type} is SKILL_DMG_PCT, SKILL_COOLDOWN_PCT, SKILL_DURATION_MULT, SKILL_HP_COST_DELTA,
+         * SKILL_RADIUS_PX, SKILL_DMG_HPMAX_PCT or MINION_PERSIST. 0 when no set gives it. A fusion adds the numbers of both characters (its base is their sum).
+         */
+        public double gen(String type, int skillId) {
+            return base == null ? 0 : base.other(type + ":" + skillId);
+        }
 
         @Override
         public int effectMask(long now) {

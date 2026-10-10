@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using BattleBall.Proto;
 
@@ -91,6 +92,66 @@ namespace BattleBall.Net
             return a.ActionResult;
         }
 
+        /// <summary>Every piece of gear in the shared bag (all pages of InventoryRequest), in item id order.</summary>
+        public async Task<List<ItemInfo>> InventoryAsync(ulong characterId)
+        {
+            var all = new List<ItemInfo>();
+            ulong after = 0;
+            for (int guard = 0; guard < 50; guard++)                 // 50 pages of 200: more than the bag can hold (2.000)
+            {
+                var a = await Ask(new Envelope { InventoryRequest = new InventoryRequest { CharacterId = characterId, AfterItemId = after, PageSize = 200 } }, Envelope.PayloadOneofCase.InventoryPage);
+                var page = a.InventoryPage;
+                all.AddRange(page.Items);
+                if (!page.HasMore || page.Items.Count == 0) break;
+                after = page.Items[page.Items.Count - 1].ItemId;
+            }
+            return all;
+        }
+
+        /// <summary>Wears a piece of the bag on this character (the server checks its planet and level); the piece that was worn goes back to the bag.</summary>
+        public async Task<ActionResult> EquipItemAsync(ulong characterId, ulong itemId)
+        {
+            var a = await Ask(new Envelope { EquipItemRequest = new EquipItemRequest { CharacterId = characterId, ItemId = itemId } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>Takes off the piece worn in a gear slot (ARMOR, PANTS, GLOVES, BOOTS, RING) and puts it in the bag.</summary>
+        public async Task<ActionResult> UnequipItemAsync(ulong characterId, string slot)
+        {
+            var a = await Ask(new Envelope { UnequipItemRequest = new UnequipItemRequest { CharacterId = characterId, Slot = slot } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>Raises a piece (worn or in the bag) by one upgrade stone: +5% of its main stat, up to +75%.</summary>
+        public async Task<ActionResult> UpgradeItemAsync(ulong characterId, ulong itemId)
+        {
+            var a = await Ask(new Envelope { UpgradeItemRequest = new UpgradeItemRequest { CharacterId = characterId, ItemId = itemId } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>A GEN stone changes one GEN line of a piece (line_no from 0) to another random set of the planet of the piece (docs 15.21).</summary>
+        public async Task<ActionResult> RerollGenAsync(ulong characterId, ulong itemId, uint lineNo)
+        {
+            var a = await Ask(new Envelope { RerollGenRequest = new RerollGenRequest { CharacterId = characterId, ItemId = itemId, LineNo = lineNo } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>GEN slot stones open one more GEN line on a piece.</summary>
+        public async Task<ActionResult> UnlockGenSlotAsync(ulong characterId, ulong itemId)
+        {
+            var a = await Ask(new Envelope { UnlockGenSlotRequest = new UnlockGenSlotRequest { CharacterId = characterId, ItemId = itemId } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>Sells pieces of the bag for a little gold (equipped pieces cannot be sold).</summary>
+        public async Task<ActionResult> SellItemAsync(ulong characterId, ulong itemId)
+        {
+            var request = new SellItemsRequest { CharacterId = characterId, Destroy = false };
+            request.ItemIds.Add(itemId);
+            var a = await Ask(new Envelope { SellItemsRequest = request }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
         /// <summary>What an NPC sells (the shop of the NPC with this id on the map); throws when the NPC sells nothing.</summary>
         public async Task<ShopContent> ShopAsync(string npcId)
         {
@@ -98,6 +159,13 @@ namespace BattleBall.Net
             if (answer.PayloadCase == Envelope.PayloadOneofCase.ShopContent) return answer.ShopContent;
             if (answer.PayloadCase == Envelope.PayloadOneofCase.ActionResult) throw new InvalidOperationException(answer.ActionResult.Message);
             throw new InvalidOperationException("unexpected answer: " + BbConnection.Describe(answer));
+        }
+
+        /// <summary>Buys a piece of gear ("GEAR") or some stones ("MATERIAL", quantity 1 to 1000) in the shop of this NPC; the server prices it for the account's highest character.</summary>
+        public async Task<ActionResult> ShopBuyAsync(string npcId, string kind, uint templateId, uint quantity)
+        {
+            var a = await Ask(new Envelope { ShopBuyRequest = new ShopBuyRequest { NpcId = npcId, Kind = kind, TemplateId = templateId, Quantity = quantity } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
         }
 
         /// <summary>Buys a skin with gems for the account (the character only decides which race may wear it); the server pushes a fresh snapshot on success.</summary>

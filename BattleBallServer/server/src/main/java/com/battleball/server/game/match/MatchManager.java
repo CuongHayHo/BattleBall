@@ -13,6 +13,8 @@ import com.battleball.server.data.StaticData;
 import com.battleball.server.data.StaticDataStore;
 import com.battleball.server.db.Database;
 import com.battleball.server.game.PlayerActions;
+import com.battleball.server.game.PlayerRepository;
+import com.battleball.server.game.StatCalculator;
 import io.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +24,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
@@ -82,6 +85,9 @@ public final class MatchManager implements AutoCloseable {
         this.starter = new MatchStarter(db, data);
         this.settlement = new MatchSettlement(db);
         this.playerActions = playerActions;
+        if (playerActions != null) {
+            playerActions.onStatsChanged(this::refreshStats);
+        }
         this.data = data;
         this.dbExecutor = dbExecutor;
         this.random = random;
@@ -171,6 +177,24 @@ public final class MatchManager implements AutoCloseable {
         } catch (SQLException | RuntimeException e) {
             LOG.error("cannot start a training session", e);
             reply(channel, requestId, ActionError.ACTION_INTERNAL, "server error");
+        }
+    }
+
+    /**
+     * Gear, a skin, an aura or a support changed in the village while a training session runs: the fighters take the new figures at once, without a restart
+     * (owner request 2026-10-10). Blocking (reads the player): call it from the DB executor. A real match is left alone.
+     */
+    public void refreshStats(long accountId) {
+        Running r = byAccount.get(accountId);
+        if (r == null || !r.training() || r.settling) {
+            return;
+        }
+        try (Connection c = db.connection()) {
+            StaticData d = data.get();
+            Map<Long, StatCalculator.CharacterStats> figures = MatchStarter.currentFigures(d, PlayerRepository.load(c, accountId), r.started.setup());
+            r.engine.submit(() -> r.engine.applyStats(figures));
+        } catch (SQLException | RuntimeException e) {
+            LOG.warn("cannot refresh the figures of a training session", e);
         }
     }
 

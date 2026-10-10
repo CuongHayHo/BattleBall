@@ -1,5 +1,5 @@
 {
-  "totalCostumes": 363,
+  "totalCostumes": 366,
   "costumes": [
     {
       "id": 196,
@@ -6645,6 +6645,60 @@
       "dyHead": 0,
       "charHeight": 40,
       "hpBarOffsetY": 30
+    },
+    {
+      "id": 9021,
+      "name": "Bunma",
+      "gender": 3,
+      "genderName": "Mọi Giới Tính",
+      "iconId": 562,
+      "headPartId": 42,
+      "bodyPartId": 43,
+      "legPartId": 44,
+      "bodyGroup": "Standard",
+      "bodyGroupId": 1,
+      "isHeadOnly": false,
+      "isMultiFrameHead": false,
+      "headCyclePartIds": [],
+      "dyHead": 0,
+      "charHeight": 42,
+      "hpBarOffsetY": 49
+    },
+    {
+      "id": 9022,
+      "name": "Bà Hạt Mít",
+      "gender": 3,
+      "genderName": "Mọi Giới Tính",
+      "iconId": 1410,
+      "headPartId": 117,
+      "bodyPartId": 118,
+      "legPartId": 119,
+      "bodyGroup": "Standard",
+      "bodyGroupId": 1,
+      "isHeadOnly": false,
+      "isMultiFrameHead": false,
+      "headCyclePartIds": [],
+      "dyHead": 0,
+      "charHeight": 42,
+      "hpBarOffsetY": 49
+    },
+    {
+      "id": 9023,
+      "name": "Cui",
+      "gender": 3,
+      "genderName": "Mọi Giới Tính",
+      "iconId": 639,
+      "headPartId": 48,
+      "bodyPartId": 49,
+      "legPartId": 50,
+      "bodyGroup": "Standard",
+      "bodyGroupId": 1,
+      "isHeadOnly": false,
+      "isMultiFrameHead": false,
+      "headCyclePartIds": [],
+      "dyHead": 0,
+      "charHeight": 42,
+      "hpBarOffsetY": 49
     }
   ]
 }

@@ -88,7 +88,12 @@ namespace BattleBall.Net
             CheckDropped();
         }
 
-        void OnDestroy() { _client?.Dispose(); }
+        void OnDestroy()
+        {
+            _attempt++;                                    // a connect or download still running must not touch the texts of this destroyed screen when it ends
+            _cts?.Cancel();
+            _client?.Dispose();
+        }
 
         // ---------------------------------------------------------------------------------------------------------------- rules (same as the server)
 

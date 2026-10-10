@@ -76,6 +76,10 @@ message Envelope {
     // ---- NPC shops (decision 2026-10-09: Urôn sells every skin; the server decides what a shop sells, as Teamobi's Npc opens a shop with cmd -44) ----
     ShopRequest shop_request = 65;           // an authenticated player taps the NPC; answered by ShopContent (or ActionResult NOT_FOUND for an NPC that sells nothing)
     ShopContent shop_content = 66;
+    ShopBuyRequest shop_buy_request = 67;    // buys gear or a material in a shop (skins are bought with BuySkinRequest); answered by ActionResult, then a fresh PlayerDataSnapshot
+    // ---- GEN (docs 15.21) ----
+    RerollGenRequest reroll_gen_request = 68;           // a GEN stone changes one line of a piece to another random set of its planet; ActionResult, then a fresh PlayerDataSnapshot
+    UnlockGenSlotRequest unlock_gen_slot_request = 69;  // GEN slot stones open one more line on a piece
   }
 }
 
@@ -132,8 +136,25 @@ message Ping { uint64 client_time_ms = 1; }
 message ShopRequest { string npc_id = 1; }              // the id of the NPC of the map (balance_config npc_shops key), e.g. "uron"
 
 message ShopItem {
-  SkinInfo skin = 1;                // costume_id, name, race, kind, fusion race and the bonus lines (StatLine.text is ready to show)
-  uint32 gem_price = 2;             // skins are paid with gems; buy with BuySkinRequest (the server checks everything again)
+  SkinInfo skin = 1;                // a skin: costume_id, name, race, kind, fusion race and the bonus lines (StatLine.text is ready to show)
+  uint32 gem_price = 2;             // gems per unit (skins, the crystal stone); 0 = not paid with gems
+  string kind = 3;                  // SKIN (also when empty), GEAR (a whole piece of equipment, bought with gold), EXCHANGE (a piece given for its fragments) or MATERIAL (a stone)
+  uint32 template_id = 4;           // GEAR: item_template id; MATERIAL: material_template id (what ShopBuyRequest names)
+  string name = 5;
+  string description = 6;           // ready to show: the bonus of a piece of gear, what a stone does
+  uint32 icon_id = 7;               // Nro small image of the item (0 = none)
+  uint64 gold_price = 8;            // gold per unit (GEAR: for the whole piece, all its fragments); 0 = not paid with gold
+  uint32 min_level = 9;             // GEAR and EXCHANGE: the level a character needs to use the piece
+  uint32 fragment_template_id = 10; // EXCHANGE: the material (fragment) that pays for the piece; the client shows how many of it the account has (PlayerDataSnapshot.materials)
+  uint32 fragment_cost = 11;        // EXCHANGE: how many fragments one piece takes
+  uint32 fragment_icon_id = 12;     // EXCHANGE: the Nro small image of that fragment (the row shows it next to "owned / needed")
+}
+
+message ShopBuyRequest {
+  string npc_id = 1;                // the shop the player stands at (the item must be on sale there)
+  string kind = 2;                  // GEAR, EXCHANGE or MATERIAL
+  uint32 template_id = 3;
+  uint32 quantity = 4;              // MATERIAL: 1 to 1000; GEAR and EXCHANGE: ignored (one piece)
 }
 
 message ShopTab {
@@ -145,6 +166,7 @@ message ShopContent {
   string npc_id = 1;
   string npc_name = 2;
   repeated ShopTab tabs = 3;        // only tabs that have something to sell
+  uint32 portrait_icon = 4;         // Nro small image shown at the top of the shop (the NPC's avatar); 0 = none
 }
 message Pong { uint64 client_time_ms = 1; uint64 server_time_ms = 2; }
 
@@ -253,6 +275,23 @@ message ItemInfo {                  // one gear piece (item_instance)
   double upgrade_percent = 4;       // 0..75 in steps of 5
   repeated StatLine lines = 5;
   bool equipped = 6;
+  // what the client needs to draw the piece without an item table (docs 15.19):
+  string name = 7;                  // "Áo Thần Linh Namếc"
+  uint32 icon_id = 8;               // Nro small image
+  string race = 9;                  // EARTH, NAMEC or XAYDA: the planet whose characters may wear it
+  uint32 tier = 10;                 // 1 Thần Linh, 2 Hủy Diệt, 3 Thiên Sứ
+  uint32 min_level = 11;            // the level a character needs to wear it
+  StatLine main_stat = 12;          // the main stat with the upgrade counted; text is ready to show ("Giáp cộng thẳng +2750")
+  repeated GenLine gens = 13;       // one entry per GEN slot of the piece, in order; an empty slot has gen_key ""
+  uint32 gen_slots = 14;            // slots the piece has now (rules: initial plus the ones opened with stones)
+  uint32 gen_unlock_cost = 15;      // GEN slot stones the next slot costs; 0 when no slot can be opened any more
+}
+
+message GenLine {
+  uint32 line_no = 1;               // 0-based, what RerollGenRequest names
+  string gen_key = 2;               // the set ("SONGOKU"); empty = nothing yet
+  string name = 3;                  // "Set Sôngôku"
+  string text = 4;                  // what the set does at each step, ready to show ("5 món: Kamejoko +100% sát thương")
 }
 
 message SkillState {
@@ -277,6 +316,10 @@ message SupportInstance {
 message MaterialAmount {
   uint32 template_id = 1;
   uint64 quantity = 2;
+  string name = 3;                  // "Đá nâng cấp", ready to show in the bag (the client has no material table)
+  uint32 icon_id = 4;               // Nro small image
+  string kind = 5;                  // FRAGMENT, UPGRADE_STONE, STAT_STONE, CRYSTAL_STONE, GEN_STONE, GEN_SLOT_STONE, ...
+  string note = 6;                  // what it is for
 }
 
 message CharacterInfo {
@@ -296,7 +339,17 @@ message CharacterInfo {
   CharacterStats fusion_stats = 19;  // the stats of this character when it is the main one of a fusion (the fusion skin counts); the client adds the partner's stats
   repeated StatLine fusion_bonuses = 20;   // bonus totals when it is the main one of a fusion
   repeated SkillCooldown cooldowns = 21;   // skills still cooling down (real server time, kept when the player logs out), left_ms from the moment of this snapshot
+  repeated GenActive active_gens = 22;     // the sets that at least one worn piece carries, with the number of worn pieces that carry them (the line under the character)
 }
+
+message GenActive {
+  string gen_key = 1;
+  uint32 pieces = 2;                // worn pieces carrying this set (a piece counts once)
+}
+
+message GenTierInfo { uint32 pieces = 1; string text = 2; }
+message GenSetInfo { string gen_key = 1; string name = 2; string race = 3; repeated GenTierInfo tiers = 4; }   // race EARTH, NAMEC, XAYDA or ALL
+message GenRulesInfo { uint32 reroll_stones = 1; uint32 max_slots = 2; uint32 stone_template_id = 3; uint32 slot_stone_template_id = 4; }
 
 message SkillCooldown {
   uint32 skill_id = 1;
@@ -344,6 +397,8 @@ message PlayerDataSnapshot {
   repeated AuraInfo auras = 13;     // every enabled aura with the level that unlocks it (the client works out which ones are unlocked from the levels of the characters)
   uint32 equipped_aura_id = 14;     // the aura the account wears, shared by the three characters; 0 = none
   repeated SkillCatalogEntry skill_catalog = 15;   // every enabled skill with its levels (the Kỹ năng tab: learn and raise with gold, UpgradeSkillRequest)
+  repeated GenSetInfo gen_sets = 16;               // every GEN set with its steps (what a set does, for the popups)
+  GenRulesInfo gen_rules = 17;
 }
 
 message SkillCatalogEntry {
@@ -484,6 +539,8 @@ message AssembleItemRequest { uint64 character_id = 1; uint32 item_template_id =
 message EquipItemRequest { uint64 character_id = 1; uint64 item_id = 2; }
 message UnequipItemRequest { uint64 character_id = 1; string slot = 2; }
 message SellItemsRequest { uint64 character_id = 1; repeated uint64 item_ids = 2; bool destroy = 3; }   // destroy = true: no gold
+message RerollGenRequest { uint64 character_id = 1; uint64 item_id = 2; uint32 line_no = 3; }   // costs gen_rules.reroll_stones GEN stones; the new set is random among the sets of the planet of the piece
+message UnlockGenSlotRequest { uint64 character_id = 1; uint64 item_id = 2; }                    // costs ItemInfo.gen_unlock_cost GEN slot stones
 message UpgradeItemRequest { uint64 character_id = 1; uint64 item_id = 2; }              // one upgrade stone: +5% of the base stat (max 75%)
 message BuySupportRequest { uint64 character_id = 1; uint32 support_id = 2; }            // gems
 message EquipSupportRequest { uint64 character_id = 1; uint64 instance_id = 2; }

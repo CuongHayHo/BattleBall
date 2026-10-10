@@ -134,7 +134,7 @@ public final class EconomyService {
         };
     }
 
-    private static long winGold(StaticData d, int level) {
+    static long winGold(StaticData d, int level) {
         return Math.round(d.balanceNum("gold_per_win_per_level", 1000) * Math.max(1, level));
     }
 
@@ -420,7 +420,7 @@ public final class EconomyService {
             long unit;
             String currency = m.buyCurrency();
             if (currency.equals("GOLD")) {
-                unit = m.priceFixed() != null ? m.priceFixed() : (long) Math.ceil(m.priceWins() * winGold(d, ch.level()));
+                unit = goldUnitPrice(d, m, ch.level());
             } else {
                 unit = m.priceFixed() == null ? 0 : m.priceFixed();
             }
@@ -438,6 +438,57 @@ public final class EconomyService {
         });
     }
 
+    /** The gold one unit of a material costs a character of this level (the price in wins times the gold of a win at that level), or the fixed price. */
+    static long goldUnitPrice(StaticData d, StaticData.Material m, int level) {
+        return m.priceFixed() != null ? m.priceFixed() : (long) Math.ceil(m.priceWins() * winGold(d, level));
+    }
+
+    /**
+     * A whole piece of gear bought in a shop (Bunma): the price of all its fragments in gold, paid and assembled in one step (the plan: "mua đủ một món bằng vàng ≈ 6 trận thắng").
+     * Same rules as buying the fragments and assembling them: the level, the bag room, the gold.
+     */
+    public ActionResult buyGear(long accountId, long characterId, int itemTemplateId) {
+        return tx(accountId, characterId, (c, d, ch) -> {
+            StaticData.ItemTemplate t = d.items().get(itemTemplateId);
+            if (t == null || !t.enabled() || !GEAR_SLOTS.contains(t.slot())) {
+                return fail(ActionError.NOT_FOUND, "item not found");
+            }
+            if (ch.level() < t.minLevel()) {
+                return fail(ActionError.LEVEL_TOO_LOW, "level too low");
+            }
+            int fragmentItem = d.fragmentRoot(t).id();
+            StaticData.Material frag = d.materials().values().stream()
+                    .filter(m -> m.kind().equals("FRAGMENT") && Integer.valueOf(fragmentItem).equals(m.itemTemplateId()) && m.enabled() && m.buyCurrency().equals("GOLD")).findFirst().orElse(null);
+            if (frag == null) {
+                return fail(ActionError.DISABLED, "this piece is not sold");
+            }
+            long total = goldUnitPrice(d, frag, ch.level()) * t.piecesNeeded();
+            if (total <= 0) {
+                return fail(ActionError.DISABLED, "no price set");
+            }
+            if (ch.gold() < total) {
+                return fail(ActionError.NOT_ENOUGH_GOLD, "not enough gold");
+            }
+            if (bagCount(c, ch.accountId()) >= bagLimit(d)) {
+                return fail(ActionError.BAG_FULL, "bag is full");
+            }
+            spend(c, ch, "GOLD", total, "BUY_GEAR", "item:" + itemTemplateId);
+            long itemId;
+            try (PreparedStatement ps = c.prepareStatement("INSERT INTO item_instance (account_id, template_id, slot) VALUES (?,?,?)", Statement.RETURN_GENERATED_KEYS)) {
+                ps.setLong(1, ch.accountId());
+                ps.setInt(2, itemTemplateId);
+                ps.setString(3, t.slot());
+                ps.executeUpdate();
+                try (ResultSet rs = ps.getGeneratedKeys()) {
+                    rs.next();
+                    itemId = rs.getLong(1);
+                }
+            }
+            itemLog(c, ch.id(), "BUY", "ITEM", itemTemplateId, itemId, 1, null);
+            return ok(itemId, true);
+        });
+    }
+
     public ActionResult assembleItem(long accountId, long characterId, int itemTemplateId) {
         return tx(accountId, characterId, (c, d, ch) -> {
             StaticData.ItemTemplate t = d.items().get(itemTemplateId);
@@ -447,8 +498,9 @@ public final class EconomyService {
             if (ch.level() < t.minLevel()) {
                 return fail(ActionError.LEVEL_TOO_LOW, "level too low");
             }
+            int fragmentItem = d.fragmentRoot(t).id();
             StaticData.Material frag = d.materials().values().stream()
-                    .filter(m -> m.kind().equals("FRAGMENT") && Integer.valueOf(itemTemplateId).equals(m.itemTemplateId())).findFirst().orElse(null);
+                    .filter(m -> m.kind().equals("FRAGMENT") && Integer.valueOf(fragmentItem).equals(m.itemTemplateId())).findFirst().orElse(null);
             if (frag == null) {
                 return fail(ActionError.NOT_FOUND, "no fragments exist for this item");
             }
@@ -484,6 +536,10 @@ public final class EconomyService {
             StaticData.ItemTemplate t = d.items().get(it.templateId);
             if (t == null || !GEAR_SLOTS.contains(it.slot)) {
                 return fail(ActionError.WRONG_SLOT, "not a gear item");
+            }
+            // one bag holds every piece of the account, but a piece is worn by a character of its own planet (owner decision 2026-10-10, docs 15.18)
+            if (!t.race().equals(ch.race())) {
+                return fail(ActionError.RACE_LOCKED, "this gear is for another planet");
             }
             if (ch.level() < t.minLevel()) {
                 return fail(ActionError.LEVEL_TOO_LOW, "level too low");
@@ -597,6 +653,112 @@ public final class EconomyService {
             itemLog(c, ch.id(), "UPGRADE", "ITEM", it.templateId, itemId, 1, null);
             return ok(itemId, true);
         });
+    }
+
+    // ---- GEN (docs 15.21) ----------------------------------------------------------------------------------------------------
+
+    /**
+     * A GEN stone changes one line of a piece to another random set (owner decision 2026-10-10). The new set is among the sets of the planet of the piece, never one the piece
+     * already carries on another line, and never the one the line has now; an empty line gets a set the first time.
+     */
+    public ActionResult rerollGen(long accountId, long characterId, long itemId, int lineNo) {
+        return tx(accountId, characterId, (c, d, ch) -> {
+            ItemRowLite it = lockItem(c, ch.accountId(), itemId);
+            StaticData.ItemTemplate t = it == null ? null : d.items().get(it.templateId);
+            if (t == null) {
+                return fail(ActionError.NOT_FOUND, "item not found");
+            }
+            GenSets.Rules rules = GenSets.rules(d);
+            int slots = rules.initialSlots() + genExtraSlots(c, itemId);
+            if (lineNo < 0 || lineNo >= slots) {
+                return fail(ActionError.INVALID_ARGUMENT, "no such GEN line");
+            }
+            Map<Integer, String> lines = genLines(c, itemId);
+            List<String> candidates = new ArrayList<>();
+            for (GenSets.GenSet g : GenSets.forRace(d, t.race())) {
+                boolean carried = false;
+                for (Map.Entry<Integer, String> e : lines.entrySet()) {
+                    carried |= e.getValue().equals(g.key());      // the same line (no change) or another line (no repeat on a piece)
+                }
+                if (!carried) {
+                    candidates.add(g.key());
+                }
+            }
+            if (candidates.isEmpty()) {
+                return fail(ActionError.DISABLED, "no other set for this piece");
+            }
+            StaticData.Material stone = d.materials().values().stream().filter(m -> m.kind().equals("GEN_STONE")).findFirst().orElse(null);
+            if (stone == null || materialQty(c, ch.accountId(), stone.id()) < rules.rerollStones()) {
+                return fail(ActionError.NOT_ENOUGH_MATERIAL, "not enough GEN stones");
+            }
+            addMaterial(c, ch.accountId(), stone.id(), -rules.rerollStones());
+            String picked = candidates.get(random.nextInt(candidates.size()));
+            try (PreparedStatement ps = c.prepareStatement("INSERT INTO item_gen_line (item_id, line_no, gen_key) VALUES (?,?,?) ON DUPLICATE KEY UPDATE gen_key = VALUES(gen_key)")) {
+                ps.setLong(1, itemId);
+                ps.setInt(2, lineNo);
+                ps.setString(3, picked);
+                ps.executeUpdate();
+            }
+            touchItem(c, itemId);
+            itemLog(c, ch.id(), "GEN_REROLL", "ITEM", it.templateId, itemId, 1, null);
+            return ok(itemId, true);
+        });
+    }
+
+    /** GEN slot stones open one more GEN line on a piece (up to the maximum of gen_rules); the cost grows with each line. */
+    public ActionResult unlockGenSlot(long accountId, long characterId, long itemId) {
+        return tx(accountId, characterId, (c, d, ch) -> {
+            ItemRowLite it = lockItem(c, ch.accountId(), itemId);
+            if (it == null || d.items().get(it.templateId) == null) {
+                return fail(ActionError.NOT_FOUND, "item not found");
+            }
+            GenSets.Rules rules = GenSets.rules(d);
+            int extra = genExtraSlots(c, itemId);
+            int cost = rules.unlockCost(rules.initialSlots() + extra);
+            if (cost <= 0) {
+                return fail(ActionError.MAXED, "no more GEN lines can be opened");
+            }
+            StaticData.Material stone = d.materials().values().stream().filter(m -> m.kind().equals("GEN_SLOT_STONE")).findFirst().orElse(null);
+            if (stone == null || materialQty(c, ch.accountId(), stone.id()) < cost) {
+                return fail(ActionError.NOT_ENOUGH_MATERIAL, "not enough GEN slot stones");
+            }
+            addMaterial(c, ch.accountId(), stone.id(), -cost);
+            try (PreparedStatement ps = c.prepareStatement("UPDATE item_instance SET gen_extra_slots = gen_extra_slots + 1, version = version + 1 WHERE item_id = ?")) {
+                ps.setLong(1, itemId);
+                ps.executeUpdate();
+            }
+            itemLog(c, ch.id(), "GEN_SLOT", "ITEM", it.templateId, itemId, 1, null);
+            return ok(itemId, true);
+        });
+    }
+
+    private static int genExtraSlots(Connection c, long itemId) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("SELECT gen_extra_slots FROM item_instance WHERE item_id = ?")) {
+            ps.setLong(1, itemId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
+    }
+
+    private static Map<Integer, String> genLines(Connection c, long itemId) throws SQLException {
+        Map<Integer, String> out = new java.util.TreeMap<>();
+        try (PreparedStatement ps = c.prepareStatement("SELECT line_no, gen_key FROM item_gen_line WHERE item_id = ?")) {
+            ps.setLong(1, itemId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.put(rs.getInt(1), rs.getString(2));
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void touchItem(Connection c, long itemId) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("UPDATE item_instance SET version = version + 1 WHERE item_id = ?")) {
+            ps.setLong(1, itemId);
+            ps.executeUpdate();
+        }
     }
 
     // ---- support items, crafting ---------------------------------------------------------------------------------------------
@@ -854,8 +1016,19 @@ public final class EconomyService {
                     }
                 }
             }
+            Map<Long, Map<Integer, String>> gens = new java.util.HashMap<>();
+            try (PreparedStatement ps = c.prepareStatement("SELECT g.item_id, g.line_no, g.gen_key FROM item_gen_line g JOIN item_instance i USING (item_id) "
+                    + "WHERE i.account_id = ? AND i.location = 'BAG' AND i.item_id > ?")) {
+                ps.setLong(1, accountId);
+                ps.setLong(2, afterItemId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        gens.computeIfAbsent(rs.getLong(1), k -> new java.util.TreeMap<>()).put(rs.getInt(2), rs.getString(3));
+                    }
+                }
+            }
             InventoryPage.Builder b = InventoryPage.newBuilder().setCharacterId(characterId);
-            try (PreparedStatement ps = c.prepareStatement("SELECT item_id, template_id, slot, upgrade_percent FROM item_instance WHERE account_id = ? AND location = 'BAG' "
+            try (PreparedStatement ps = c.prepareStatement("SELECT item_id, template_id, slot, upgrade_percent, gen_extra_slots FROM item_instance WHERE account_id = ? AND location = 'BAG' "
                     + "AND item_id > ? ORDER BY item_id LIMIT ?")) {
                 ps.setLong(1, accountId);
                 ps.setLong(2, afterItemId);
@@ -867,8 +1040,8 @@ public final class EconomyService {
                             b.setHasMore(true);
                             break;
                         }
-                        b.addItems(PlayerRepository.itemProto(new PlayerRepository.ItemRow(rs.getLong(1), rs.getInt(2), rs.getString(3), rs.getDouble(4), "BAG",
-                                lines.getOrDefault(rs.getLong(1), Map.of()))));
+                        b.addItems(PlayerRepository.itemProto(d, new PlayerRepository.ItemRow(rs.getLong(1), rs.getInt(2), rs.getString(3), rs.getDouble(4), "BAG",
+                                lines.getOrDefault(rs.getLong(1), Map.of()), PlayerRepository.gensList(gens.get(rs.getLong(1))), rs.getInt(5))));
                     }
                 }
             }

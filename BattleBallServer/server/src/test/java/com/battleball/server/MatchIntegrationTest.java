@@ -395,6 +395,48 @@ class MatchIntegrationTest {
     }
 
     @Test
+    void gearWornDuringATrainingSessionChangesTheFightersAtOnce() throws Exception {
+        Player p = newPlayer();
+        update("INSERT INTO item_instance (account_id, template_id, slot, upgrade_percent) VALUES (?, 1, 'ARMOR', 10)", p.accountId());       // Áo Thần Linh Trái Đất, +10%: Giáp 2.750
+        long armorItem = scalar("SELECT item_id FROM item_instance WHERE account_id = ? AND template_id = 1", p.accountId());
+        try (TestClient c = p.client()) {
+            c.send(Envelope.newBuilder().setRequestId(30).setStartTrainingRequest(StartTrainingRequest.newBuilder().setControlledCharacterId(p.characters()[0])
+                    .setArenaW(3000).setArenaH(800).addSpots(TrainingSpot.newBuilder().setKey("moc_nhan").setX(900).setY(200))).build());
+            MatchStarted s = c.expectCase(Envelope.PayloadCase.MATCH_STARTED, 8000).getMatchStarted();
+            int me = s.getEntitiesList().stream().filter(e -> e.getControlled()).findFirst().orElseThrow().getEntityId();
+            long before = armorOf(c, me, -1);
+            c.send(Envelope.newBuilder().setRequestId(31).setEquipItemRequest(com.battleball.proto.EquipItemRequest.newBuilder()
+                    .setCharacterId(p.characters()[0]).setItemId(armorItem)).build());
+            long worn = armorOf(c, me, before + 2750);
+            assertEquals(before + 2750, worn, "the fighter of the running session takes the armor of the piece at once (+2.500 and 10%)");
+            c.send(Envelope.newBuilder().setRequestId(32).setUnequipItemRequest(com.battleball.proto.UnequipItemRequest.newBuilder()
+                    .setCharacterId(p.characters()[0]).setSlot("ARMOR")).build());
+            assertEquals(before, armorOf(c, me, before), "and loses it again when the piece comes off");
+        }
+    }
+
+    /** The armor of this entity in the frames: the first one when {@code want} is negative, else the first one that equals it (or the last seen after 8 s). */
+    private static long armorOf(TestClient c, int entity, long want) throws Exception {
+        long last = -1;
+        long end = System.currentTimeMillis() + 8000;
+        while (System.currentTimeMillis() < end) {
+            Envelope e = c.next(1000);
+            if (e == null || !e.hasMatchFrame()) {
+                continue;
+            }
+            for (var st : e.getMatchFrame().getStatesList()) {
+                if (st.getEntityId() == entity && st.getArmor() > 0) {
+                    last = st.getArmor();
+                    if (want < 0 || last == want) {
+                        return last;
+                    }
+                }
+            }
+        }
+        return last;
+    }
+
+    @Test
     void aTrainingSessionOffersEverySkillOfTheRaceAndRecordsNothing() throws Exception {
         Player p = newPlayer();
         update("INSERT INTO character_skill (character_id, skill_id, `level`) VALUES (?, 1, 1)", p.characters()[0]);       // Kamejoko learned too

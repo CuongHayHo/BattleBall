@@ -17,7 +17,10 @@ public final class StatCalculator {
     }
 
     /** One worn piece of gear: its main stat (already multiplied by its upgrade %) and its extra stat lines. */
-    public record GearPiece(String mainStatKey, double mainValue, Map<String, Double> lines) {
+    public record GearPiece(String mainStatKey, double mainValue, Map<String, Double> lines, java.util.List<String> gens) {
+        public GearPiece(String mainStatKey, double mainValue, Map<String, Double> lines) {
+            this(mainStatKey, mainValue, lines, java.util.List.of());
+        }
     }
 
     public record CharacterStats(long hpMax, long kiMax, long atk, long armor, double critRatePct, double critDmgPct, double dodgePct,
@@ -54,6 +57,18 @@ public final class StatCalculator {
         for (Map<String, Double> m : bonusMaps) {
             m.forEach((k, v) -> add(d, total, k, v));
         }
+        // GEN (docs 15.21): the sets switched on by the worn pieces; a stat effect joins the % totals, an effect of one skill ("SKILL_DMG_PCT:1") is kept by key for the fight
+        java.util.List<java.util.List<String>> gens = new java.util.ArrayList<>();
+        for (GearPiece g : gear) {
+            gens.add(g.gens());
+        }
+        GenSets.effects(d, gens).forEach((k, v) -> {
+            if (k.indexOf(':') >= 0) {
+                total.merge(k, v, Double::sum);
+            } else {
+                add(d, total, k, v);
+            }
+        });
         hp = (hp + total.getOrDefault("FLAT_HP", 0.0)) * (1 + total.getOrDefault("HP_PCT", 0.0) / 100.0);
         ki = (ki + total.getOrDefault("FLAT_KI", 0.0)) * (1 + total.getOrDefault("KI_PCT", 0.0) / 100.0);
         atk = (atk + total.getOrDefault("FLAT_ATK", 0.0)) * (1 + total.getOrDefault("ATK_PCT", 0.0) / 100.0);

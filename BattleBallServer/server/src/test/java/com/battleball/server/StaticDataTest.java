@@ -52,7 +52,7 @@ class StaticDataTest {
             assertEquals(7, d.skills().get(1).levels().size());
             assertEquals(450.0, d.skills().get(1).level(7).damagePctAtk());
             assertEquals(500_000.0, d.balanceNum("max_atk_total", 0));
-            assertEquals(5, d.items().size());
+            assertEquals(45, d.items().size(), "three sets of five pieces for each of the three planets");
             assertEquals(20000.0, d.items().get(3).baseValue());
             assertTrue(d.materials().containsKey(301));
             assertEquals(6, d.recipes().size());

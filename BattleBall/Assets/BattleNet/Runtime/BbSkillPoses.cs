@@ -118,7 +118,7 @@ namespace BattleBall.Net
         }
 
         /// <summary>As above; {@code fxFrom} is the pose where the paint of the skill (its effects and dart) starts, -1 when the poses carry none.</summary>
-        public static int[] Charge(uint skillId, uint level, bool flying, bool xayda, float seconds, out int fxFrom, out int paint, out bool fly)
+        public static int[] Charge(uint skillId, uint level, bool flying, bool xayda, float seconds, out int fxFrom, out int paint, out bool fly, float windowSeconds = 0f)
         {
             fxFrom = -1;
             paint = -1;
@@ -143,15 +143,30 @@ namespace BattleBall.Net
                     for (int i = 0; i < hold; i++) list.Add(pose);
                     break;
                 case 24:
-                case 25:                                                       // Super Kamejoko, Cađíc liên hoàn chưởng: the gong of the beam
+                case 25:                                                       // Super Kamejoko, Cađíc liên hoàn chưởng: the gong of the beam, then the attack pose for as long as it hits
+                {
                     for (int i = 0; i < hold; i++) list.Add(flying ? (int)NroPose.Kame_Charge_Fly : (int)NroPose.Kame_Charge);
-                    for (int i = 0; i < 12; i++) list.Add(flying ? (int)NroPose.Kame_Fire_Fly : (int)NroPose.Kame_Fire);
+                    // Nro (Char.SetSkillPaint_NEW, UpdSkillPaint_NEW): fr_atk repeats until the damage time is over: pose 20 (31 in the air) for Super Kamejoko, 13 13 13 14 14 14
+                    // (26 26 26 27 27 27 in the air) for Cađíc; without a window (the old callers) a short fire and release as before
+                    int window = Mathf.RoundToInt(windowSeconds * FramesPerSecond);
+                    if (window > 0)
+                    {
+                        int[] attack = skillId == 24 ? new[] { flying ? (int)NroPose.Kame_Fire_Fly : (int)NroPose.Kame_Fire }
+                                                     : flying ? new[] { 26, 26, 26, 27, 27, 27 } : new[] { 13, 13, 13, 14, 14, 14 };
+                        for (int i = 0; i < window; i++) list.Add(attack[i % attack.Length]);
+                    }
+                    else for (int i = 0; i < 12; i++) list.Add(flying ? (int)NroPose.Kame_Fire_Fly : (int)NroPose.Kame_Fire);
                     for (int i = 0; i < 8; i++) list.Add(flying ? (int)NroPose.Kame_Release_Fly : (int)NroPose.Kame_Release);
                     return list.ToArray();
-                default:                                                       // Ma phong ba and the rest: the charge, then the blast
+                }
+                default:                                                       // Ma phong ba and the rest: the charge, then the blast (Ma phong ba: the attack pose while the jar works)
+                {
                     for (int i = 0; i < hold; i++) list.Add((int)NroPose.Charge_Ki);
-                    for (int i = 0; i < 12; i++) list.Add((int)NroPose.Charge_Blast);
+                    int window = Mathf.RoundToInt(windowSeconds * FramesPerSecond);
+                    if (window > 0) for (int i = 0; i < window; i++) list.Add(flying ? (int)NroPose.Kame_Fire_Fly : (int)NroPose.Kame_Fire);
+                    else for (int i = 0; i < 12; i++) list.Add((int)NroPose.Charge_Blast);
                     return list.ToArray();
+                }
             }
             var released = UsePicked(skillId, level, flying);
             fxFrom = list.Count;

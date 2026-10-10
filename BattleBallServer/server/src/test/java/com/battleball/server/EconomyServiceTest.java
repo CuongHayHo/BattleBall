@@ -402,14 +402,16 @@ class EconomyServiceTest {
         assertTrue(eco.buyMaterial(a[0], a[2], 101, 1).getOk());
         assertTrue(character(a[0], a[1]).gold() < 100_000, "the Namek's purchase was paid from the shared wallet");
 
-        // a piece of gear assembled by the Earth character is worn by the Xayda character; only one wearer at a time
-        long item = eco.assembleItem(a[0], a[1], 1).getNewId();
+        // a piece of gear for Xayda (template 31, made from the fragments of the armor) assembled by the Earth character sits in the shared bag and is worn by the Xayda character:
+        // a piece is worn by a character of its own planet (owner decision 2026-10-10); only one wearer at a time
+        long item = eco.assembleItem(a[0], a[1], 31).getNewId();
         assertEquals(1, character(a[0], a[3]).bagCount(), "the bag is shared");
+        assertError(ActionError.RACE_LOCKED, eco.equipItem(a[0], a[1], item));            // the Earth character cannot wear Xayda gear
         assertTrue(eco.equipItem(a[0], a[3], item).getOk());
         assertEquals(item, character(a[0], a[3]).equipment().get("ARMOR").itemId().longValue());
-        assertError(ActionError.NOT_FOUND, eco.equipItem(a[0], a[1], item));              // worn by Xayda: not in the bag
+        assertError(ActionError.NOT_FOUND, eco.equipItem(a[0], a[2], item));              // worn by Xayda: not in the bag
         assertTrue(eco.unequipItem(a[0], a[3], "ARMOR").getOk());
-        assertTrue(eco.equipItem(a[0], a[1], item).getOk());
+        assertTrue(eco.equipItem(a[0], a[3], item).getOk());
         assertEquals(0, character(a[0], a[3]).bagCount());
 
         // skins are owned by the account and worn by the race they fit
@@ -452,6 +454,100 @@ class EconomyServiceTest {
         assertTrue(character(a[0], a[1]).equipment().get("SKIN") == null, "the character's own skin is off");
         assertTrue(eco.equipSkin(a[0], a[1], 0, false).getOk(), "taking off twice is harmless");
         assertTrue(eco.equipSkin(a[0], a[1], plain, false).getOk(), "and it can be worn again");
+    }
+
+    // ---- GEN (docs 15.21) ----
+    private static long gearPiece(long account, String race, int tier, String slot) throws Exception {
+        int template = (int) scalar("SELECT template_id FROM item_template WHERE race = ? AND tier = ? AND slot = ?", race, tier, slot);
+        update("INSERT INTO item_instance (account_id, template_id, slot) VALUES (?,?,?)", account, template, slot);
+        return scalar("SELECT MAX(item_id) FROM item_instance WHERE account_id = ?", account);
+    }
+
+    private static String genOf(long account, long character, long itemId, int line) throws Exception {
+        var page = eco.inventory(account, character, 0, 0);
+        for (var it : page.getItemsList()) {
+            if (it.getItemId() == itemId) {
+                return it.getGens(line).getGenKey();
+            }
+        }
+        throw new AssertionError("item not in the bag");
+    }
+
+    @Test
+    void aGenStoneChangesAChosenLineToAnotherSetOfThePlanetAndAnotherStoneOpensALine() throws Exception {
+        long[] a = newAccount();
+        long item = gearPiece(a[0], "EARTH", 1, "ARMOR");
+        var first = eco.inventory(a[0], a[1], 0, 0).getItems(0);
+        assertEquals(1, first.getGenSlots(), "one empty line to begin with");
+        assertEquals("", first.getGens(0).getGenKey());
+        assertEquals(1, first.getGenUnlockCost(), "the second line costs one slot stone");
+        assertError(ActionError.NOT_ENOUGH_MATERIAL, eco.rerollGen(a[0], a[1], item, 0));
+        giveMaterial(a[1], 204, 5);
+        giveMaterial(a[1], 205, 3);
+        assertError(ActionError.INVALID_ARGUMENT, eco.rerollGen(a[0], a[1], item, 1));          // only one line yet
+        assertTrue(eco.rerollGen(a[0], a[1], item, 0).getOk());
+        String one = genOf(a[0], a[1], item, 0);
+        assertFalse(one.isEmpty());
+        var set = com.battleball.server.game.GenSets.find(data.get(), one);
+        assertTrue(set.race().equals("EARTH") || set.race().equals("ALL"), "only a set of the planet of the piece");
+        assertEquals(4, character(a[0], a[1]).materials().get(204).intValue(), "one GEN stone spent");
+        assertTrue(eco.unlockGenSlot(a[0], a[1], item).getOk());
+        assertEquals(2, eco.inventory(a[0], a[1], 0, 0).getItems(0).getGenSlots());
+        assertEquals(2, eco.inventory(a[0], a[1], 0, 0).getItems(0).getGenUnlockCost(), "the third line costs two");
+        assertTrue(eco.rerollGen(a[0], a[1], item, 1).getOk());
+        String two = genOf(a[0], a[1], item, 1);
+        assertFalse(two.isEmpty() || two.equals(one), "two lines of a piece never carry the same set");
+        for (int i = 0; i < 6; i++) {                                                        // whatever the draw, the line changes and never copies the other line
+            String before = genOf(a[0], a[1], item, 0);
+            if (character(a[0], a[1]).materials().getOrDefault(204, 0L) < 1) {
+                giveMaterial(a[1], 204, 1);
+            }
+            assertTrue(eco.rerollGen(a[0], a[1], item, 0).getOk());
+            String after = genOf(a[0], a[1], item, 0);
+            assertFalse(after.equals(before) || after.equals(genOf(a[0], a[1], item, 1)));
+        }
+        assertTrue(eco.unlockGenSlot(a[0], a[1], item).getOk());
+        assertEquals(0, eco.inventory(a[0], a[1], 0, 0).getItems(0).getGenUnlockCost(), "three lines is the most");
+        assertError(ActionError.MAXED, eco.unlockGenSlot(a[0], a[1], item));
+        assertEquals(0, character(a[0], a[1]).materials().getOrDefault(205, 0L).intValue(), "1 + 2 slot stones spent");
+    }
+
+    @Test
+    void fivePiecesOfASetSwitchItOnAndTheStepsFollowTheNumberWorn() throws Exception {
+        long[] a = newAccount();
+        var d = data.get();
+        String[] slots = {"ARMOR", "PANTS", "GLOVES", "BOOTS", "RING"};
+        long[] items = new long[5];
+        for (int i = 0; i < 5; i++) {
+            items[i] = gearPiece(a[0], "XAYDA", 1, slots[i]);
+            assertTrue(eco.equipItem(a[0], a[3], items[i]).getOk());
+        }
+        long hpPlain = PlayerRepository.stats(d, character(a[0], a[3]), false).hpMax();
+        for (int i = 0; i < 4; i++) {
+            update("INSERT INTO item_gen_line (item_id, line_no, gen_key) VALUES (?,0,'NAPPA')", items[i]);
+        }
+        assertEquals(hpPlain, PlayerRepository.stats(d, character(a[0], a[3]), false).hpMax(), "four pieces of Nappa do nothing");
+        update("INSERT INTO item_gen_line (item_id, line_no, gen_key) VALUES (?,0,'NAPPA')", items[4]);
+        var five = PlayerRepository.stats(d, character(a[0], a[3]), false);
+        assertEquals(hpPlain * 1.8, five.hpMax(), hpPlain * 0.001, "five pieces of Nappa: +80% HP");
+        var snapshotChar = PlayerRepository.toProto(d, load(a[0]), 20).getCharactersList().stream().filter(c -> c.getRace().equals("XAYDA")).findFirst().orElseThrow();
+        assertEquals("NAPPA", snapshotChar.getActiveGens(0).getGenKey());
+        assertEquals(5, snapshotChar.getActiveGens(0).getPieces());
+        assertTrue(snapshotChar.getBonusesList().stream().noneMatch(l -> l.getStatKey().contains(":")), "the numbers of one skill stay on the server");
+
+        // Ca Đíc M has steps: 2 pieces, 4 pieces and 5 pieces; a step replaces the same kind of effect of the lower one
+        for (int i = 0; i < 5; i++) {
+            update("DELETE FROM item_gen_line WHERE item_id = ?", items[i]);
+        }
+        for (int worn = 1; worn <= 5; worn++) {
+            update("INSERT INTO item_gen_line (item_id, line_no, gen_key) VALUES (?,0,'CADIC_M')", items[worn - 1]);
+            var s = PlayerRepository.stats(d, character(a[0], a[3]), false);
+            assertEquals(worn >= 2 ? 200.0 : 0.0, s.other("SKILL_RADIUS_PX:14"), "wider blast from 2 pieces");
+            assertEquals(worn == 5 ? 50.0 : worn == 4 ? 20.0 : 0.0, s.other("SKILL_DMG_HPMAX_PCT:14"), "the blast adds 20% from 4 pieces and 50% (not 70%) from 5");
+        }
+        // a piece with two lines counts for each of its sets, once
+        update("INSERT INTO item_gen_line (item_id, line_no, gen_key) VALUES (?,1,'GOHAN')", items[0]);
+        assertEquals(1, com.battleball.server.game.GenSets.counts(character(a[0], a[3]).equippedItems().stream().map(PlayerRepository.ItemRow::gens).toList()).get("GOHAN"));
     }
 
     // ---- throwing a skin away ----

@@ -329,6 +329,57 @@ class MatchEngineTest {
         assertTrue(hits.stream().allMatch(h -> h >= expected * 0.94 && h <= expected * 1.06), "the spread stays inside +/-5%");
     }
 
+    /** A fighter whose GEN sets add these numbers to its skills (docs 15.21), crit rate 0 so only the +/-5% spread remains. */
+    private static MatchEngine genFight(Map<String, Double> gen) {
+        StatCalculator.CharacterStats s = StatCalculator.compute(d, 100, List.of(), List.of());
+        StatCalculator.CharacterStats st = new StatCalculator.CharacterStats(s.hpMax() * 100, s.kiMax(), s.atk(), s.armor(), 0, s.critDmgPct(), 0, 0.5, 5, gen);
+        MatchSetup.SquadMember m = new MatchSetup.SquadMember(1, "x", "EARTH", 100, true, false, 0, st, Map.of(0, 7), 0, null);
+        MatchEngine e = engine(12, 1, List.of(m), 13);
+        for (int i = 0; i < 80; i++) {
+            e.step();
+        }
+        return e;
+    }
+
+    @Test
+    void aGenSetAddsToTheDamageAndShortensTheCooldownOfOneSkillOnly() {
+        double plain = 0, boosted = 0;
+        long cooldownPlain = 0, cooldownBoosted = 0;
+        for (int round = 0; round < 2; round++) {
+            Map<String, Double> gen = round == 0 ? Map.of() : Map.of("SKILL_DMG_PCT:0", 100.0, "SKILL_COOLDOWN_PCT:0", 50.0, "SKILL_DMG_PCT:1", 500.0);
+            MatchEngine e = genFight(gen);
+            Entities.Fighter me = e.controlledFighter();
+            Entities.Monster boss = (Entities.Monster) e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+            me.x = boss.x - 30;
+            me.y = boss.y;
+            boss.shieldUntil = 0;
+            List<Long> hits = new ArrayList<>();
+            long cooldown = 0;
+            for (int i = 0; i < 400 && hits.size() < 30; i++) {
+                if (e.useSkill(i, 0, boss.id, 1, 0) && cooldown == 0) {
+                    cooldown = e.cooldownLeftMs(me, 0);
+                }
+                e.step();
+                for (DamageEvent ev : e.buildFrame().getDamagesList()) {
+                    if (ev.getSourceId() == me.id && ev.getAmount() > 0) {
+                        hits.add(ev.getAmount());
+                    }
+                }
+            }
+            assertTrue(hits.size() >= 20, "the punch hits the boss repeatedly");
+            double avg = hits.stream().mapToLong(Long::longValue).average().orElse(0);
+            if (round == 0) {
+                plain = avg;
+                cooldownPlain = cooldown;
+            } else {
+                boosted = avg;
+                cooldownBoosted = cooldown;
+            }
+        }
+        assertEquals(plain * 2, boosted, plain * 0.08, "+100% to the damage of the punch (the +500% of Kamejoko does not touch it)");
+        assertEquals(cooldownPlain / 2.0, cooldownBoosted, cooldownPlain * 0.05 + 60, "50% shorter cooldown of the punch");
+    }
+
     // ---- training in the starter village (docs/architecture/BattleBallServer.md 15.12) ----
     private static MatchEngine training(long idleEndMs, long dummyHp) {
         List<MatchSetup.SquadMember> squad = List.of(member(1, "EARTH", 30, true, EARTH_SKILLS, 300, 1), member(2, "NAMEC", 30, false, NAMEC_SKILLS, 300, 1),
@@ -463,6 +514,24 @@ class MatchEngineTest {
 
     private static long events(List<MatchFrame> frames, Effect effect, int skillId) {
         return frames.stream().flatMap(f -> f.getEffectsList().stream()).filter(x -> x.getEffect() == effect && x.getSkillId() == skillId).count();
+    }
+
+    @Test
+    void skillsAreUsedOneAtATimeInOrder() {
+        // Nro refuses a new skill while the paint of the last one plays or its dart still flies: a second skill in the same instant, or while the chưởng is in the air, is refused
+        MatchEngine e = village(soloSquad("EARTH", Map.of(0, 1, 1, 1)), 5000, dummy("far", 1900, 300));
+        Entities.Dummy far = dummyOf(e, "far");
+        e.submit(() -> e.reportPosition(1, 1000, 300, 1, 0));
+        e.step();
+        assertTrue(e.useSkill(2, slotOf(1), far.id, 1, 0), "the chưởng starts");
+        assertFalse(e.useSkill(3, slotOf(0), far.id, 1, 0), "a second skill in the same instant is refused");
+        steps(e, 6, null);                                                        // 300 ms
+        assertFalse(e.useSkill(4, slotOf(0), far.id, 1, 0), "and so is one a moment later");
+        steps(e, 5, null);                                                        // 550 ms: the gap (500 ms) is over but the chưởng (625 ms to the end of its way) is still flying
+        assertFalse(e.useSkill(5, slotOf(0), far.id, 1, 0), "the next skill waits for the chưởng to end");
+        steps(e, 6, null);                                                        // 850 ms
+        assertTrue(e.useSkill(6, slotOf(0), far.id, 1, 0), "then it is the turn of the next skill");
+        assertFalse(e.useSkill(7, slotOf(0), far.id, 1, 0), "and the one right after it has to wait again");
     }
 
     @Test

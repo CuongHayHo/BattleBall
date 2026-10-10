@@ -79,6 +79,8 @@ namespace BattleBall.Net
         readonly List<float> _layerParallax = new List<float>();
         readonly List<Actor> _actors = new List<Actor>();
         readonly List<GameObject> _npcObjects = new List<GameObject>();
+        readonly Dictionary<string, Actor> _npcs = new Dictionary<string, Actor>();          // the NPCs that can be talked to (not the dummies), by id: they are focus targets too
+        readonly Dictionary<string, NpcSpec> _npcSpecs = new Dictionary<string, NpcSpec>();
         readonly Dictionary<string, Actor> _dummies = new Dictionary<string, Actor>();
         float _inset, _insetRight, _camX = -1f, _camY, _groupX = -1f, _clock;
         float _width = 1280f, _height = 720f;
@@ -132,6 +134,8 @@ namespace BattleBall.Net
             _actors.Clear();
             _npcObjects.Clear();
             _dummies.Clear();
+            _npcs.Clear();
+            _npcSpecs.Clear();
             _camX = -1f;
             _camY = 0f;
 
@@ -263,6 +267,8 @@ namespace BattleBall.Net
             actor.root.sizeDelta = new Vector2(110f, 170f);
             Place(actor);
             _npcObjects.Add(actor.root.gameObject);
+            _npcs[npc.Id] = actor;
+            _npcSpecs[npc.Id] = npc;
         }
 
         /// <summary>A training dummy (docs 15.12): an enemy standing on the map, an Nro mob or a costume, with a red name; a tap focuses it.</summary>
@@ -352,6 +358,22 @@ namespace BattleBall.Net
             foreach (var a in _actors) if (a.id == characterId) a.locked = locked;
         }
 
+        /// <summary>The character is still playing the poses of a skill (Nro: skillPaint != null); the next skill waits for them to end.</summary>
+        public bool IsActing(ulong characterId)
+        {
+            foreach (var a in _actors) if (a.id == characterId) return a.view.Acting;
+            return false;
+        }
+
+        readonly HashSet<ulong> _hidden = new HashSet<ulong>();
+
+        /// <summary>The character is not painted (Nro: Char.isPaint is false while it fuses or splits); the choice survives SetCast.</summary>
+        public void SetHidden(ulong characterId, bool hidden)
+        {
+            if (hidden) _hidden.Add(characterId); else _hidden.Remove(characterId);
+            foreach (var a in _actors) if (a.id == characterId && a.root != null) a.root.gameObject.SetActive(!hidden);
+        }
+
         public bool IsLocked(ulong characterId)
         {
             foreach (var a in _actors) if (a.id == characterId) return a.locked;
@@ -431,6 +453,42 @@ namespace BattleBall.Net
             var keys = new List<string>();
             foreach (var p in list) keys.Add(p.Value);
             return keys;
+        }
+
+        /// <summary>The key is the id of an NPC that can be talked to (a dummy is not).</summary>
+        public bool IsNpc(string key) { return key != null && _npcs.ContainsKey(key); }
+
+        public NpcSpec NpcOf(string key)
+        {
+            NpcSpec spec;
+            return key != null && _npcSpecs.TryGetValue(key, out spec) ? spec : null;
+        }
+
+        /// <summary>The keys of everything the focus can rest on in view, dummies and NPCs, from left to right.</summary>
+        public List<string> VisibleTargetKeys()
+        {
+            var list = new List<KeyValuePair<float, string>>();
+            float left = Mathf.Max(0f, _camX) + _inset - 10f, right = Mathf.Max(0f, _camX) + _width - _insetRight + 10f;
+            foreach (var kv in _dummies) if (kv.Value.x >= left && kv.Value.x <= right) list.Add(new KeyValuePair<float, string>(kv.Value.x, kv.Key));
+            foreach (var kv in _npcs) if (kv.Value.x >= left && kv.Value.x <= right) list.Add(new KeyValuePair<float, string>(kv.Value.x, kv.Key));
+            list.Sort((a, b) => a.Key.CompareTo(b.Key));
+            var keys = new List<string>();
+            foreach (var p in list) keys.Add(p.Value);
+            return keys;
+        }
+
+        /// <summary>Where a target (a dummy or an NPC) stands (feet, world canvas pixels) and how tall it is.</summary>
+        public bool TargetInfo(string key, out Vector2 feet, out float height)
+        {
+            if (DummyInfo(key, out feet, out height)) return true;
+            Actor a;
+            if (key != null && _npcs.TryGetValue(key, out a))
+            {
+                feet = new Vector2(a.x, a.y);
+                height = a.view.OverheadHeight > 0f ? a.view.OverheadHeight : 90f;
+                return true;
+            }
+            return false;
         }
 
         /// <summary>Where a dummy stands (feet, world canvas pixels) and how tall it is.</summary>
@@ -584,6 +642,7 @@ namespace BattleBall.Net
                 _actors.Add(a);
             }
             foreach (var gone in old.Values) Kill(gone.root.gameObject);
+            foreach (var a in _actors) a.root.gameObject.SetActive(!_hidden.Contains(a.id));
             if (_actors.Count > 0 && cast[0].Main) _actors[0].x = Mathf.Clamp(groupX, 60f, _map.Width - 60f);
             // the main character is drawn last (in front), the AI behind it
             for (int i = _actors.Count - 1; i >= 0; i--) _actors[i].root.SetAsLastSibling();
@@ -664,8 +723,11 @@ namespace BattleBall.Net
 
         void Update()
         {
-            Tick(joystick != null ? joystick.Value : Vector2.zero, Mathf.Min(Time.unscaledDeltaTime, 0.05f));
+            Tick((joystick != null ? joystick.Value : Vector2.zero) + DebugStick, Mathf.Min(Time.unscaledDeltaTime, 0.05f));
         }
+
+        /// <summary>For the scripted run in Play mode: a push of the stick.</summary>
+        public Vector2 DebugStick;
 
         /// <summary>One step of the village: the joystick direction moves the main character, the followers walk after it, the view scrolls. Public so a test can drive it.</summary>
         public void Tick(Vector2 input, float dt)

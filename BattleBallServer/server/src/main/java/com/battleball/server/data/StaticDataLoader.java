@@ -103,15 +103,15 @@ public final class StaticDataLoader {
         }
 
         Map<Integer, StaticData.ItemTemplate> items = new LinkedHashMap<>();
-        for (var i : rows(c, "SELECT template_id, item_key, slot, name_vi, tier, base_stat_key, base_value, pieces_needed, min_level, enabled FROM item_template",
+        for (var i : rows(c, "SELECT template_id, item_key, slot, name_vi, tier, base_stat_key, base_value, pieces_needed, min_level, enabled, icon_id, note, race FROM item_template",
                 rs -> new StaticData.ItemTemplate(rs.getInt(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getInt(5), rs.getString(6),
-                        rs.getDouble(7), rs.getInt(8), rs.getInt(9), rs.getBoolean(10)))) {
+                        rs.getDouble(7), rs.getInt(8), rs.getInt(9), rs.getBoolean(10), rs.getInt(11), rs.getString(12), rs.getString(13)))) {
             items.put(i.id(), i);
         }
         Map<Integer, StaticData.Material> materials = new LinkedHashMap<>();
-        for (var m : rows(c, "SELECT template_id, material_key, kind, name_vi, item_template_id, buy_currency, price_wins, price_fixed, enabled FROM material_template",
+        for (var m : rows(c, "SELECT template_id, material_key, kind, name_vi, item_template_id, buy_currency, price_wins, price_fixed, enabled, icon_id, note FROM material_template",
                 rs -> new StaticData.Material(rs.getInt(1), rs.getString(2), rs.getString(3), rs.getString(4), (Integer) nullableInt(rs, 5),
-                        rs.getString(6), (Double) nullableDouble(rs, 7), (Integer) nullableInt(rs, 8), rs.getBoolean(9)))) {
+                        rs.getString(6), (Double) nullableDouble(rs, 7), (Integer) nullableInt(rs, 8), rs.getBoolean(9), rs.getInt(10), rs.getString(11)))) {
             materials.put(m.id(), m);
         }
 

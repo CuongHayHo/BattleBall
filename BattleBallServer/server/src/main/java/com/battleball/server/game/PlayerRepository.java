@@ -36,7 +36,10 @@ public final class PlayerRepository {
     private PlayerRepository() {
     }
 
-    public record ItemRow(long id, int templateId, String slot, double upgradePct, String location, Map<String, Double> lines) {
+    public record ItemRow(long id, int templateId, String slot, double upgradePct, String location, Map<String, Double> lines, List<String> gens, int extraSlots) {
+        public ItemRow(long id, int templateId, String slot, double upgradePct, String location, Map<String, Double> lines) {
+            this(id, templateId, slot, upgradePct, location, lines, List.of(), 0);
+        }
     }
 
     public record SupportRow(long instanceId, int supportId, int chargePoints, boolean appraised, Map<String, Double> lines) {
@@ -155,10 +158,13 @@ public final class PlayerRepository {
             Map<Long, Map<String, Double>> itemLines = new HashMap<>();
             query(c, "SELECT l.item_id, l.stat_key, l.`value` FROM item_stat_line l JOIN item_instance i USING (item_id) WHERE i.location = 'EQUIPPED' AND i.account_id = ?", owner,
                     rs -> itemLines.computeIfAbsent(rs.getLong(1), k -> new LinkedHashMap<>()).merge(rs.getString(2), rs.getDouble(3), Double::sum));
-            query(c, "SELECT i.item_id, e.character_id, i.template_id, i.slot, i.upgrade_percent, i.location FROM character_equipment e JOIN item_instance i ON i.item_id = e.item_id "
+            Map<Long, Map<Integer, String>> itemGens = new HashMap<>();
+            query(c, "SELECT g.item_id, g.line_no, g.gen_key FROM item_gen_line g JOIN item_instance i USING (item_id) WHERE i.location = 'EQUIPPED' AND i.account_id = ?", owner,
+                    rs -> itemGens.computeIfAbsent(rs.getLong(1), k -> new TreeMap<>()).put(rs.getInt(2), rs.getString(3)));
+            query(c, "SELECT i.item_id, e.character_id, i.template_id, i.slot, i.upgrade_percent, i.location, i.gen_extra_slots FROM character_equipment e JOIN item_instance i ON i.item_id = e.item_id "
                     + "WHERE e.character_id IN (" + in + ")", ids,
                     rs -> equippedItems.computeIfAbsent(rs.getLong(2), k -> new ArrayList<>()).add(new ItemRow(rs.getLong(1), rs.getInt(3), rs.getString(4),
-                            rs.getDouble(5), rs.getString(6), itemLines.getOrDefault(rs.getLong(1), Map.of()))));
+                            rs.getDouble(5), rs.getString(6), itemLines.getOrDefault(rs.getLong(1), Map.of()), gensList(itemGens.get(rs.getLong(1))), rs.getInt(7))));
             query(c, "SELECT character_id, skill_id, ready_at_ms FROM character_skill_cooldown WHERE ready_at_ms > " + System.currentTimeMillis()
                     + " AND character_id IN (" + in + ")", ids,
                     rs -> cooldowns.computeIfAbsent(rs.getLong(1), k -> new TreeMap<>()).put(rs.getInt(2), rs.getLong(3)));
@@ -197,7 +203,7 @@ public final class PlayerRepository {
         for (ItemRow it : ch.equippedItems()) {
             StaticData.ItemTemplate t = d.items().get(it.templateId());
             if (t != null) {
-                gear.add(new StatCalculator.GearPiece(t.baseStatKey(), t.baseValue() * (1 + it.upgradePct() / 100.0), it.lines()));
+                gear.add(new StatCalculator.GearPiece(t.baseStatKey(), t.baseValue() * (1 + it.upgradePct() / 100.0), it.lines(), it.gens()));
             }
         }
         List<Map<String, Double>> bonuses = new ArrayList<>();
@@ -307,11 +313,24 @@ public final class PlayerRepository {
                     .setStats(CharacterStats.newBuilder().setHpMax(s.hpMax()).setKiMax(s.kiMax()).setAtk(s.atk()).setArmor(s.armor())
                             .setCritRatePct(s.critRatePct()).setCritDmgPct(s.critDmgPct()).setDodgePct(s.dodgePct())
                             .setHpRegenPctPerSec(s.hpRegenPctPerSec()).setKiRegenPctPerSec(s.kiRegenPctPerSec()));
-            new TreeMap<>(s.other()).forEach((key, value) -> cb.addBonuses(StatLine.newBuilder().setStatKey(key).setValue(value).setSource("TOTAL")));
+            new TreeMap<>(s.other()).forEach((key, value) -> {
+                if (key.indexOf(':') < 0) {
+                    cb.addBonuses(StatLine.newBuilder().setStatKey(key).setValue(value).setSource("TOTAL"));
+                }
+            });
+            for (Map.Entry<String, Integer> e : new TreeMap<>(GenSets.counts(ch.equippedItems().stream().map(ItemRow::gens).toList())).entrySet()) {
+                if (!e.getKey().isEmpty()) {
+                    cb.addActiveGens(com.battleball.proto.GenActive.newBuilder().setGenKey(e.getKey()).setPieces(e.getValue()));
+                }
+            }
             cb.setFusionStats(CharacterStats.newBuilder().setHpMax(fs.hpMax()).setKiMax(fs.kiMax()).setAtk(fs.atk()).setArmor(fs.armor())
                     .setCritRatePct(fs.critRatePct()).setCritDmgPct(fs.critDmgPct()).setDodgePct(fs.dodgePct())
                     .setHpRegenPctPerSec(fs.hpRegenPctPerSec()).setKiRegenPctPerSec(fs.kiRegenPctPerSec()));
-            new TreeMap<>(fs.other()).forEach((key, value) -> cb.addFusionBonuses(StatLine.newBuilder().setStatKey(key).setValue(value).setSource("TOTAL")));
+            new TreeMap<>(fs.other()).forEach((key, value) -> {
+                if (key.indexOf(':') < 0) {
+                    cb.addFusionBonuses(StatLine.newBuilder().setStatKey(key).setValue(value).setSource("TOTAL"));
+                }
+            });
             ch.skills().forEach((id, lv) -> cb.addSkills(SkillState.newBuilder().setSkillId(id).setLevel(lv)));
             long nowMs = System.currentTimeMillis();
             ch.cooldownReadyAt().forEach((id, readyAt) -> {
@@ -323,11 +342,26 @@ public final class PlayerRepository {
                     .setItemId(ref.itemId() == null ? 0 : ref.itemId()).setCostumeId(ref.costumeId() == null ? 0 : ref.costumeId())
                     .setSupportInstanceId(ref.supportInstanceId() == null ? 0 : ref.supportInstanceId())));
             for (ItemRow it : ch.equippedItems()) {
-                cb.addEquippedItems(itemProto(it));
+                cb.addEquippedItems(itemProto(d, it));
             }
             ch.firstClears().stream().sorted().forEach(cb::addFirstClears);
             b.addCharacters(cb);
         }
+        for (GenSets.GenSet g : GenSets.all(d)) {
+            com.battleball.proto.GenSetInfo.Builder gb = com.battleball.proto.GenSetInfo.newBuilder().setGenKey(g.key()).setName(g.name()).setRace(g.race());
+            g.tiers().forEach(t -> gb.addTiers(com.battleball.proto.GenTierInfo.newBuilder().setPieces(t.pieces()).setText(t.text())));
+            b.addGenSets(gb);
+        }
+        GenSets.Rules genRules = GenSets.rules(d);
+        com.battleball.proto.GenRulesInfo.Builder rb = com.battleball.proto.GenRulesInfo.newBuilder().setRerollStones(genRules.rerollStones()).setMaxSlots(genRules.maxSlots());
+        for (StaticData.Material m : d.materials().values()) {
+            if (m.kind().equals("GEN_STONE")) {
+                rb.setStoneTemplateId(m.id());
+            } else if (m.kind().equals("GEN_SLOT_STONE")) {
+                rb.setSlotStoneTemplateId(m.id());
+            }
+        }
+        b.setGenRules(rb);
         Shared sh = p.shared();
         b.setGold(sh.gold()).setGems(sh.gems()).setBagCount(sh.bagCount());
         for (Auras.Aura a : Auras.all(d)) {
@@ -349,7 +383,14 @@ public final class PlayerRepository {
                             .setKiCostPct(L.kiCostPct() == null ? 0 : L.kiCostPct()).setRangePx((int) Math.round(reachPx(sk, L)))));
                     b.addSkillCatalog(e);
                 });
-        sh.materials().forEach((id, q) -> b.addMaterials(MaterialAmount.newBuilder().setTemplateId(id).setQuantity(q)));
+        sh.materials().forEach((id, q) -> {
+            MaterialAmount.Builder mb = MaterialAmount.newBuilder().setTemplateId(id).setQuantity(q);
+            StaticData.Material m = d.materials().get(id);
+            if (m != null) {
+                mb.setName(m.name()).setIconId(m.iconId()).setKind(m.kind()).setNote(m.note() == null ? "" : m.note());
+            }
+            b.addMaterials(mb);
+        });
         sh.ownedSkins().stream().sorted().forEach(id -> b.addSkins(skinProto(d, id)));
         for (SupportRow sr : sh.supports()) {
             SupportInstance.Builder sb = SupportInstance.newBuilder().setInstanceId(sr.instanceId()).setSupportId(sr.supportId()).setChargePoints(sr.chargePoints());
@@ -381,10 +422,49 @@ public final class PlayerRepository {
         return b.build();
     }
 
-    public static ItemInfo itemProto(ItemRow it) {
+    /** The GEN lines of a piece as a list by line number, "" for a line with nothing yet (the lines come from item_gen_line, which has no row for an empty one). */
+    public static List<String> gensList(Map<Integer, String> byLine) {
+        if (byLine == null || byLine.isEmpty()) {
+            return List.of();
+        }
+        int last = java.util.Collections.max(byLine.keySet());
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i <= last; i++) {
+            out.add(byLine.getOrDefault(i, ""));
+        }
+        return out;
+    }
+
+    /** What a set does at each step, in one line ("2 món: ...; 5 món: ..."). */
+    public static String genText(GenSets.GenSet g) {
+        StringBuilder sb = new StringBuilder();
+        for (GenSets.Tier t : g.tiers()) {
+            if (sb.length() > 0) {
+                sb.append("; ");
+            }
+            sb.append(t.pieces()).append(" món: ").append(t.text());
+        }
+        return sb.toString();
+    }
+
+    public static ItemInfo itemProto(StaticData d, ItemRow it) {
         ItemInfo.Builder b = ItemInfo.newBuilder().setItemId(it.id()).setTemplateId(it.templateId()).setSlot(it.slot()).setUpgradePercent(it.upgradePct())
                 .setEquipped("EQUIPPED".equals(it.location()));
+        StaticData.ItemTemplate t = d.items().get(it.templateId());
+        if (t != null) {
+            double main = t.baseValue() * (1 + it.upgradePct() / 100.0);
+            b.setName(t.name()).setIconId(t.iconId()).setRace(t.race()).setTier(t.tier()).setMinLevel(t.minLevel())
+                    .setMainStat(StatLine.newBuilder().setStatKey(t.baseStatKey()).setValue(main).setSource("BASE").setText(d.statText(t.baseStatKey(), main)));
+        }
         it.lines().forEach((k, v) -> b.addLines(StatLine.newBuilder().setStatKey(k).setValue(v).setSource("STAT_STONE")));
+        GenSets.Rules rules = GenSets.rules(d);
+        int slots = rules.initialSlots() + it.extraSlots();
+        for (int i = 0; i < slots; i++) {
+            String key = i < it.gens().size() ? it.gens().get(i) : "";
+            GenSets.GenSet g = key.isEmpty() ? null : GenSets.find(d, key);
+            b.addGens(com.battleball.proto.GenLine.newBuilder().setLineNo(i).setGenKey(g == null ? "" : g.key()).setName(g == null ? "" : g.name()).setText(g == null ? "" : genText(g)));
+        }
+        b.setGenSlots(slots).setGenUnlockCost(rules.unlockCost(slots));
         return b.build();
     }
 

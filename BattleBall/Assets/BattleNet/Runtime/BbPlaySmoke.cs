@@ -198,10 +198,10 @@ namespace BattleBall.Net
             var snap = BbSession.Snapshot;
             ulong gemsBefore = snap.Gems;
             int skinsBefore = snap.Skins.Count;
-            menu.DemoNpc(village.Map.Npcs.IndexOf(uron));
-            bool opened = await WaitFor(() => menu.shop.IsOpen, 8f);
+            float hitch = await OpenShopMeasured(menu, village, uron);
+            bool opened = menu.shop.IsOpen;
             await Wait(0.8f);
-            Log("shop open=" + opened + " rows=" + menu.shop.DebugRowCount + " menu on the right=" + (menu.panelRect.anchorMin.x > 0.5f));
+            Log("shop open=" + opened + " rows=" + menu.shop.DebugRowCount + " live rows=" + menu.shop.DebugLiveRows + " longest frame while it opened: " + (hitch * 1000f).ToString("0") + " ms (Open " + menu.shop.DebugOpenMs.ToString("0") + " ms, of it icons " + menu.shop.DebugIconMs.ToString("0") + " ms) | menu on the right=" + (menu.panelRect.anchorMin.x > 0.5f));
             Shoot("shop_open");
             uint item = menu.shop.DebugFirstUnowned();
             Log("first unowned skin: " + item);
@@ -221,6 +221,330 @@ namespace BattleBall.Net
             await Wait(1.2f);
             Log("shop closed=" + !menu.shop.IsOpen + " menu on the left=" + (menu.panelRect.anchorMin.x < 0.5f));
             Shoot("shop_closed");
+        }
+
+        /// <summary>Gear with the real server: the bag in gear mode, a piece worn by the Earth character (its stats grow), upgraded with a stone, taken off again.</summary>
+        async Task GearRun(BbMenuUi menu, BbVillageView village)
+        {
+            menu.DemoSelect(0);                                              // Trái Đất
+            await Wait(1.0f);
+            Shoot("gear_start");
+            string headerBefore = menu.headerText.text.Replace("\n", " | ");
+            menu.DebugToggleGear();
+            bool loaded = await WaitFor(() => menu.DebugGearLoaded, 8f);
+            await Wait(0.6f);
+            Log("gear bag loaded=" + loaded + " pieces=" + menu.DebugGearCount + " mode=" + menu.DebugGearMode);
+            Shoot("gear_bag");
+            var piece = menu.DebugFirstGearOfOpenPlanet();
+            if (piece == null) { Log("FAILED: no piece for the Earth character in the bag"); return; }
+            Log("first piece of this planet: " + piece.Name + " (" + piece.MainStat.Text + ")");
+            menu.DebugOpenGearPopup(piece);
+            await Wait(0.6f);
+            Shoot("gear_popup");
+            var before = BbSession.Snapshot;
+            menu.DebugEquip(piece);
+            await WaitFor(() => BbSession.Snapshot != before, 8f);
+            await Wait(1.0f);
+            Log("header before: " + headerBefore);
+            Log("header after wearing: " + menu.headerText.text.Replace("\n", " | "));
+            Shoot("gear_worn");
+            before = BbSession.Snapshot;
+            menu.DebugUpgrade(piece);
+            await WaitFor(() => BbSession.Snapshot != before, 8f);
+            await Wait(1.0f);
+            Log("header after the upgrade: " + menu.headerText.text.Replace("\n", " | "));
+            Shoot("gear_upgraded");
+            before = BbSession.Snapshot;
+            menu.DebugUnequip(piece.Slot);
+            await WaitFor(() => BbSession.Snapshot != before, 8f);
+            await Wait(1.0f);
+            Log("header after taking it off: " + menu.headerText.text.Replace("\n", " | ") + " | pieces in the bag " + menu.DebugGearCount);
+            Shoot("gear_off");
+        }
+
+        /// <summary>
+        /// Gear worn or taken off while the fused form trains (owner report 2026-10-10): the live figures of the session must follow at once. The run fuses Trái Đất and Namếc,
+        /// waits for the fused session, wears a piece of the Earth character, and logs how long the live armor takes to change; then takes it off and logs again.
+        /// </summary>
+        async Task GearFuseRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            await Learn(client, "EARTH", 1);
+            menu.SetPanelOpen(true, true);
+            menu.DemoSelect(0);
+            menu.DebugToggleGear();
+            await WaitFor(() => menu.DebugGearLoaded, 8f);
+            await Wait(0.6f);
+            var piece = menu.DebugFirstGearOfOpenPlanet();
+            if (piece == null) { Log("FAILED: no piece for the Earth character in the bag"); return; }
+            menu.DebugToggleGear();                                            // back to the skins; the gear stays in the list
+            menu.DemoFuse(0, 2);                                               // Trái Đất is the main character, Namếc its partner
+            village.TeleportMain(1850f);
+            await WaitFor(() => training.Active && training.FusedSession, 15f);
+            training.Focus("moc_nhan");
+            await Wait(1.5f);
+            ulong main = menu.FusionMainCharacterId;
+            BbTraining.Live live;
+            training.TryLive(main, out live);
+            ulong armor0 = live.Armor;
+            Log("fused session: " + training.FusedSession + ", live armor " + armor0 + " (" + piece.Name + " " + piece.MainStat.Text + ")");
+            var before = BbSession.Snapshot;
+            float t0 = Time.realtimeSinceStartup;
+            menu.DebugEquip(piece);
+            bool changed = await WaitFor(() => training.TryLive(main, out live) && training.FusedSession && live.Armor > armor0, 15f);
+            Log("after wearing: live armor " + live.Armor + (changed ? " changed after " : " NOT changed, waited ") + (Time.realtimeSinceStartup - t0).ToString("0.00") + " s, fused " + training.FusedSession);
+            await Wait(1.0f);
+            Shoot("gearfuse_worn");
+            t0 = Time.realtimeSinceStartup;
+            menu.DemoSelect(0);
+            menu.DebugUnequip(piece.Slot);
+            changed = await WaitFor(() => training.TryLive(main, out live) && training.FusedSession && live.Armor == armor0, 15f);
+            Log("after taking it off: live armor " + live.Armor + (changed ? " changed after " : " NOT changed, waited ") + (Time.realtimeSinceStartup - t0).ToString("0.00") + " s, fused " + training.FusedSession);
+            Shoot("gearfuse_off");
+        }
+
+        /// <summary>GEN with the real server (docs 15.21): a stone puts a set on the empty line, a slot stone opens a second line, the second line gets another set, the piece is worn and the sets show under the character.</summary>
+        async Task GenRun(BbMenuUi menu, BbVillageView village, BbClient client)
+        {
+            menu.DemoSelect(0);
+            await Wait(1.0f);
+            menu.DebugToggleGear();
+            await WaitFor(() => menu.DebugGearLoaded, 8f);
+            await Wait(0.6f);
+            var piece = menu.DebugFirstGearOfOpenPlanet();
+            if (piece == null) { Log("FAILED: no piece for the Earth character in the bag"); return; }
+            ulong character = client.Snapshot.Characters[0].CharacterId;
+            Log("piece " + piece.Name + ": slots " + piece.GenSlots + ", next slot costs " + piece.GenUnlockCost + ", stones in the snapshot " + StoneCount(client, 204) + " GEN, " + StoneCount(client, 205) + " slot");
+            var r = await client.RerollGenAsync(character, piece.ItemId, 0);
+            Log("reroll line 1: " + r.Ok + " " + r.Error);
+            r = await client.RerollGenAsync(character, piece.ItemId, 1);
+            Log("reroll line 2 before it exists: " + r.Ok + " " + r.Error);
+            r = await client.UnlockGenSlotAsync(character, piece.ItemId);
+            Log("open a slot: " + r.Ok + " " + r.Error);
+            r = await client.RerollGenAsync(character, piece.ItemId, 1);
+            Log("reroll line 2: " + r.Ok + " " + r.Error);
+            var items = await client.InventoryAsync(character);
+            ItemInfo now = null;
+            foreach (var it in items) if (it.ItemId == piece.ItemId) now = it;
+            if (now == null) { Log("FAILED: the piece is gone"); return; }
+            var sb = new System.Text.StringBuilder();
+            foreach (var g in now.Gens) sb.Append(g.GenKey.Length == 0 ? "(empty)" : g.GenKey).Append(" / ");
+            Log("the piece now has " + now.GenSlots + " slots: " + sb + "next slot costs " + now.GenUnlockCost);
+            client.Pump();
+            menu.DebugToggleGear();
+            menu.DebugToggleGear();
+            await WaitFor(() => menu.DebugGearLoaded, 8f);
+            await Wait(0.8f);
+            var shown = menu.DebugFirstGearOfOpenPlanet();
+            menu.DebugOpenGearPopup(shown ?? now);
+            await Wait(0.6f);
+            Shoot("gen_popup");
+            var before = BbSession.Snapshot;
+            menu.DebugEquip(now);
+            await WaitFor(() => BbSession.Snapshot != before, 8f);
+            await Wait(1.0f);
+            Log("worn: " + menu.bonusText.text.Replace("\n", " | "));
+            Shoot("gen_worn");
+        }
+
+        /// <summary>Pictures of the places that were added to the village (owner request 2026-10-11): the capsule behind Bunma, Cui in front of the two ships, the end of the map.</summary>
+        async Task SightsRun(BbMenuUi menu, BbVillageView village)
+        {
+            menu.SetPanelOpen(false, true);
+            Log("map width " + village.MapWidth.ToString("0") + ", npcs " + string.Join(",", village.Map.Npcs.ConvertAll(n => n.Id + "@" + n.X.ToString("0"))));
+            foreach (var n in village.Map.Npcs)
+            {
+                if (n.Id != "bunma" && n.Id != "cui") continue;
+                village.TeleportMain(n.X - 60f);
+                await Wait(1.5f);
+                Shoot("sight_" + n.Id);
+            }
+            village.TeleportMain(village.MapWidth);
+            await Wait(1.5f);
+            Shoot("sight_end");
+        }
+
+        /// <summary>Owner request 2026-10-10: the focus goes to the nearest target or NPC by itself and only the stick resets it; the fist talks to an NPC in focus; the dialog of an NPC is in the middle.</summary>
+        async Task FocusRun(BbMenuUi menu, BbTraining training, BbVillageView village)
+        {
+            NpcSpec hatMit = null, uron = null;
+            foreach (var n in village.Map.Npcs) { if (n.Id == "shop") hatMit = n; if (n.Id == "uron") uron = n; }
+            menu.SetPanelOpen(false, true);
+            village.TeleportMain(hatMit.X - 90f);
+            await Wait(1.5f);
+            Log("near Bà Hạt Mít: focus " + training.FocusKey + " (nobody tapped anything)");
+            Shoot("focus_npc");
+            var seen = new System.Text.StringBuilder();
+            for (int i = 0; i < 4; i++) { training.DebugCycle(); await Wait(0.2f); seen.Append(training.FocusKey).Append(" > "); }
+            Log("the focus button goes through: " + seen);
+            training.Focus("shop");
+            await Wait(0.3f);
+            training.DebugFist();
+            await Wait(0.8f);
+            var rect = (RectTransform)menu.popup.box.transform;
+            float canvasW = ((RectTransform)menu.popup.root.transform).rect.width;
+            Log("fist with her in focus: dialog open " + menu.popup.IsOpen + ", automatic skills on " + training.AutoOn + ", box centre x " + (rect.anchoredPosition.x + rect.sizeDelta.x * 0.5f).ToString("0") + " of " + canvasW.ToString("0"));
+            Shoot("focus_dialog");
+            menu.popup.Hide();
+            village.DebugStick = new Vector2(1f, 0f);
+            await Wait(0.3f);
+            Log("the stick is pushed: focus " + (training.FocusKey ?? "none"));
+            village.DebugStick = Vector2.zero;
+            await Wait(0.6f);
+            Log("the stick is let go: focus " + (training.FocusKey ?? "none"));
+            village.TeleportMain(hatMit.X - 420f);
+            await Wait(1.0f);
+            training.Focus("shop");
+            await Wait(0.3f);
+            Log("far away, " + training.FocusKey + " in focus (in view: " + string.Join(",", village.VisibleTargetKeys()) + ")");
+            training.DebugFist();
+            bool opened = await WaitFor(() => menu.popup.IsOpen, 8f);
+            Log("the fist walked to her and talked: " + opened);
+            menu.popup.Hide();
+            village.TeleportMain(1850f);
+            await Wait(1.0f);
+            training.Focus("moc_nhan");
+            await Wait(0.3f);
+            training.DebugFist();
+            Log("fist with a dummy in focus: automatic skills on " + training.AutoOn + ", dialog open " + menu.popup.IsOpen);
+        }
+
+        /// <summary>The panel of Bà Hạt Mít with the real server: the piece and the stone are put in, the button runs the request (docs 15.22).</summary>
+        async Task SmithRun(BbMenuUi menu, BbVillageView village, BbClient client)
+        {
+            menu.DemoSelect(0);
+            await Wait(1.0f);
+            menu.DebugToggleGear();
+            await WaitFor(() => menu.DebugGearLoaded, 8f);
+            await Wait(0.6f);
+            var piece = menu.DebugFirstGearOfOpenPlanet();
+            if (piece == null) { Log("FAILED: no piece for the Earth character in the bag"); return; }
+            var smith = menu.smith;
+            NpcSpec hatMit = null;
+            foreach (var n in village.Map.Npcs) if (n.Id == "shop") hatMit = n;
+            if (hatMit == null) { Log("FAILED: no Bà Hạt Mít in the village map"); return; }
+            Log("Bà Hạt Mít: action " + hatMit.Action + ", costume " + hatMit.CostumeId + ", x " + hatMit.X);
+            village.TeleportMain(hatMit.X - 90f);
+            await Wait(1.0f);
+            menu.DemoNpc(village.Map.Npcs.IndexOf(hatMit));
+            await Wait(0.8f);
+            Log("her menu is open: " + menu.popup.IsOpen);
+            Shoot("smith_npc_menu");
+            menu.popup.Hide();
+            MaterialAmount Stone(string kind) { foreach (var m in client.Snapshot.Materials) if (m.Kind == kind) return m; return null; }
+            var modes = new[] { BbSmithPanel.Mode.Upgrade, BbSmithPanel.Mode.Reroll, BbSmithPanel.Mode.Unlock, BbSmithPanel.Mode.Reroll };
+            var kinds = new[] { "UPGRADE_STONE", "GEN_STONE", "GEN_SLOT_STONE", "GEN_STONE" };
+            for (int i = 0; i < modes.Length; i++)
+            {
+                menu.DemoSmith(modes[i]);
+                await Wait(0.6f);
+                smith.PutItem(piece);
+                smith.PutStone(Stone(kinds[i]));
+                if (i == 3) smith.DebugLine(1);
+                await Wait(0.3f);
+                Log("step " + i + " " + modes[i] + ": can press " + smith.DebugCanPress + ", text \"" + smith.DebugResult + "\"");
+                if (i == 1) Shoot("smith_ready");
+                smith.DebugPress();
+                string before = smith.DebugResult;
+                await WaitFor(() => smith.DebugResult != before && smith.DebugResult.Length > 0 && !smith.DebugResult.StartsWith("Chạm") && !smith.DebugResult.StartsWith("Chọn"), 8f);
+                await Wait(0.8f);
+                Log("step " + i + " result: " + smith.DebugResult);
+                if (i == 3) Shoot("smith_done");
+                smith.Close();
+                await Wait(0.8f);
+                piece = menu.ItemById(piece.ItemId) ?? piece;
+            }
+        }
+
+        static ulong StoneCount(BbClient client, uint template)
+        {
+            foreach (var m in client.Snapshot.Materials) if (m.TemplateId == template) return m.Quantity;
+            return 0;
+        }
+
+        /// <summary>Taps the NPC and returns the longest frame (seconds) from the tap until the shop is open and two more frames have passed: the "khựng" the owner reported.</summary>
+        async Task<float> OpenShopMeasured(BbMenuUi menu, BbVillageView village, NpcSpec npc)
+        {
+            await Wait(0.3f);
+            float longest = 0f, last = Time.realtimeSinceStartup;
+            menu.DemoNpc(village.Map.Npcs.IndexOf(npc));
+            float start = last;
+            int after = 0;
+            while (Time.realtimeSinceStartup - start < 8f && after < 3)
+            {
+                await Task.Yield();
+                float now = Time.realtimeSinceStartup;
+                longest = Mathf.Max(longest, now - last);
+                last = now;
+                if (menu.shop.IsOpen) after++;
+            }
+            return longest;
+        }
+
+        /// <summary>Bunma's shop with the real server: clothes and stones, each bought once, the money and the bag checked.</summary>
+        async Task BunmaRun(BbMenuUi menu, BbVillageView village)
+        {
+            var bunma = village.Map.Npcs.Find(n => n.Id == "bunma");
+            if (bunma == null) { Log("FAILED: no NPC bunma on the map"); return; }
+            village.TeleportMain(bunma.X + 260f);
+            await Wait(1.2f);
+            Shoot("bunma_village");
+            var snap = BbSession.Snapshot;
+            float hitch = await OpenShopMeasured(menu, village, bunma);
+            await Wait(0.8f);
+            Log("bunma shop open=" + menu.shop.IsOpen + " items in the first tab=" + menu.shop.DebugRowCount + " longest frame: " + (hitch * 1000f).ToString("0") + " ms");
+            Shoot("bunma_open");
+            menu.shop.DemoTapIndex(2, 7);                                    // Thiên Sứ, the Namếc pants
+            await Wait(0.6f);
+            Shoot("bunma_angel_namec");
+            menu.popup.Hide();
+            menu.shop.DemoTapIndex(2, 12);                                   // Thiên Sứ, the Xayda gloves
+            await Wait(0.6f);
+            Shoot("bunma_angel_xayda");
+            menu.popup.Hide();
+            menu.shop.DemoTapIndex(1, 0);
+            await Wait(0.6f);
+            Shoot("bunma_hd_popup");
+            menu.popup.Hide();
+            menu.shop.DebugBuyAt(0, 1);                                      // Hủy Diệt needs level 30: refused
+            await Wait(1.0f);
+            menu.shop.DemoTapIndex(3, 0);
+            await Wait(0.6f);
+            Shoot("bunma_exchange_popup");
+            menu.popup.Hide();
+            var swapBefore = BbSession.Snapshot;
+            menu.shop.DebugBuyAt(0, 1);                                      // 10 fragments of Áo Thần Linh were put in the account: the piece comes, the fragments go
+            await WaitFor(() => BbSession.Snapshot != swapBefore, 8f);
+            await Wait(0.5f);
+            ulong frag = 0;
+            foreach (var m in BbSession.Snapshot.Materials) if (m.TemplateId == 101) frag = m.Quantity;
+            Log("exchanged: bag " + BbSession.Snapshot.BagCount + ", fragments of the armor left " + frag);
+            Shoot("bunma_exchanged");
+            menu.shop.DemoTapIndex(0, 0);
+            await Wait(0.6f);
+            Shoot("bunma_gear_popup");
+            menu.popup.Hide();
+            ulong gold0 = BbSession.Snapshot.Gold;
+            var before = BbSession.Snapshot;
+            menu.shop.DebugBuyAt(0, 1);
+            await WaitFor(() => BbSession.Snapshot != before, 8f);
+            await Wait(0.5f);
+            Log("bought a piece of gear: gold " + gold0 + " -> " + BbSession.Snapshot.Gold + ", bag " + BbSession.Snapshot.BagCount);
+            Shoot("bunma_bought_gear");
+            menu.shop.DemoTapIndex(4, 0);
+            await Wait(0.6f);
+            Shoot("bunma_stone_popup");
+            menu.popup.Hide();
+            before = BbSession.Snapshot;
+            menu.shop.DebugBuyAt(0, 10);
+            await WaitFor(() => BbSession.Snapshot != before, 8f);
+            await Wait(0.5f);
+            ulong stones = 0;
+            foreach (var m in BbSession.Snapshot.Materials) if (m.TemplateId == 201) stones = m.Quantity;
+            Log("bought 10 upgrade stones: gold " + BbSession.Snapshot.Gold + ", stones in the account " + stones);
+            Shoot("bunma_bought_stones");
+            menu.shop.Close();
+            await Wait(1.2f);
+            Log("shop closed=" + !menu.shop.IsOpen);
         }
 
         /// <summary>The beam of each planet (Kamejoko, Masenko, Antomic): where the dart is next to the hand of the character, the body and the target (owner remark 2026-10-10: it came out of the feet).</summary>
@@ -258,6 +582,67 @@ namespace BattleBall.Net
                 client.Pump();
             }
             await Wait(0.5f);
+        }
+
+        /// <summary>
+        /// One skill at a time (owner remark 2026-10-10): the chưởng and the fist are pressed in the same frame; the fist must wait for the chưởng to end. The run logs when
+        /// each skill was fired ("[SkillFx] fire ... at t" in the editor log) and the damage numbers of the server.
+        /// </summary>
+        async Task Order(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            menu.DemoSelect(0);                                              // the run raised the chưởng of Trái Đất before (earthRun)
+            await Wait(2.5f);
+            village.TeleportMain(1800f);
+            await WaitFor(() => training.Active, 10f);
+            training.Focus("moc_nhan");
+            await Wait(1.5f);
+            Log("order: pressing chưởng (1) then fist (0) twice in the same frame");
+            training.DebugUse(1);
+            training.DebugUse(0);
+            training.DebugUse(0);
+            await Observe("order", 4.0f, village, 0.2f, 0.5f, 0.8f, 1.2f, 1.8f);
+        }
+
+        /// <summary>The fusion effects of the Nro client (owner request 2026-10-10): the character vanishes under the white blinking, the Potara effect rises, then the aura of the merged form.</summary>
+        async Task FusionFxRun(BbMenuUi menu, BbVillageView village)
+        {
+            menu.SetPanelOpen(true, true);
+            menu.DemoSelect(0);
+            await Wait(2.0f);
+            Shoot("fx_before");
+            menu.DemoDance(0);                                               // the fusion dance of Nro (type 4): Effect(34)
+            await Wait(0.3f);
+            Shoot("fx_dance_30");
+            await Wait(0.4f);
+            Shoot("fx_dance_70");
+            await Wait(1.6f);
+            menu.SetPanelOpen(true, true);
+            Log("fuse with the earring effects: panel open " + menu.PanelOpen);
+            menu.DemoFuseWithEffect(0, 2);
+            if (await WaitFor(() => menu.FusionEffects.WhiteNow, 1f)) Shoot("fx_white");
+            float[] at = { 0.05f, 0.15f, 0.3f, 0.5f, 0.8f, 1.2f, 1.6f };
+            float last = 0f;
+            foreach (float t in at)
+            {
+                await Wait(t - last);
+                last = t;
+                Shoot("fx_fuse_" + (int)(t * 100));
+            }
+            await Wait(1.2f);
+            Log("fused: panel open " + menu.PanelOpen);
+            for (int i = 0; i < 3; i++) { await Wait(0.3f); Shoot("fx_aura_" + i); }
+            Log("split");
+            menu.SetPanelOpen(true, true, false);
+            menu.DemoSplit();
+            last = 0f;
+            foreach (float t in new[] { 0.05f, 0.3f, 1.0f, 1.6f })
+            {
+                await Wait(t - last);
+                last = t;
+                Shoot("fx_split_" + (int)(t * 100));
+            }
+            await Wait(1.0f);
+            Shoot("fx_after");
         }
 
         async Task Gong(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
@@ -357,6 +742,70 @@ namespace BattleBall.Net
                 if (page == 3) Shoot("fusion_tab");
             }
         }
+
+        /// <summary>
+        /// What a player does: the automatic fist is on (the default) and he presses the ultimate; the poses of the character must not be replaced by the punches that the fist
+        /// sends before the server has said that the character is busy (owner report 2026-10-10: the ultimate of Trái Đất loses its animation when the player uses it).
+        /// </summary>
+        async Task AutoUlt(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            await Learn(client, "XAYDA", 25);
+            await Learn(client, "NAMEC", 26);
+            int[] pages = { 0, 1, 2 };
+            uint[] skills = { 24, 25, 26 };
+            string[] names = { "earth", "xayda", "namek" };
+            for (int i = 0; i < 3; i++)
+            {
+                menu.DemoSelect(pages[i]);
+                await Wait(2.5f);
+                village.TeleportMain(1700f);
+                await WaitFor(() => training.Active, 10f);
+                training.Focus("moc_nhan");
+                training.DemoAuto(true);
+                await Wait(2f);
+                Log(names[i] + ": " + Where(village));
+                training.DebugUse(skills[i]);
+                _pushSeconds = 0f;
+                await ObserveWalking(names[i], 5f, village, 0.1f, 0.2f, 0.3f, 0.5f, 0.8f, 1.2f, 1.8f, 2.4f, 3.0f);
+                training.DemoAuto(false);
+                await Wait(8f);
+            }
+        }
+
+        async Task Push(BbVillageView village, Vector2 stick, float seconds)
+        {
+            float end = Time.realtimeSinceStartup + seconds;
+            while (Time.realtimeSinceStartup < end) { village.Tick(stick, Time.unscaledDeltaTime); await Task.Yield(); }
+        }
+
+        /// <summary>The ultimate of Trái Đất by the controlled character in the situations of a player: standing, flying, and walking when the button is pressed.</summary>
+        async Task UltVariants(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            string[] names = { "stand", "fly", "walk", "xayda", "namek" };
+            int only = int.Parse(Arg("-bbVariant", "0"));                       // one situation a run: the ultimate cools down for 170 s
+            for (int i = only; i <= only; i++)
+            {
+                if (i == 3) await Learn(client, "XAYDA", 25);
+                if (i == 4) await Learn(client, "NAMEC", 26);
+                menu.DemoSelect(i == 3 ? 1 : i == 4 ? 2 : 0);
+                await Wait(2.5f);
+                village.TeleportMain(1700f);
+                await WaitFor(() => training.Active, 10f);
+                training.Focus("moc_nhan");
+                await Wait(1.5f);
+                if (i == 1) await Push(village, new Vector2(0f, 1f), 1.4f);               // up: a jump that turns into flying
+                if (i == 2) { _walkWhilePressing = true; }
+                ulong id; Vector2 feet; int facing;
+                village.PartyMember(0, out id, out feet, out facing);
+                Log(names[i] + ": main at " + Mathf.RoundToInt(feet.x) + "," + Mathf.RoundToInt(feet.y) + " airborne " + village.Airborne(id));
+                training.DebugUse(i == 3 ? 25u : i == 4 ? 26u : 24u);
+                _pushSeconds = i == 2 ? 0.3f : 0f;
+                await ObserveWalking("var_" + names[i], 4.2f, village, 0.15f, 0.4f, 0.9f, 1.5f, 2.2f, 2.6f, 3.2f, 3.9f);
+                await Wait(10f);
+            }
+        }
+
+        bool _walkWhilePressing;
 
         /// <summary>The three ultimates used by the three characters at once (the AI use theirs by themselves), the main one on the right of the dummy so that its beam goes left.</summary>
         async Task Ultimates(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
@@ -466,7 +915,7 @@ namespace BattleBall.Net
             if (!await WaitFor(() => File.Exists(go), 300f)) throw new Exception("nobody put the gold on the account");
             BattleBall.Proto.CharacterInfo earth = null;
             foreach (var c in client.Snapshot.Characters) if (c.Race == "EARTH") earth = c;
-            bool beams = Arg("-bbScenario", "") == "beams", gong = Arg("-bbScenario", "") == "gong" || Arg("-bbScenario", "") == "fusion" || Arg("-bbScenario", "") == "ult";
+            bool beams = Arg("-bbScenario", "") == "beams", gong = Arg("-bbScenario", "") == "gong" || Arg("-bbScenario", "") == "fusion" || Arg("-bbScenario", "") == "ult" || Arg("-bbScenario", "") == "autoult" || Arg("-bbScenario", "") == "ultvar";
             bool earthRun = Arg("-bbScenario", "") != "auditXayda" && Arg("-bbScenario", "") != "auditMonkey" && !beams && !gong, xaydaRun = Arg("-bbScenario", "") != "auditEarth" && !beams && !gong;
             foreach (uint skill in gong ? new uint[] { 10, 24 } : beams ? new uint[] { 1 } : earthRun ? new uint[] { 1, 1, 1, 10, 24, 6, 9 } : new uint[0])
             {
@@ -510,8 +959,19 @@ namespace BattleBall.Net
             _menu = menu;
             string scenario = Arg("-bbScenario", "");
             if (scenario == "shop") { await ShopRun(menu, village); return; }
+            if (scenario == "gear") { await GearRun(menu, village); return; }
+            if (scenario == "gen") { await GenRun(menu, village, client); return; }
+            if (scenario == "smith") { await SmithRun(menu, village, client); return; }
+            if (scenario == "focus") { await FocusRun(menu, training, village); return; }
+            if (scenario == "sights") { await SightsRun(menu, village); return; }
+            if (scenario == "gearfuse") { await GearFuseRun(menu, training, village, client); return; }
+            if (scenario == "bunma") { await BunmaRun(menu, village); return; }
             if (scenario == "beams") { await Beams(menu, training, village); return; }
             if (scenario == "gong") { await Gong(menu, training, village, client); return; }
+            if (scenario == "order") { await Order(menu, training, village, client); return; }
+            if (scenario == "fusionfx") { await FusionFxRun(menu, village); return; }
+            if (scenario == "ultvar") { await UltVariants(menu, training, village, client); return; }
+            if (scenario == "autoult") { await AutoUlt(menu, training, village, client); return; }
             if (scenario == "ult") { await Ultimates(menu, training, village, client); return; }
             if (scenario == "fusion") { await Fusion(menu, training, village, client); return; }
             if (scenario == "auditEarth") { await AuditEarth(menu, training, village); return; }

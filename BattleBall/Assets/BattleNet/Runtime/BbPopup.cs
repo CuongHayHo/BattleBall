@@ -29,6 +29,7 @@ namespace BattleBall.Net
         public float areaWidth = 320f;                           // the buttons are centred in the width of the panel
         public Func<float> areaLeftProvider;                     // where the panel that owns the popup starts: 0 on the left, the menu panel docked on the right (asked at every Show)
         public float? areaLeftOverride;                          // the shop on the left sets 0 for the popup of its items; Hide clears it
+        public bool centerOnScreen;                              // the dialog of an NPC stands in the middle of the screen (owner request 2026-10-10); Hide clears it
         float areaLeft;
 
         public struct ButtonSpec
@@ -39,6 +40,8 @@ namespace BattleBall.Net
             public ButtonSpec(string label, bool enabled, bool primary) { this.label = label; this.enabled = enabled; this.primary = primary; }
         }
 
+        RectTransform _separator;                                 // the line above the description, and the layout of the full box, kept for the compact dialog of an NPC
+        float _fullHeight, _sepY, _descY, _descH;
         Action<int> _onButton;
         Action _onClose;
         bool _wired;
@@ -50,6 +53,11 @@ namespace BattleBall.Net
         {
             if (_wired) return;
             _wired = true;
+            _separator = box.Find("Separator") as RectTransform;
+            _fullHeight = box.sizeDelta.y;
+            if (_separator != null) _sepY = _separator.anchoredPosition.y;
+            _descY = description.rectTransform.anchoredPosition.y;
+            _descH = description.rectTransform.sizeDelta.y;
             for (int i = 0; i < buttons.Length; i++)
             {
                 int index = i;
@@ -69,6 +77,7 @@ namespace BattleBall.Net
         {
             Wire();
             areaLeft = areaLeftOverride ?? (areaLeftProvider != null ? areaLeftProvider() : 0f);
+            if (centerOnScreen) areaLeft = Mathf.Max(0f, (((RectTransform)root.transform).rect.width - areaWidth) * 0.5f);
             _onButton = onButton;
             _onClose = onClose;
             icon.sprite = iconSprite;
@@ -113,6 +122,14 @@ namespace BattleBall.Net
             linesRect.anchoredPosition = new Vector2(narrow ? 126f : 8f, g > 0 ? -128f : -52f);
             linesRect.sizeDelta = new Vector2(narrow ? boxW - 134f : boxW - 16f, g > 0 ? 78f : 152f);
 
+            // the dialog of an NPC (a few words and the choices) needs no room for an icon and bonus lines: a short box (owner request 2026-10-10: in the middle of the screen)
+            bool compact = centerOnScreen && string.IsNullOrEmpty(linesRich) && g == 0 && !body && iconSprite == null;
+            box.sizeDelta = new Vector2(box.sizeDelta.x, compact ? 116f : _fullHeight);
+            if (_separator != null) _separator.anchoredPosition = new Vector2(_separator.anchoredPosition.x, compact ? -48f : _sepY);
+            var descRect = description.rectTransform;
+            descRect.anchoredPosition = new Vector2(descRect.anchoredPosition.x, compact ? -54f : _descY);
+            descRect.sizeDelta = new Vector2(descRect.sizeDelta.x, compact ? 56f : _descH);
+
             // the command buttons: rows of three at the bottom (the first row on top), centred in the panel; the box stands on them
             int n = specs != null ? Mathf.Min(specs.Count, buttons.Length) : 0;
             const int perRow = 3;
@@ -137,7 +154,7 @@ namespace BattleBall.Net
                 buttonLabels[i].fontSize = specs[i].label.Length > 14 ? 15 : 17;
             }
             // the box is a little wider than the panel (as in Nro): it hangs out on the right of a panel on the left, and on the left of a panel docked on the right
-            float boxX = areaLeft > 0f ? areaLeft + areaWidth - box.sizeDelta.x - 5.5f : 5.5f;
+            float boxX = centerOnScreen ? areaLeft + (areaWidth - box.sizeDelta.x) * 0.5f : areaLeft > 0f ? areaLeft + areaWidth - box.sizeDelta.x - 5.5f : 5.5f;
             box.anchoredPosition = new Vector2(boxX, bottom + rows * (size.y + gap));
             root.SetActive(true);
         }
@@ -147,6 +164,7 @@ namespace BattleBall.Net
             if (!IsOpen) return;
             root.SetActive(false);
             areaLeftOverride = null;
+            centerOnScreen = false;
             var closed = _onClose;
             _onClose = null;
             if (closed != null) closed();

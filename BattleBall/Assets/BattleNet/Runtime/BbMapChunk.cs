@@ -83,7 +83,7 @@ namespace BattleBall.Net
         public Color Color;
     }
 
-    public enum NpcAction { Talk, DungeonGate, TrainingDummy, Shop }          // Shop: the server sends what the NPC sells (docs 15.15)
+    public enum NpcAction { Talk, DungeonGate, TrainingDummy, Shop, Smith }          // Shop: the server sends what the NPC sells (docs 15.15)
 
     public sealed class NpcSpec
     {
@@ -132,10 +132,11 @@ namespace BattleBall.Net
             // the NPCs of the starter village (pictures are placeholders: costumes of the catalog)
             map.Npcs.Add(new NpcSpec { Id = "elder", Name = "Ông Trưởng làng", CostumeId = 430, X = 1300, Action = NpcAction.Talk,
                 Talk = "Chào cháu! Dùng cần điều khiển để đi lại. Hãy mở menu bên trái để xem nhân vật, hành trang và hòm thư." });
-            map.Npcs.Add(new NpcSpec { Id = "shop", Name = "Bà Hạt Mít", CostumeId = 431, X = 1850, Action = NpcAction.Talk,
-                Talk = "Cửa hàng sắp mở. Cháu hãy ghé lại sau nhé." });
-            map.Npcs.Add(new NpcSpec { Id = "gate", Name = "Cổng phó bản", CostumeId = 432, X = 2300, Action = NpcAction.DungeonGate,
-                Talk = "Nơi chọn phó bản để vào trận. Chức năng này sắp có." });
+            map.Npcs.Add(new NpcSpec { Id = "shop", Name = "Bà Hạt Mít", CostumeId = 9022, X = 1850, Action = NpcAction.Smith, Talk = "" });          // upgrades gear (docs 15.22)
+            map.Npcs.Add(new NpcSpec { Id = "cui", Name = "Cui", CostumeId = 9023, X = 2300, Action = NpcAction.DungeonGate,
+                Talk = "Ta đưa cháu tới các phó bản. Chức năng này sắp có." });
+            // Bunma sells clothes and stones (docs 15.17)
+            map.Npcs.Add(new NpcSpec { Id = "bunma", Name = "Bunma", CostumeId = 9021, X = 700, Action = NpcAction.Shop, Talk = "" });
             // Urôn sells every skin (docs 15.15)
             map.Npcs.Add(new NpcSpec { Id = "uron", Name = "Urôn", CostumeId = 9020, X = 1550, Action = NpcAction.Shop, Talk = "" });
             // the training dummies (docs/architecture/BattleBallServer.md 15.12)

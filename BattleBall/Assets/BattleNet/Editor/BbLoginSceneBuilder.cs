@@ -330,7 +330,7 @@ namespace BattleBall.EditorTools
             var close = Image("Close", panel, "nro_close", false);
             TopLeft(close.rectTransform, PW - G(17) - 4, 4, G(17), G(17));
             ui.closeButton = close.gameObject.AddComponent<Button>();
-            ui.closeButton.targetGraphic = close;
+            ui.closeButton.targetGraphic = BigTouchArea(close);
 
             var body = Group("Body", panel);                       // everything that fades when the tab changes
             ui.bodyGroup = body.gameObject.AddComponent<CanvasGroup>();
@@ -396,6 +396,22 @@ namespace BattleBall.EditorTools
             ui.gearLabels = new Text[5];
             for (int i = 0; i < 5; i++)
                 ui.gearSlots[i] = NroCell("Gear" + i, body, G(2), CT + i * G(24), "nro_cell_body", out ui.gearLabels[i]);
+            // the five gear slots take taps and show the piece worn there (docs 15.19)
+            ui.gearIcons = new UnityEngine.UI.Image[5];
+            ui.gearButtons = new Button[5];
+            for (int i = 0; i < 5; i++)
+            {
+                var slotImage = ui.gearSlots[i];
+                slotImage.raycastTarget = true;
+                ui.gearButtons[i] = slotImage.gameObject.AddComponent<Button>();
+                ui.gearButtons[i].targetGraphic = slotImage;
+                ui.gearIcons[i] = Image("GearIcon", slotImage.transform, "white", false);
+                Stretch(ui.gearIcons[i].rectTransform, 8, 5);
+                ui.gearIcons[i].preserveAspect = true;
+                ui.gearIcons[i].raycastTarget = false;
+                ui.gearIcons[i].enabled = false;
+                ui.gearLabels[i].transform.SetAsLastSibling();
+            }
             ui.supportSlots = new UnityEngine.UI.Image[4];
             ui.supportLabels = new Text[4];
             for (int i = 0; i < 4; i++)
@@ -441,8 +457,14 @@ namespace BattleBall.EditorTools
             // the line of the bag: count on the left, page and the scroll arrows of Nro on the right
             float bagLine = CT + 5 * G(24) + 1;
             ui.bagText = Label("BagText", body, "", 15, new Color(0.35f, 0.20f, 0.08f), Vector2.zero, Vector2.zero, true);
-            TopLeft(ui.bagText.rectTransform, 6, bagLine, 190, 24);
+            TopLeft(ui.bagText.rectTransform, 6, bagLine, 124, 24);
             ui.bagText.alignment = TextAnchor.MiddleLeft;
+            ui.bagText.resizeTextForBestFit = true;
+            ui.bagText.resizeTextMinSize = 11;
+            ui.bagText.resizeTextMaxSize = 15;
+            // the switch of the bag between the skins and the pieces of gear (docs 15.19)
+            ui.bagModeButton = RowButton("BagMode", body, 132, bagLine + 2, 76, 20, "Xem đồ", 13);
+            ui.bagModeLabel = ui.bagModeButton.GetComponentInChildren<Text>();
             ui.bagPageText = Label("BagPage", body, "", 15, new Color(0.35f, 0.20f, 0.08f), Vector2.zero, Vector2.zero, true);
             TopLeft(ui.bagPageText.rectTransform, 196, bagLine, 54, 24);
             ui.bagPageText.alignment = TextAnchor.MiddleRight;
@@ -521,6 +543,7 @@ namespace BattleBall.EditorTools
 
             // ---- the shop of an NPC (Urôn): a second panel on the left, under the popup (the menu panel moves to the right while it is open)
             ui.shop = BuildShop(root, ui);
+            ui.smith = BuildSmith(root, ui);
 
             // ---- the popup (skin, mail, notice), the Chức năng tab and its password form
             ui.popup = BuildPopup(root);
@@ -1012,7 +1035,7 @@ namespace BattleBall.EditorTools
             var close = Image("Close", panel, "nro_close", false);
             TopLeft(close.rectTransform, PW - G(17) - 4, 4, G(17), G(17));
             shop.closeButton = close.gameObject.AddComponent<Button>();
-            shop.closeButton.targetGraphic = close;
+            shop.closeButton.targetGraphic = BigTouchArea(close);
 
             // tabs (up to four, spread at run time) and the orange line under them
             shop.tabIdle = Sprite("nro_tab_idle");
@@ -1075,6 +1098,173 @@ namespace BattleBall.EditorTools
             shop.content = cr;
             panelGo.SetActive(false);
             return shop;
+        }
+
+        /// <summary>One of the two rows of the panel of Bà Hạt Mít (the piece, the stone): a dark cell with the picture, the name and a line under it; a tap takes what is in it out again.</summary>
+        static Button SmithRow(string name, Transform parent, float y, out Image icon, out Text title, out Text desc)
+        {
+            var img = Image(name, parent, "white", false);
+            TopLeft(img.rectTransform, 6, y, PW - 12, 62);
+            img.color = NroRow;
+            var b = img.gameObject.AddComponent<Button>();
+            b.targetGraphic = img;
+            var cell = Image("Cell", img.transform, "nro_cell_body", true);
+            TopLeft(cell.rectTransform, 3, 3, 56, 56);
+            cell.raycastTarget = false;
+            icon = Image("Icon", cell.transform, "white", false);
+            Center(icon.rectTransform, Vector2.zero, new Vector2(44, 44));
+            icon.preserveAspect = true;
+            icon.raycastTarget = false;
+            icon.enabled = false;
+            title = PlacedText("Name", img.transform, "", 17, Dark, 66, 4, PW - 12 - 72, 24, TextAnchor.MiddleLeft);
+            title.raycastTarget = false;
+            desc = PlacedText("Desc", img.transform, "", 14, new Color(0.10f, 0.35f, 0.85f), 66, 28, PW - 12 - 72, 32, TextAnchor.UpperLeft, false);
+            desc.resizeTextForBestFit = true;
+            desc.resizeTextMinSize = 10;
+            desc.resizeTextMaxSize = 14;
+            desc.raycastTarget = false;
+            return b;
+        }
+
+        /// <summary>
+        /// The panel of Bà Hạt Mít (the combine panel of the original game, docs 15.22): the same frame as the shop (her portrait and what she says at the top, the money strip at the bottom),
+        /// a title tab, two rows (the piece and the stone the player put in from his own panel on the right), the GEN lines to choose from, what will happen, and the button.
+        /// </summary>
+        static BbSmithPanel BuildSmith(Transform canvasRoot, BbMenuUi ui)
+        {
+            var panelGo = new GameObject("SmithPanel", typeof(RectTransform), typeof(Image), typeof(BbSmithPanel));
+            panelGo.transform.SetParent(canvasRoot, false);
+            var rect = Rect(panelGo);
+            rect.anchorMin = new Vector2(0f, 0f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.sizeDelta = new Vector2(PW, 0f);
+            rect.anchoredPosition = new Vector2(-PW, 0f);
+            var bg = panelGo.GetComponent<Image>();
+            bg.sprite = Sprite("white");
+            bg.color = NroPanel;
+            var panel = panelGo.transform;
+            var smith = panelGo.GetComponent<BbSmithPanel>();
+            smith.root = panelGo;
+            smith.panelRect = rect;
+            smith.menu = ui;
+            var edge = Image("Edge", panel, "white", false);
+            edge.rectTransform.anchorMin = new Vector2(1f, 0f);
+            edge.rectTransform.anchorMax = new Vector2(1f, 1f);
+            edge.rectTransform.pivot = new Vector2(1f, 0.5f);
+            edge.rectTransform.sizeDelta = new Vector2(2f, 0f);
+            edge.rectTransform.anchoredPosition = Vector2.zero;
+            edge.color = NroEdge;
+            edge.raycastTarget = false;
+
+            Flat("HeaderBg", panel, 0, 0, PW, G(50), NroHeader);
+            var footerGo = new GameObject("Footer", typeof(RectTransform));
+            footerGo.transform.SetParent(panel, false);
+            var footerRect = Rect(footerGo);
+            footerRect.anchorMin = new Vector2(0f, 0f);
+            footerRect.anchorMax = new Vector2(1f, 0f);
+            footerRect.pivot = new Vector2(0.5f, 0f);
+            footerRect.sizeDelta = new Vector2(0f, G(15));
+            footerRect.anchoredPosition = Vector2.zero;
+            Stretch(Flat("FooterBg", footerGo.transform, 0, 0, PW, G(15), NroBag).rectTransform, 0, 0);
+            Flat("FooterLine", footerGo.transform, 0, 0, PW, 2, NroLine);
+            var goldIcon = Image("GoldIcon", footerGo.transform, "nro_gold", false);
+            TopLeft(goldIcon.rectTransform, G(11) - 12, 6, 24, 18);
+            goldIcon.preserveAspect = true;
+            goldIcon.raycastTarget = false;
+            smith.goldText = Label("GoldText", footerGo.transform, "0", 15, StatYellow, Vector2.zero, Vector2.zero, true);
+            TopLeft(smith.goldText.rectTransform, G(24), 2, 100, G(15) - 2);
+            smith.goldText.alignment = TextAnchor.MiddleLeft;
+            AddOutline(smith.goldText.gameObject, 1f);
+            var gemIcon = Image("GemIcon", footerGo.transform, "nro_gem", false);
+            TopLeft(gemIcon.rectTransform, G(75) - 11, 6, 22, 18);
+            gemIcon.preserveAspect = true;
+            gemIcon.raycastTarget = false;
+            smith.gemText = Label("GemText", footerGo.transform, "0", 15, StatYellow, Vector2.zero, Vector2.zero, true);
+            TopLeft(smith.gemText.rectTransform, G(85), 2, 140, G(15) - 2);
+            smith.gemText.alignment = TextAnchor.MiddleLeft;
+            AddOutline(smith.gemText.gameObject, 1f);
+
+            smith.portrait = Image("Portrait", panel, "white", false);
+            TopLeft(smith.portrait.rectTransform, 2, 2, G(50) - 4, G(50) - 4);
+            smith.portrait.preserveAspect = true;
+            smith.portrait.raycastTarget = false;
+            smith.headerText = Label("HeaderText", panel, "", 16, StatYellow, Vector2.zero, Vector2.zero, false);
+            TopLeft(smith.headerText.rectTransform, G(60), 3, PW - G(60) - G(17) - 8, G(50) - 5);
+            smith.headerText.alignment = TextAnchor.MiddleLeft;
+            smith.headerText.lineSpacing = 1.1f;
+            smith.headerText.resizeTextForBestFit = true;
+            smith.headerText.resizeTextMinSize = 11;
+            smith.headerText.resizeTextMaxSize = 16;
+            smith.headerText.verticalOverflow = VerticalWrapMode.Truncate;
+            AddOutline(smith.headerText.gameObject, 1f);
+            var close = Image("Close", panel, "nro_close", false);
+            TopLeft(close.rectTransform, PW - G(17) - 4, 4, G(17), G(17));
+            smith.closeButton = close.gameObject.AddComponent<Button>();
+            smith.closeButton.targetGraphic = BigTouchArea(close);
+
+            // the title tab (what is being done) and the orange line under it, where the tabs of a shop stand
+            float tabY = G(50) + 4f;
+            var tab = Image("Title", panel, "nro_tab_on", true);
+            TopLeft(tab.rectTransform, 4, tabY, 150, G(25));
+            smith.titleText = Label("Text", tab.transform, "", 17, new Color(0.45f, 0.18f, 0.05f), Vector2.zero, Vector2.zero, true);
+            Stretch(Rect(smith.titleText.gameObject), 1, 1);
+            Flat("TabLine", panel, 2, tabY + G(25) + 1, PW - 4, 2, NroLine);
+
+            float y = tabY + G(25) + 10f;
+            Image icon;
+            Text title, desc;
+            smith.itemRow = SmithRow("ItemRow", panel, y, out icon, out title, out desc);
+            smith.itemIcon = icon;
+            smith.itemName = title;
+            smith.itemDesc = desc;
+            smith.stoneRow = SmithRow("StoneRow", panel, y + 66, out icon, out title, out desc);
+            smith.stoneIcon = icon;
+            smith.stoneName = title;
+            smith.stoneDesc = desc;
+
+            // the GEN lines to choose from (the change of a GEN line) and what will happen
+            float linesY = y + 66 * 2 + 8;
+            smith.lineButtons = new Button[3];
+            smith.lineLabels = new Text[3];
+            for (int i = 0; i < 3; i++)
+            {
+                var b = RowButton("Line" + i, panel, 6, linesY + i * 44, PW - 12, 40, "", 16);
+                smith.lineButtons[i] = b;
+                smith.lineLabels[i] = b.GetComponentInChildren<Text>();
+                b.gameObject.SetActive(false);
+            }
+            smith.infoText = PlacedText("Info", panel, "", 15, Dark, 10, linesY, PW - 20, 130, TextAnchor.UpperLeft, false);
+            smith.infoText.lineSpacing = 1.05f;
+            smith.infoText.resizeTextForBestFit = true;
+            smith.infoText.resizeTextMinSize = 11;
+            smith.infoText.resizeTextMaxSize = 15;
+            smith.infoText.verticalOverflow = VerticalWrapMode.Truncate;
+            smith.infoRect = smith.infoText.rectTransform;
+
+            // the result and the button at the bottom, above the money strip
+            smith.resultText = PlacedText("Result", panel, "", 15, Dark, 10, 0, PW - 20, 44, TextAnchor.MiddleCenter);
+            var rr = smith.resultText.rectTransform;
+            rr.anchorMin = rr.anchorMax = new Vector2(0.5f, 0f);
+            rr.pivot = new Vector2(0.5f, 0f);
+            rr.anchoredPosition = new Vector2(0f, G(15) + 80f);
+            rr.sizeDelta = new Vector2(PW - 20, 44);
+            smith.resultText.resizeTextForBestFit = true;
+            smith.resultText.resizeTextMinSize = 11;
+            smith.resultText.resizeTextMaxSize = 15;
+            var action = NroButton("Action", panel, 0, 0, 150, 66, "", 19, true);
+            var ar = action.GetComponent<RectTransform>();
+            ar.anchorMin = ar.anchorMax = new Vector2(0.5f, 0f);
+            ar.pivot = new Vector2(0.5f, 0f);
+            ar.anchoredPosition = new Vector2(0f, G(15) + 8f);
+            ar.sizeDelta = new Vector2(150, 66);
+            var ac = action.colors;
+            ac.disabledColor = new Color(0.6f, 0.6f, 0.6f, 1f);
+            action.colors = ac;
+            smith.actionButton = action;
+            smith.actionLabel = action.GetComponentInChildren<Text>();
+            panelGo.SetActive(false);
+            return smith;
         }
 
         /// <summary>The Chức năng tab as the tool list of Nro (paintTools): full-width light rows with the name centred; the mail and notice lists, the account and the sprite scale.</summary>
@@ -1394,6 +1584,21 @@ namespace BattleBall.EditorTools
         }
 
         static RectTransform Group(string name, Transform parent) { return Stretched(name, parent); }
+
+        /// <summary>
+        /// An invisible square of 96 canvas px around a small button, centred on it: the touch area of the X of the panels was the size of its picture (31 px, owner report
+        /// 2026-10-10). A touch on the child reaches the Button of the parent.
+        /// </summary>
+        static Image BigTouchArea(Image small)
+        {
+            var hit = Image("TouchArea", small.transform, "white", false);
+            hit.color = new Color(1f, 1f, 1f, 0f);
+            hit.rectTransform.anchorMin = hit.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            hit.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            hit.rectTransform.sizeDelta = new Vector2(96f, 96f);
+            hit.rectTransform.anchoredPosition = Vector2.zero;
+            return hit;
+        }
 
         static Image Image(string name, Transform parent, string sprite, bool sliced)
         {

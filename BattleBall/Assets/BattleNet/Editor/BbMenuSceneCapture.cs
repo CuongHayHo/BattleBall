@@ -348,6 +348,75 @@ namespace BattleBall.EditorTools
             Canvas.ForceUpdateCanvases();
             BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_skills_learned.png");
 
+            // gear on the characters (docs 15.19): worn pieces in the five slots, the bag in gear mode, the popup of a piece of the bag and of a worn piece
+            var gearSnap = Fake(true);
+            gearSnap.Characters[0].EquippedItems.Add(Piece(101, "Áo Thần Linh Trái Đất", 4647, "EARTH", 1, "ARMOR", 2500, 15, "Giáp cộng thẳng"));
+            gearSnap.Characters[0].EquippedItems.Add(Piece(102, "Găng Hủy Diệt Trái Đất", 6318, "EARTH", 2, "GLOVES", 30000, 0, "Sức đánh cộng thẳng"));
+            foreach (var it in gearSnap.Characters[0].EquippedItems) gearSnap.Characters[0].Equipment.Add(new EquipSlotInfo { Slot = it.Slot, ItemId = it.ItemId });
+            gearSnap.Materials.Add(new MaterialAmount { TemplateId = 201, Quantity = 3, Name = "Đá nâng cấp", IconId = 10204, Kind = "UPGRADE_STONE", Note = "+5% chỉ số cơ bản mỗi bậc, tối đa 15 bậc" });
+            gearSnap.Materials.Add(new MaterialAmount { TemplateId = 204, Quantity = 4, Name = "Đá GEN", IconId = 10208, Kind = "GEN_STONE", Note = "Đổi một dòng GEN sang bộ ngẫu nhiên" });
+            gearSnap.Materials.Add(new MaterialAmount { TemplateId = 205, Quantity = 1, Name = "Đá mở ô GEN", IconId = 10209, Kind = "GEN_SLOT_STONE", Note = "Mở thêm một ô GEN" });
+            gearSnap.GenRules = new GenRulesInfo { RerollStones = 1, MaxSlots = 3, StoneTemplateId = 204, SlotStoneTemplateId = 205 };
+            AddGenSet(gearSnap, "SONGOKU", "Set Sôngôku", "EARTH", Tier(5, "Kamejoko +100% sát thương"));
+            AddGenSet(gearSnap, "THIEN_XIN_HANG", "Set Thiên Xin Hăng", "EARTH", Tier(5, "Thái dương hạ san: thời gian choáng x2"));
+            AddGenSet(gearSnap, "KAIO", "Set Thần Vũ Trụ Kaio", "EARTH", Tier(2, "Tăng 10% tỷ lệ chí mạng"), Tier(4, "Kaioken tốn 5% HP thay vì 10%"), Tier(5, "Kaioken +30% sát thương, chỉ tốn 3% HP"));
+            SetGens(gearSnap.Characters[0].EquippedItems[0], 2, 2, "SONGOKU|Set Sôngôku", "KAIO|Set Thần Vũ Trụ Kaio");
+            SetGens(gearSnap.Characters[0].EquippedItems[1], 3, 0, "SONGOKU|Set Sôngôku", "KAIO|Set Thần Vũ Trụ Kaio", "THIEN_XIN_HANG|Set Thiên Xin Hăng");
+            gearSnap.Characters[0].ActiveGens.Add(new GenActive { GenKey = "SONGOKU", Pieces = 2 });
+            gearSnap.Characters[0].ActiveGens.Add(new GenActive { GenKey = "KAIO", Pieces = 2 });
+            ui.ShowDemo(gearSnap, 0);
+            var genPiece = Piece(201, "Quần Thần Linh Trái Đất", 4648, "EARTH", 1, "PANTS", 200000, 0, "HP cộng thẳng");
+            SetGens(genPiece, 2, 2, "KAIO|Set Thần Vũ Trụ Kaio", "");
+            ui.DemoGearBag(new List<ItemInfo>
+            {
+                genPiece,
+                Piece(202, "Giày Thiên Sứ Trái Đất", 10167, "EARTH", 3, "BOOTS", 400000, 5, "Ki cộng thẳng"),
+                Piece(203, "Nhẫn Hủy Diệt Trái Đất", 6323, "EARTH", 2, "RING", 37.5, 0, "Sát thương chí mạng"),
+                Piece(204, "Áo Thần Linh Namếc", 4657, "NAMEC", 1, "ARMOR", 2500, 0, "Giáp cộng thẳng"),
+                Piece(205, "Quần Hủy Diệt Xayda", 6311, "XAYDA", 2, "PANTS", 300000, 0, "HP cộng thẳng"),
+            });
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_gear_bag.png");
+            ui.DemoGearBagSlot(0);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_gear_popup.png");
+            ui.popup.Hide();
+            ui.DemoGearBagSlot(2);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_gen_bag_popup.png");
+            ui.popup.Hide();
+            ui.DemoSmithMenu();
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_smith_menu.png");
+            ui.popup.Hide();
+            var stoneUp = gearSnap.Materials[0];
+            var stoneGen = gearSnap.Materials[1];
+            var stoneSlot = gearSnap.Materials[2];
+            ui.DemoSmith(BbSmithPanel.Mode.Upgrade);
+            ui.smith.DemoSet(gearSnap.Characters[0].EquippedItems[0], stoneUp, 0);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_smith_upgrade.png");
+            ui.smith.Close();
+            ui.DemoSmith(BbSmithPanel.Mode.Reroll);
+            ui.smith.DemoSet(genPiece, stoneGen, 1);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_smith_reroll.png");
+            ui.smith.Close();
+            ui.DemoSmith(BbSmithPanel.Mode.Unlock);
+            ui.smith.DemoSet(genPiece, null, 0);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_smith_unlock.png");
+            ui.smith.Close();
+            ui.popup.Hide();
+            ui.DemoGearSlot(0);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_gear_worn_popup.png");
+            ui.popup.Hide();
+            ui.DemoGearSlot(2);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_gen_worn_full.png");
+            ui.popup.Hide();
+
             // Urôn's shop (docs 15.15): the shop on the left, the menu moved to the right, the popup of an item, then the popup of a skin of the bag on the right
             ui.ShowDemo(all, 0);
             ui.village.TeleportMain(2550f);
@@ -365,6 +434,86 @@ namespace BattleBall.EditorTools
             ui.shop.Close();
             Canvas.ForceUpdateCanvases();
             BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_shop_closed.png");
+
+            // Bunma's shop: clothes and stones
+            ui.village.TeleportMain(800f);
+            ui.DemoShop(FakeBunma());
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_bunma.png");
+            ui.shop.DemoTapIndex(1, 0);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_bunma_popup.png");
+            ui.popup.Hide();
+            ui.shop.DemoTapIndex(3, 4);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_bunma_exchange.png");
+            ui.popup.Hide();
+            ui.shop.DemoTapIndex(4, 0);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_bunma_stones.png");
+            ui.popup.Hide();
+            ui.shop.Close();
+
+        }
+
+        static GenTierInfo Tier(uint pieces, string text) { return new GenTierInfo { Pieces = pieces, Text = text }; }
+
+        static void AddGenSet(PlayerDataSnapshot snap, string key, string name, string race, params GenTierInfo[] tiers)
+        {
+            var set = new GenSetInfo { GenKey = key, Name = name, Race = race };
+            set.Tiers.AddRange(tiers);
+            snap.GenSets.Add(set);
+        }
+
+        /// <summary>The GEN lines of a made-up piece: "KEY|Name" per slot, "" for an empty one.</summary>
+        static void SetGens(ItemInfo it, uint slots, uint unlockCost, params string[] lines)
+        {
+            it.GenSlots = slots;
+            it.GenUnlockCost = unlockCost;
+            for (int i = 0; i < slots; i++)
+            {
+                string[] parts = i < lines.Length ? lines[i].Split('|') : new string[0];
+                it.Gens.Add(new GenLine { LineNo = (uint)i, GenKey = parts.Length > 0 ? parts[0] : "", Name = parts.Length > 1 ? parts[1] : "" });
+            }
+        }
+
+        /// <summary>A made-up piece of gear as the server describes it.</summary>
+        static ItemInfo Piece(ulong id, string name, uint icon, string race, uint tier, string slot, double main, double upgrade, string statName)
+        {
+            double shown = main * (1 + upgrade / 100.0);
+            var it = new ItemInfo { ItemId = id, TemplateId = 1, Slot = slot, UpgradePercent = upgrade, Name = name, IconId = icon, Race = race, Tier = tier, MinLevel = tier == 1 ? 1u : tier == 2 ? 30u : 60u };
+            it.MainStat = new StatLine { StatKey = "X", Value = shown, Text = statName + " +" + shown.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) };
+            return it;
+        }
+
+        /// <summary>Made-up content of Bunma's shop (what the server sends for a character of level 1): five pieces of gear and three stones.</summary>
+        static ShopContent FakeBunma()
+        {
+            var c = new ShopContent { NpcId = "bunma", NpcName = "Bunma", PortraitIcon = 562 };
+            string[] setNames = { "Thần Linh", "Hủy Diệt", "Thiên Sứ" };
+            uint[][] setIcons = { new uint[] { 4647, 4648, 4650, 4649, 6314 }, new uint[] { 6315, 6316, 6318, 6317, 6323 }, new uint[] { 10165, 10166, 10168, 10167, 10169 } };
+            string[] pieces = { "Áo", "Quần", "Găng", "Giày", "Nhẫn" };
+            string[] stats = { "Giáp +2500", "HP +200000", "Sức đánh +20000", "KI +200000", "Sát thương chí mạng +25%" };
+            for (int set = 0; set < 3; set++)
+            {
+                var tab = new ShopTab { Name = setNames[set] };
+                for (int i = 0; i < 5; i++)
+                    tab.Items.Add(new ShopItem { Kind = "GEAR", TemplateId = (uint)(set * 5 + i + 1), Name = pieces[i] + " " + setNames[set], IconId = setIcons[set][i], GoldPrice = (ulong)(6000 * (set + 1)),
+                                                 MinLevel = (uint)(set == 0 ? 1 : set == 1 ? 30 : 60), Description = stats[i] + "\nGhép từ 10 mảnh đồ, mua đủ một món." });
+                c.Tabs.Add(tab);
+            }
+            var swap = new ShopTab { Name = "Đổi mảnh" };
+            for (int set = 0; set < 3; set++)
+                for (int i = 0; i < 5; i++)
+                    swap.Items.Add(new ShopItem { Kind = "EXCHANGE", TemplateId = (uint)(set * 5 + i + 1), Name = pieces[i] + " " + setNames[set], IconId = setIcons[set][i], FragmentTemplateId = (uint)(101 + set * 5 + i),
+                                                  FragmentCost = 10, Description = stats[i] + "\nĐổi 10 mảnh lấy món này." });
+            c.Tabs.Add(swap);
+            var stones = new ShopTab { Name = "Đá" };
+            stones.Items.Add(new ShopItem { Kind = "MATERIAL", TemplateId = 201, Name = "Đá nâng cấp", IconId = 10204, GoldPrice = 1500, Description = "+5% chỉ số cơ bản mỗi bậc, tối đa 15 bậc" });
+            stones.Items.Add(new ShopItem { Kind = "MATERIAL", TemplateId = 202, Name = "Đá chỉ số", IconId = 10206, GoldPrice = 1000, Description = "Cộng % chỉ số tổng; luật ở GDD 6" });
+            stones.Items.Add(new ShopItem { Kind = "MATERIAL", TemplateId = 203, Name = "Đá pha lê", IconId = 6467, GemPrice = 500, Description = "Siêu hiếm; chỉ đổi bằng đá quý" });
+            c.Tabs.Add(stones);
+            return c;
         }
 
         /// <summary>Made-up content of Urôn's shop (the server sends the real one: every skin that can be sold, tabs by race).</summary>

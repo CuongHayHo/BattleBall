@@ -437,6 +437,7 @@ public final class MatchEngine {
         f.dodgePct = s.dodgePct();
         f.lifestealPct = s.other("LIFESTEAL_PCT");
         f.kiStealPct = s.other("KI_STEAL_PCT");
+        f.base = s;
         f.pet = m.pet();
         f.nextPetAt = m.pet() == null ? Long.MAX_VALUE : (long) m.pet().intervalS() * 1000L;
         for (Map.Entry<Integer, Integer> e : m.skills().entrySet()) {
@@ -449,6 +450,43 @@ public final class MatchEngine {
         entities.add(f);
         spawnBuf.add(spawnProto(f));
         return f;
+    }
+
+    /**
+     * New figures for fighters that are already in the fight (gear worn, taken off or upgraded in the village during a training session; owner request 2026-10-10).
+     * Engine thread. Whatever the fight added on top stays (the monkey, Huýt sáo, the pet buff): only the difference between the old and the new figures is applied.
+     * The current HP and Ki stay as they are, cut to the new maximum.
+     */
+    public void applyStats(Map<Long, StatCalculator.CharacterStats> byCharacter) {
+        for (Entity e : entities) {
+            if (!(e instanceof Fighter f) || f.base == null) {
+                continue;
+            }
+            StatCalculator.CharacterStats n = byCharacter.get(f.characterId);
+            if (n == null) {
+                continue;
+            }
+            StatCalculator.CharacterStats o = f.base;
+            f.hpMax = Math.max(1, f.hpMax + (n.hpMax() - o.hpMax()));
+            f.hp = Math.min(f.hp, f.hpMax);
+            f.kiMax = Math.max(1, f.kiMax + (n.kiMax() - o.kiMax()));
+            f.ki = Math.min(f.ki, f.kiMax);
+            f.atk += n.atk() - o.atk();
+            f.armorStat = n.armor();
+            f.armorReduction = StatCalculator.armorReduction(d, n.armor());
+            if (f.monkeyUntil > 0) {
+                f.monkeyCritBefore = n.critRatePct();              // the monkey keeps its own rate; the new one comes back with the form
+            } else {
+                f.critRatePct = n.critRatePct();
+            }
+            f.critDmgPct = n.critDmgPct();
+            f.dodgePct = n.dodgePct();
+            f.lifestealPct = n.other("LIFESTEAL_PCT");
+            f.kiStealPct = n.other("KI_STEAL_PCT");
+            f.hpRegenPctPerSec = n.hpRegenPctPerSec();
+            f.kiRegenPctPerSec = n.kiRegenPctPerSec();
+            f.base = n;
+        }
     }
 
     private void updateFighter(Fighter f, double dt) {
@@ -531,6 +569,10 @@ public final class MatchEngine {
         if (!f.alive || !f.canAct(now) || f.cast != null || f.channel != null) {
             return false;
         }
+        // one skill at a time, in order (Nro: Char.setSkillPaint does nothing while the paint of the last skill plays or its dart is still flying)
+        if (now < f.actionUntil || projectiles.stream().anyMatch(p -> p.owner == f)) {
+            return false;
+        }
         StaticData.Skill sk = f.skillBySlot.get(slot);
         Integer lv = f.skillLevelBySlot.get(slot);
         if (sk == null || lv == null) {
@@ -557,17 +599,21 @@ public final class MatchEngine {
         // using any skill ends the regeneration (stopCharge) and lets go of what the fighter holds (removeUseTroi), before the skill itself (SkillService.useSkill)
         endRegen(f);
         releaseHolds(f);
-        return startSkill(f, sk, L, slot, target, ndx, ndy, kiCost, allKi);
+        boolean started = startSkill(f, sk, L, slot, target, ndx, ndy, kiCost, allKi);
+        if (started) {
+            f.actionUntil = now + (long) rule("skill_gap_ms", 500);
+        }
+        return started;
     }
 
     private boolean startSkill(Fighter f, StaticData.Skill sk, StaticData.SkillLevel L, int slot, Entity target, double dx, double dy, double kiCost, boolean allKi) {
         Map<String, Object> p = L.params();
         int id = sk.id();
-        long cd = L.cooldownMs();
+        long cd = Math.round(L.cooldownMs() * Math.max(0.0, 1 - f.gen("SKILL_COOLDOWN_PCT", id) / 100.0));       // GEN: a shorter cooldown of this skill
         switch (id) {
             case 0, 2, 4, 9, 17 -> {                                                       // punches, Kaioken, Liên hoàn: instant melee rectangle
                 if (id == 9) {
-                    long cost = Math.round(f.hpMax * Json.num(p, "selfHpCostPctOfMax", 10) / 100.0);
+                    long cost = Math.round(f.hpMax * Math.max(0.0, Json.num(p, "selfHpCostPctOfMax", 10) + f.gen("SKILL_HP_COST_DELTA", 9)) / 100.0);
                     if (f.hp <= cost) {
                         return false;
                     }
@@ -619,7 +665,7 @@ public final class MatchEngine {
             case 6 -> {                                                                    // Thái Dương Hạ San: stun everyone around the caster
                 pay(f, slot, cd, kiCost, allKi);
                 double radius = L.radiusPx() == null ? 150 : L.radiusPx();
-                long ms = (long) Json.num(p, "stunMs", 3000);
+                long ms = Math.round(Json.num(p, "stunMs", 3000) * (1 + f.gen("SKILL_DURATION_MULT", 6)));      // GEN: the stun lasts longer
                 addEffect(Effect.CAST_START, f, f, 0, id);
                 for (Entity e : enemiesOf(f)) {
                     if (f.distance(e) <= radius + e.radius) {
@@ -668,7 +714,7 @@ public final class MatchEngine {
                 pet.hpMax = pet.hp = Math.max(1, f.hpMax / 4);
                 int[] hatched = {8, 11, 32, 25, 43, 49, 50};                // the mob of the pet by level of the skill (Nro: SkillUtil.getTempMobMe)
                 pet.mobTemplateId = hatched[Math.max(0, Math.min(hatched.length, f.skillLevelBySlot.getOrDefault(slot, 1)) - 1)];
-                pet.expiresAt = now + (long) Json.num(p, "lifetimeMs", 120000);
+                pet.expiresAt = f.gen("MINION_PERSIST", 12) > 0 ? Long.MAX_VALUE : now + (long) Json.num(p, "lifetimeMs", 120000);      // GEN: it stays until it is beaten
                 pet.damagePct = Json.num(p, "petDamagePctOfAttack", 30);
                 pet.atk = f.atk;
                 pet.critRatePct = 0;
@@ -826,9 +872,9 @@ public final class MatchEngine {
             }
             case 13 -> startMonkey(f, L);
             case 14 -> {                                                                   // Tự phát nổ: damage = the caster's current HP, ignores armor, halved against bosses; the caster dies
-                double radius = L.radiusPx() == null ? 430 : L.radiusPx();
+                double radius = (L.radiusPx() == null ? 430 : L.radiusPx()) + f.gen("SKILL_RADIUS_PX", 14);        // GEN: a wider blast
                 double divisor = Json.num(p, "vsBossDamageDivisor", 2);
-                double dmg = f.hp;
+                double dmg = f.hp + f.hpMax * f.gen("SKILL_DMG_HPMAX_PCT", 14) / 100.0;                          // GEN: part of the maximum HP is added to the blast
                 for (Entity e : enemiesOf(f)) {
                     if (f.distance(e) <= radius + e.radius) {
                         boolean boss = e instanceof Monster m && m.kind == MonsterKind.BOSS;
@@ -934,7 +980,7 @@ public final class MatchEngine {
         f.atk += f.monkeyAtkAdd;
         f.monkeyCritBefore = f.critRatePct;
         f.critRatePct = Json.num(p, "critRatePct", 110);
-        long ms = (long) Json.num(p, "durationMs", 60000);
+        long ms = Math.round(Json.num(p, "durationMs", 60000) * (1 + f.gen("SKILL_DURATION_MULT", 13)));      // GEN: the monkey lasts longer
         f.monkeyUntil = now + ms;
         addEffect(Effect.BUFF, f, f, (int) ms, 13);
     }
@@ -1067,7 +1113,9 @@ public final class MatchEngine {
             return;
         }
         boolean crit = forceCrit || rng.nextDouble() * 100.0 < src.effectiveCritRate(now);
-        double dmg = base;
+        Fighter genOwner = src instanceof Fighter sf ? sf : src instanceof PetEntity pe ? pe.owner : null;       // GEN: +% to the damage of this one skill
+        double genDmg = genOwner == null ? 0 : genOwner.gen("SKILL_DMG_PCT", skillId);
+        double dmg = genDmg == 0 ? base : base * (1 + genDmg / 100.0);
         if (crit) {
             dmg *= 1 + src.critDmgPct / 100.0;
         }

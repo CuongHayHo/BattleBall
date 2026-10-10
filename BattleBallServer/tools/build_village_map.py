@@ -9,7 +9,7 @@ Output, into BattleBall/SourceData/data/map/village_start (the client reads it l
   chunk.json              size, ground heights, scenery placement and NPCs of the village
   ground_a_x1..x4.png, ground_b_x1..x4.png   the two halves of one segment of the map (a texture stays within 4096 px on weak phones)
   bg/x1..x4/<id>.png      the scenery images that are used
-The village is FIVE segments of this picture joined end to end, every second one mirrored (both ends of the picture are the same high platform, so the
+The village is THREE segments of this picture joined end to end (owner request 2026-10-11: the last two of the five were cut), every second one mirrored (both ends of the picture are the same high platform, so the
 joints are seamless and the walk does not repeat itself). The black border tile columns of the picture are cut away, and the black bottom row of tiles (the owner saw it as a black band under the map), and so is the empty sky above.
 Usage:  python tools/build_village_map.py [--map-png ...] [--map-json ...] [--bg ...] [--out ...]
 """
@@ -32,13 +32,13 @@ BG_PARALLAX = 0.25
 BG_BASE_Y = 90              # the bottom of the background sits at this height of the world (the ground covers it; a flat colour fills below)
 
 SCALES = (1, 2, 3, 4)
-SEGMENTS = 5
+SEGMENTS = 3
 TILE4 = 96                  # a tile at zoom x4
 CROP_TOP4 = 960             # the picture is empty sky above this row (x4); the first solid row of the map is 1061
 SOLID_RUN4 = 160            # a column counts as ground where it is solid for this many x4 pixels (grass tufts are thinner)
 STEP1 = 4                   # one ground height every 4 pixels of zoom x1
 SINK1 = 11                  # the walkable ground is this many x1 pixels below the detected top (the bushes and tufts on it): the feet stand in the grass, not above it. The scenery keeps the detected top (owner request: trees and houses stay up where they were).
-SCENERY_IDS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16)    # 9 is a floating island: not used
+SCENERY_IDS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 97, 129, 237)    # 9 is a floating island: not used; 129 the hover capsule behind Bunma, 97 and 237 the ships behind Cui
 
 
 def ground_heights(img4):
@@ -156,6 +156,7 @@ def main():
 
     # scenery: placed on the flat platforms of every segment (odd segments are mirrored), different seed per segment
     decor = []
+    cui_at = [None]
     npcs_spots = []
     trees = (13, 12, 16, 0, 7, 2)
     houses = (10, 15)
@@ -176,6 +177,13 @@ def main():
         for i in SCENERY_IDS:
             p = os.path.join(a.bg, "x1", "%d.png" % i)
             sizes[i] = Image.open(p).size
+        if s == SEGMENTS - 1:
+            # the two ships behind Cui (owner request 2026-10-11): on the widest platform of the last segment, where the dungeon NPC stands in front of them
+            big = max(flat, key=lambda p: p[1] - p[0])
+            mid = (big[0] + big[1]) // 2 + 60
+            add(97, mid - 50, big[2], sizes[97][0])
+            add(237, mid + 55, big[2], sizes[237][0])
+            cui_at[0] = (s, mid + 5)
         for (x0, x1_, hgt) in flat:
             width = x1_ - x0
             # a house on the wider platforms (not every segment: the first and last always have one), then trees, rocks and grass between
@@ -197,13 +205,18 @@ def main():
                 if free(gx, sizes[gid][0] * 0.5):
                     add(gid, gx, hgt, sizes[gid][0] * 0.5)
 
-    # NPCs stand on a platform near a house of the first, middle and last segment
+    # the hover capsule behind Bunma (owner request 2026-10-11): she stands at x 330 of the first platform
+    bunma_x = 330.0
+    for (x0, x1_, hgt) in flat:
+        if x0 <= bunma_x <= x1_:
+            decor.append({"id": 129, "x": bunma_x + 5.0, "ground": round(hgt, 1), "back": 1})
+            break
+
+    # NPCs stand on a platform near a house of the first and middle segment
     def spot(seg):
         c = [t for t in npcs_spots if t[0] == seg]
         return c[0] if c else None
     elder = spot(0) or (0, 300, 200)
-    shop = spot(2) or (2, 300, 200)
-    gate = spot(4) or (4, 300, 200)
 
     def world_x(seg, x, offset):
         # x is a house position in the segment; stand beside it, towards the middle of the platform
@@ -220,11 +233,13 @@ def main():
 
     npcs = []
     for npc_id, name, costume, (seg, hx, hgt), talk, action in (
-            ("elder", "Ông Trưởng làng", 430, elder, "Chào cháu! Dùng cần điều khiển để đi lại, kéo lên để nhảy, giữ lên để bay. Mở menu bên trái để xem nhân vật, hành trang và hòm thư.", "Talk"),
-            ("shop", "Bà Hạt Mít", 431, shop, "Cửa hàng sắp mở. Cháu hãy ghé lại sau nhé.", "Talk"),
-            ("gate", "Cổng phó bản", 432, gate, "Nơi chọn phó bản để vào trận. Chức năng này sắp có.", "DungeonGate")):
+            ("elder", "Ông Trưởng làng", 430, elder, "Chào cháu! Dùng cần điều khiển để đi lại, kéo lên để nhảy, giữ lên để bay. Mở menu bên trái để xem nhân vật, hành trang và hòm thư.", "Talk"),):
         wx = world_x(seg, hx, 150)
         npcs.append({"id": npc_id, "name": name, "costume": costume, "x": round(wx, 1), "talk": talk, "action": action})
+    # Cui, the NPC of the dungeons (owner request 2026-10-11: it takes the place of the placeholder gate of the cut end of the map): in front of the two ships, costume 9023 is
+    # his Nro look (parts 48, 49, 50)
+    cs, cx = cui_at[0]
+    npcs.append({"id": "cui", "name": "Cui", "costume": 9023, "x": round(world_x(cs, cx, 0), 1), "talk": "Ta đưa cháu tới các phó bản. Chức năng này sắp có.", "action": "DungeonGate"})
     # the training dummies (owner decision 2026-10-08, docs/architecture/BattleBallServer.md 15.12) on the flat platform right of the elder;
     # the id is the key of balance_config training.dummies, "mob" an Nro mob template drawn instead of the costume (-1 = the costume)
     for npc_id, name, mob, costume, wx in (("moc_nhan", "Mộc nhân", 0, 0, 880.0), ("saibamen", "Saibamen", -1, 647, 1060.0)):
@@ -232,6 +247,12 @@ def main():
 
     # Urôn sells every skin (owner request 2026-10-09, docs/architecture/BattleBallServer.md 15.15); costume 9020 is his Nro NPC look (parts 61, 62, 63)
     npcs.append({"id": "uron", "name": "Urôn", "costume": 9020, "x": 1250.0, "talk": "", "action": "Shop"})
+
+    # Bunma sells clothes and stones (owner request 2026-10-10, docs 15.17): left of the elder, on the higher ground; costume 9021 is her Nro NPC look (parts 42, 43, 44)
+    npcs.append({"id": "bunma", "name": "Bunma", "costume": 9021, "x": 330.0, "talk": "", "action": "Shop"})
+
+    # Bà Hạt Mít upgrades gear (owner request 2026-10-10, docs 15.22): on the small platform right of Urôn; costume 9022 is her Nro look (parts 117, 118, 119)
+    npcs.append({"id": "shop", "name": "Bà Hạt Mít", "costume": 9022, "x": 1530.0, "talk": "", "action": "Smith"})
 
     spawn = 400.0
     # scenery images for every scale

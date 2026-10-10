@@ -464,6 +464,156 @@ class ProtocolIntegrationTest {
     }
 
     @Test
+    void bunmaSellsGearAndStonesAndChecksWhatIsOnSale() throws Exception {
+        String user = uniqueUser();
+        createAccount(user, "password123");
+        long account = scalar("SELECT account_id FROM account WHERE username = ?", user);
+        update("UPDATE account_wallet SET gold = 1000000, gems = 1000 WHERE account_id = ?", account);
+        try (TestClient c = connected()) {
+            c.send(loginPw(3, user, "password123"));
+            assertTrue(c.expect(5000).getLoginResult().getOk());
+            c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000);
+            c.send(Envelope.newBuilder().setRequestId(4).setShopRequest(com.battleball.proto.ShopRequest.newBuilder().setNpcId("bunma")).build());
+            var shop = c.expectCase(Envelope.PayloadCase.SHOP_CONTENT, 5000).getShopContent();
+            assertEquals("Bunma", shop.getNpcName());
+            assertEquals(562, shop.getPortraitIcon());
+            assertEquals(5, shop.getTabsCount(), "three sets, the exchange tab and the stones");
+            assertEquals("Thần Linh", shop.getTabs(0).getName());
+            assertEquals("Hủy Diệt", shop.getTabs(1).getName());
+            assertEquals("Thiên Sứ", shop.getTabs(2).getName());
+            assertEquals("Đổi mảnh", shop.getTabs(3).getName());
+            assertEquals("Đá", shop.getTabs(4).getName());
+            for (int set = 0; set < 3; set++) {
+                assertEquals(15, shop.getTabs(set).getItemsCount(), "five pieces of the set for each of the three planets");
+                for (var piece : shop.getTabs(set).getItemsList()) {
+                    assertEquals("GEAR", piece.getKind());
+                    assertTrue(piece.getName().contains(shop.getTabs(set).getName()), piece.getName());
+                    assertEquals(new long[] {6000, 9000, 12000}[set], piece.getGoldPrice(), "10 fragments of 0.6 / 0.9 / 1.2 wins at level 1");
+                    assertTrue(piece.getIconId() > 0 && !piece.getDescription().isEmpty());
+                }
+            }
+            assertEquals("Áo Thần Linh Trái Đất", shop.getTabs(0).getItems(0).getName());
+            assertEquals("Áo Thần Linh Namếc", shop.getTabs(0).getItems(5).getName());
+            assertEquals("Áo Thần Linh Xayda", shop.getTabs(0).getItems(10).getName());
+            assertEquals(shop.getTabs(0).getItems(0).getGoldPrice(), shop.getTabs(0).getItems(5).getGoldPrice(), "a piece costs the same for every planet");
+            java.util.Set<Integer> pictures = new java.util.HashSet<>();
+            for (var piece : shop.getTabs(2).getItemsList()) pictures.add(piece.getIconId());
+            assertTrue(pictures.size() >= 12, "the planets show different pictures: " + pictures);
+            assertEquals(1, shop.getTabs(0).getItems(0).getMinLevel());
+            assertEquals(30, shop.getTabs(1).getItems(0).getMinLevel());
+            assertEquals(60, shop.getTabs(2).getItems(0).getMinLevel());
+            var exchange = shop.getTabs(3);
+            assertEquals(45, exchange.getItemsCount(), "every piece of every set of every planet");
+            assertEquals("EXCHANGE", exchange.getItems(0).getKind());
+            assertEquals(10, exchange.getItems(0).getFragmentCost());
+            assertEquals(101, exchange.getItems(0).getFragmentTemplateId());
+            assertEquals(0, exchange.getItems(0).getGoldPrice());
+            assertEquals(3, shop.getTabs(4).getItemsCount(), "the upgrade stone, the stat stone and the crystal stone");
+            var crystal = shop.getTabs(4).getItems(2);
+            assertEquals(203, crystal.getTemplateId());
+            assertEquals(500, crystal.getGemPrice());
+            assertEquals(0, crystal.getGoldPrice());
+            assertEquals(1500, shop.getTabs(4).getItems(0).getGoldPrice(), "upgrade stone: 1.5 wins");
+            // buy a piece of gear: 6.000 gold, one piece in the bag
+            c.send(Envelope.newBuilder().setRequestId(5).setShopBuyRequest(com.battleball.proto.ShopBuyRequest.newBuilder().setNpcId("bunma").setKind("GEAR").setTemplateId(1)).build());
+            assertTrue(c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getOk());
+            var afterGear = c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            assertEquals(994_000, afterGear.getGold());
+            assertEquals(1, afterGear.getBagCount());
+            // a piece of the second set needs level 30: refused before anything is spent
+            c.send(Envelope.newBuilder().setRequestId(10).setShopBuyRequest(com.battleball.proto.ShopBuyRequest.newBuilder().setNpcId("bunma").setKind("GEAR").setTemplateId(6)).build());
+            assertEquals(com.battleball.proto.ActionError.LEVEL_TOO_LOW, c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getError());
+            // exchange: without the fragments it fails; with 10 fragments the piece comes and the fragments go
+            c.send(Envelope.newBuilder().setRequestId(11).setShopBuyRequest(com.battleball.proto.ShopBuyRequest.newBuilder().setNpcId("bunma").setKind("EXCHANGE").setTemplateId(2)).build());
+            assertEquals(com.battleball.proto.ActionError.NOT_ENOUGH_MATERIAL, c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getError());
+            update("INSERT INTO material_stack (account_id, template_id, quantity) VALUES (?, 102, 12)", account);
+            c.send(Envelope.newBuilder().setRequestId(12).setShopBuyRequest(com.battleball.proto.ShopBuyRequest.newBuilder().setNpcId("bunma").setKind("EXCHANGE").setTemplateId(2)).build());
+            assertTrue(c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getOk());
+            var afterExchange = c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            assertEquals(2, afterExchange.getBagCount());
+            assertEquals(994_000, afterExchange.getGold(), "an exchange costs no gold");
+            long left = 0;
+            for (var m : afterExchange.getMaterialsList()) if (m.getTemplateId() == 102) left = m.getQuantity();
+            assertEquals(2, left, "12 fragments minus the 10 of the piece");
+            // the same fragments make the piece of any planet: 8 more, then the Namếc pants (template 17) are exchanged for them
+            update("UPDATE material_stack SET quantity = quantity + 8 WHERE account_id = ? AND template_id = 102", account);
+            c.send(Envelope.newBuilder().setRequestId(15).setShopBuyRequest(com.battleball.proto.ShopBuyRequest.newBuilder().setNpcId("bunma").setKind("EXCHANGE").setTemplateId(17)).build());
+            assertTrue(c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getOk());
+            assertEquals(3, c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot().getBagCount());
+            // buy stones: 3 upgrade stones for 4.500 gold, then a crystal stone for 500 gems
+            c.send(Envelope.newBuilder().setRequestId(6).setShopBuyRequest(com.battleball.proto.ShopBuyRequest.newBuilder().setNpcId("bunma").setKind("MATERIAL").setTemplateId(201).setQuantity(3)).build());
+            assertTrue(c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getOk());
+            assertEquals(989_500, c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot().getGold());
+            c.send(Envelope.newBuilder().setRequestId(7).setShopBuyRequest(com.battleball.proto.ShopBuyRequest.newBuilder().setNpcId("bunma").setKind("MATERIAL").setTemplateId(203).setQuantity(1)).build());
+            assertTrue(c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getOk());
+            var afterCrystal = c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            assertEquals(500, afterCrystal.getGems());
+            long stones = 0, crystals = 0;
+            for (var m : afterCrystal.getMaterialsList()) {
+                if (m.getTemplateId() == 201) stones = m.getQuantity();
+                if (m.getTemplateId() == 203) crystals = m.getQuantity();
+            }
+            assertEquals(3, stones);
+            assertEquals(1, crystals);
+            // things the shop does not sell are refused before anything is spent
+            for (var bad : new Object[][] {{"bunma", "MATERIAL", 301}, {"bunma", "MATERIAL", 105}, {"uron", "GEAR", 1}, {"nobody", "GEAR", 1}, {"bunma", "EXCHANGE", 999}}) {
+                c.send(Envelope.newBuilder().setRequestId(8).setShopBuyRequest(com.battleball.proto.ShopBuyRequest.newBuilder()
+                        .setNpcId((String) bad[0]).setKind((String) bad[1]).setTemplateId((Integer) bad[2]).setQuantity(1)).build());
+                var refused = c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult();
+                assertFalse(refused.getOk(), bad[0] + " " + bad[1] + " " + bad[2]);
+                assertEquals(com.battleball.proto.ActionError.NOT_FOUND, refused.getError());
+            }
+            update("UPDATE account_wallet SET gold = 100 WHERE account_id = ?", account);
+            c.send(Envelope.newBuilder().setRequestId(9).setShopBuyRequest(com.battleball.proto.ShopBuyRequest.newBuilder().setNpcId("bunma").setKind("GEAR").setTemplateId(2)).build());
+            assertEquals(com.battleball.proto.ActionError.NOT_ENOUGH_GOLD, c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getError());
+        }
+    }
+
+    @Test
+    void gearIsDescribedForTheClientInTheBagAndOnTheCharacter() throws Exception {
+        String user = uniqueUser();
+        createAccount(user, "password123");
+        long account = scalar("SELECT account_id FROM account WHERE username = ?", user);
+        update("INSERT INTO item_instance (account_id, template_id, slot, upgrade_percent) VALUES (?, 1, 'ARMOR', 10)", account);       // Áo Thần Linh Trái Đất, +10%
+        update("INSERT INTO item_instance (account_id, template_id, slot) VALUES (?, 17, 'PANTS')", account);                          // Quần Thần Linh Namếc
+        long armor = scalar("SELECT item_id FROM item_instance WHERE account_id = ? AND template_id = 1", account);
+        try (TestClient c = connected()) {
+            c.send(loginPw(3, user, "password123"));
+            assertTrue(c.expect(5000).getLoginResult().getOk());
+            var snap = c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            long earth = 0;
+            for (var ch : snap.getCharactersList()) if (ch.getRace().equals("EARTH")) earth = ch.getCharacterId();
+            c.send(Envelope.newBuilder().setRequestId(4).setInventoryRequest(com.battleball.proto.InventoryRequest.newBuilder().setCharacterId(earth)).build());
+            var page = c.expectCase(Envelope.PayloadCase.INVENTORY_PAGE, 5000).getInventoryPage();
+            assertEquals(2, page.getItemsCount());
+            var piece = page.getItems(0);
+            assertEquals("Áo Thần Linh Trái Đất", piece.getName());
+            assertEquals("EARTH", piece.getRace());
+            assertEquals(1, piece.getTier());
+            assertEquals(1, piece.getMinLevel());
+            assertTrue(piece.getIconId() > 0);
+            assertEquals("FLAT_ARMOR", piece.getMainStat().getStatKey());
+            assertEquals(2750.0, piece.getMainStat().getValue(), 0.001, "2.500 base with +10% upgrade");
+            assertTrue(piece.getMainStat().getText().contains("2750"), piece.getMainStat().getText());
+            assertEquals("NAMEC", page.getItems(1).getRace());
+            // worn: the piece moves to the character in the snapshot with the same description, and the stats count it
+            long armorBefore = 0;
+            for (var ch : snap.getCharactersList()) if (ch.getCharacterId() == earth) armorBefore = ch.getStats().getArmor();
+            c.send(Envelope.newBuilder().setRequestId(5).setEquipItemRequest(com.battleball.proto.EquipItemRequest.newBuilder().setCharacterId(earth).setItemId(armor)).build());
+            assertTrue(c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getOk());
+            var after = c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            for (var ch : after.getCharactersList()) {
+                if (ch.getCharacterId() != earth) continue;
+                assertEquals(1, ch.getEquippedItemsCount());
+                assertEquals("Áo Thần Linh Trái Đất", ch.getEquippedItems(0).getName());
+                assertTrue(ch.getEquippedItems(0).getEquipped());
+                assertEquals(armorBefore + 2750, ch.getStats().getArmor(), "the armor of the piece counts in the final stats");
+            }
+            assertEquals(1, after.getBagCount());
+        }
+    }
+
+    @Test
     void mailboxAndNoticesOverTheWire() throws Exception {
         String user = uniqueUser();
         try (TestClient c = connected()) {
