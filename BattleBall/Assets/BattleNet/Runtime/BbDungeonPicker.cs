@@ -20,6 +20,9 @@ namespace BattleBall.Net
         public Text[] rowNames, rowInfos;
         public Button prev, next, enter, close;
         public Sprite rowIdle, rowSelected;
+        public Button[] difficultyButtons;                       // Dễ / Khó / Địa ngục (docs 15.33): one button for each difficulty the server names
+        public Image[] difficultyImages;
+        public Text[] difficultyLabels;
 
         /// <summary>The dungeon the player chose and wants to enter.</summary>
         public Action<DungeonInfo> Entered;
@@ -27,8 +30,13 @@ namespace BattleBall.Net
 
         static readonly Color SelectedInk = new Color(0.30f, 0.14f, 0.05f), InfoInk = new Color(1f, 0.93f, 0.25f);
         readonly List<DungeonInfo> _list = new List<DungeonInfo>();
+        readonly List<DifficultyInfo> _difficulties = new List<DifficultyInfo>();
         int _page, _selected = -1;
+        static int _difficulty;                                  // the difficulty chosen last stays chosen the next time the list opens
         bool _wired;
+
+        /// <summary>The key (EASY, HARD, HELL) of the difficulty chosen; empty when the server names none (the server then uses its default).</summary>
+        public string SelectedDifficulty { get { return _difficulty >= 0 && _difficulty < _difficulties.Count ? _difficulties[_difficulty].Key : ""; } }
 
         public bool IsOpen { get { return root != null && root.activeSelf; } }
         public int PerPage { get { return rows.Length; } }
@@ -42,6 +50,12 @@ namespace BattleBall.Net
                 int row = i;
                 rows[i].onClick.AddListener(() => Select(_page * PerPage + row));
             }
+            if (difficultyButtons != null)
+                for (int i = 0; i < difficultyButtons.Length; i++)
+                {
+                    int level = i;
+                    difficultyButtons[i].onClick.AddListener(() => { _difficulty = level; Refresh(); });
+                }
             prev.onClick.AddListener(() => Turn(-1));
             next.onClick.AddListener(() => Turn(1));
             enter.onClick.AddListener(() =>
@@ -62,6 +76,9 @@ namespace BattleBall.Net
             _list.Clear();
             if (snapshot != null) _list.AddRange(snapshot.Dungeons);
             _list.Sort((a, b) => a.DungeonId.CompareTo(b.DungeonId));
+            _difficulties.Clear();
+            if (snapshot != null) _difficulties.AddRange(snapshot.Difficulties);
+            if (_difficulty >= _difficulties.Count) _difficulty = 0;
             if (_selected >= _list.Count) _selected = -1;
             _page = _selected >= 0 ? _selected / PerPage : 0;
             _canEnter = canEnter;
@@ -150,7 +167,29 @@ namespace BattleBall.Net
                 detailText.text = d.Name + " (" + TierName(d.Tier) + ")\nCấp đề nghị " + d.RecommendedLevel + ". Gặp " + d.BossCount + " boss, mỗi boss có các đợt quái nhỏ đi trước."
                                   + (d.TimeLimitS > 0 ? "\nGiới hạn thời gian: " + Minutes(d.TimeLimitS) + "." : "");
             }
+            RefreshDifficulty();
             enter.interactable = _selected >= 0 && _canEnter;
+        }
+
+        /// <summary>The three difficulty buttons (the chosen one is lit) and, under the dungeon, what the chosen difficulty does.</summary>
+        void RefreshDifficulty()
+        {
+            if (difficultyButtons == null) return;
+            for (int i = 0; i < difficultyButtons.Length; i++)
+            {
+                bool has = i < _difficulties.Count;
+                difficultyButtons[i].gameObject.SetActive(has);
+                if (!has) continue;
+                bool chosen = i == _difficulty;
+                difficultyImages[i].sprite = chosen ? rowSelected : rowIdle;
+                difficultyLabels[i].text = _difficulties[i].Name;
+                difficultyLabels[i].color = chosen ? SelectedInk : Color.white;
+            }
+            if (_selected >= 0 && _difficulty < _difficulties.Count)
+            {
+                var df = _difficulties[_difficulty];
+                detailText.text += "\n" + df.Name + ": " + df.Note;
+            }
         }
 
         /// <summary>For the screenshot tool and the play scenario: choose the dungeon with this id.</summary>
@@ -158,6 +197,12 @@ namespace BattleBall.Net
         {
             int index = _list.FindIndex(d => d.DungeonId == dungeonId);
             if (index >= 0) { _page = index / PerPage; Select(index); }
+        }
+
+        /// <summary>For the play scenario: choose the difficulty with this index (0 = the easiest).</summary>
+        public void DemoDifficulty(int index)
+        {
+            if (index >= 0 && index < _difficulties.Count) { _difficulty = index; Refresh(); }
         }
 
         /// <summary>For the play scenario: press Vào.</summary>

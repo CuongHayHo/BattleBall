@@ -17,11 +17,28 @@ public record MatchSetup(
         List<Encounter> minionPool,             // small mobs that swarm during fights (may be empty)
         long goldAvailable,                     // gold of the controlled character at the start (for revives)
         RandomGenerator random,
-        Training training) {                    // null for a real match; a training session of the village otherwise (dungeon is null then)
+        Training training,                      // null for a real match; a training session of the village otherwise (dungeon is null then)
+        Difficulty difficulty) {                // how hard and how generous the run is (docs 15.33); Difficulty.NONE = the table as it is
+
+    public MatchSetup {
+        if (difficulty == null) {
+            difficulty = Difficulty.NONE;
+        }
+    }
 
     public MatchSetup(long runId, StaticData data, StaticData.Dungeon dungeon, List<SquadMember> squad, List<Encounter> encounters, List<Encounter> minionPool,
                       long goldAvailable, RandomGenerator random) {
-        this(runId, data, dungeon, squad, encounters, minionPool, goldAvailable, random, null);
+        this(runId, data, dungeon, squad, encounters, minionPool, goldAvailable, random, null, Difficulty.NONE);
+    }
+
+    public MatchSetup(long runId, StaticData data, StaticData.Dungeon dungeon, List<SquadMember> squad, List<Encounter> encounters, List<Encounter> minionPool,
+                      long goldAvailable, RandomGenerator random, Training training) {
+        this(runId, data, dungeon, squad, encounters, minionPool, goldAvailable, random, training, Difficulty.NONE);
+    }
+
+    /** The same run at another difficulty. */
+    public MatchSetup withDifficulty(Difficulty difficulty) {
+        return new MatchSetup(runId, data, dungeon, squad, encounters, minionPool, goldAvailable, random, training, difficulty);
     }
 
     /**
@@ -40,7 +57,16 @@ public record MatchSetup(
                               StatCalculator.CharacterStats stats, Map<Integer, Integer> skills, int costumeId, StaticData.PetEffect pet) {
     }
 
-    public record Encounter(StaticData.Boss boss, String role, String mobTier) {
+    public record Encounter(StaticData.Boss boss, String role, String mobTier, List<StaticData.Boss> forms) {
+        public Encounter(StaticData.Boss boss, String role, String mobTier) {
+            this(boss, role, mobTier, null);
+        }
+
+        /** How many bosses this encounter is worth: an evolving boss counts every form. */
+        public int bosses() {
+            return forms == null ? 1 : forms.size();
+        }
+
         /** BOSS, MINI, FINAL, MOB or ELITE: the class used for stats and drops. */
         public String classKey() {
             return switch (role) {

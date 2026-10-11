@@ -84,7 +84,7 @@ namespace BattleBall.Net
         public Color Color;
     }
 
-    public enum NpcAction { Talk, DungeonGate, TrainingDummy, Shop, Smith }          // Shop: the server sends what the NPC sells (docs 15.15)
+    public enum NpcAction { Talk, DungeonGate, TrainingDummy, Shop, Smith, Attendance, Quest }          // Shop: the server sends what the NPC sells (docs 15.15)
 
     public sealed class NpcSpec
     {
@@ -131,8 +131,8 @@ namespace BattleBall.Net
             foreach (float x in new float[] { 560, 1190, 1900, 2150 })
                 map.Scenery.Add(new Scenery { Kind = SceneryKind.Fence, X = x, Width = 220, Height = 46, Parallax = 1f, Color = new Color(0.55f, 0.36f, 0.18f) });
             // the NPCs of the starter village (pictures are placeholders: costumes of the catalog)
-            map.Npcs.Add(new NpcSpec { Id = "elder", Name = "Ông Trưởng làng", CostumeId = 430, X = 1300, Action = NpcAction.Talk,
-                Talk = "Chào cháu! Dùng cần điều khiển để đi lại. Hãy mở menu bên trái để xem nhân vật, hành trang và hòm thư." });
+            map.Npcs.Add(new NpcSpec { Id = "gohan", Name = "Ông Gôhan", CostumeId = 9024, X = 1000, Action = NpcAction.Quest, Talk = "" });          // the quests (docs 15.32)
+            map.Npcs.Add(new NpcSpec { Id = "elder", Name = "Ông Trưởng làng", CostumeId = 430, X = 1300, Action = NpcAction.Attendance, Talk = "" });          // the daily check-in (docs 15.25)
             map.Npcs.Add(new NpcSpec { Id = "shop", Name = "Bà Hạt Mít", CostumeId = 9022, X = 1850, Action = NpcAction.Smith, Talk = "" });          // upgrades gear (docs 15.22)
             map.Npcs.Add(new NpcSpec { Id = "cui", Name = "Cui", CostumeId = 9023, X = 2300, Action = NpcAction.DungeonGate,
                 Talk = "Cháu muốn đi phó bản nào? Ta đưa cháu tới đó bằng tàu của ta." });

@@ -49,7 +49,8 @@ public final class MatchSettlement {
                     return end.build();     // already settled
                 }
                 long mainId = mainMember.characterId();
-                long gold = out.goldEarned();
+                double rewardMult = s.setup().difficulty().rewardMult();                // docs 15.33: a harder run pays more
+                long gold = Math.round(out.goldEarned() * rewardMult);
                 if (!won) {
                     gold = Math.round(gold * d.balanceNum("gold_loss_factor", 0.5));
                 }
@@ -68,15 +69,15 @@ public final class MatchSettlement {
                 double winBonus = won ? 1 + Json.num(d.balanceObj("exp_rules"), "win_bonus", 0.2) : 1.0;
                 Map<Long, int[]> levelsAfter = new LinkedHashMap<>();
                 for (Map.Entry<Long, Double> e : out.expRaw().entrySet()) {
-                    int[] lv = applyExp(c, d, e.getKey(), Math.round(e.getValue() * winBonus));
+                    int[] lv = applyExp(c, d, e.getKey(), Math.round(e.getValue() * winBonus * rewardMult));
                     levelsAfter.put(e.getKey(), lv);
-                    end.addCharacters(CharacterReward.newBuilder().setCharacterId(e.getKey()).setExpGained(Math.round(e.getValue() * winBonus))
+                    end.addCharacters(CharacterReward.newBuilder().setCharacterId(e.getKey()).setExpGained(Math.round(e.getValue() * winBonus * rewardMult))
                             .setLevelBefore(lv[0]).setLevelAfter(lv[1]));
                     try (PreparedStatement ps = c.prepareStatement("INSERT INTO match_run_character (run_id, character_id, exp_gained, level_before, level_after) VALUES (?,?,?,?,?) "
                             + "ON DUPLICATE KEY UPDATE exp_gained = VALUES(exp_gained), level_after = VALUES(level_after)")) {
                         ps.setLong(1, s.runId());
                         ps.setLong(2, e.getKey());
-                        ps.setLong(3, Math.round(e.getValue() * winBonus));
+                        ps.setLong(3, Math.round(e.getValue() * winBonus * rewardMult));
                         ps.setInt(4, lv[0]);
                         ps.setInt(5, lv[1]);
                         ps.executeUpdate();
@@ -97,7 +98,7 @@ public final class MatchSettlement {
                 }
 
                 // ---- drops
-                Map<Integer, Integer> drops = rollDrops(d, dungeon, out, rng);
+                Map<Integer, Integer> drops = rollDrops(d, dungeon, out, rng, s.setup().difficulty().dropMult());
                 for (Map.Entry<Integer, Integer> e : drops.entrySet()) {
                     StaticData.Material m = d.materials().get(e.getKey());
                     boolean toAccount = m != null && m.kind().equals("POTARA_SHARD");
@@ -237,6 +238,10 @@ public final class MatchSettlement {
 
     /** Drop rules (docs/database/BattleBall.md 10.28 to 10.30): per kill, the rule of its class and tier, rate x dungeon multiplier (at most 100%). */
     static Map<Integer, Integer> rollDrops(StaticData d, StaticData.Dungeon dungeon, MatchOutcome out, RandomGenerator rng) {
+        return rollDrops(d, dungeon, out, rng, 1.0);
+    }
+
+    static Map<Integer, Integer> rollDrops(StaticData d, StaticData.Dungeon dungeon, MatchOutcome out, RandomGenerator rng, double dropMult) {
         Map<Integer, Integer> result = new LinkedHashMap<>();
         for (MatchOutcome.Kill k : out.kills()) {
             for (StaticData.DropRule r : d.dropRules()) {
@@ -244,7 +249,7 @@ public final class MatchSettlement {
                         || (r.dungeonId() != null && r.dungeonId() != dungeon.id())) {
                     continue;
                 }
-                double rate = Math.min(100.0, r.ratePct() * d.dropMult(dungeon.id(), r.materialId()));
+                double rate = Math.min(100.0, r.ratePct() * d.dropMult(dungeon.id(), r.materialId()) * dropMult);
                 if (rng.nextDouble() * 100.0 < rate) {
                     int qty = r.qtyMin() + (r.qtyMax() > r.qtyMin() ? (int) (rng.nextDouble() * (r.qtyMax() - r.qtyMin() + 1)) : 0);
                     result.merge(r.materialId(), Math.min(qty, r.qtyMax()), Integer::sum);

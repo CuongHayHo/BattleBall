@@ -542,9 +542,32 @@ namespace BattleBall.EditorTools
             tr.anchoredPosition = new Vector2(PW * 0.5f, 260f);
             AddOutline(ui.toastText.gameObject, 1f);
 
+            // ---- the quest being followed (Ông Gôhan, docs 15.32): a small box at the top of the screen, never in the way of a touch
+            var trackerGo = new GameObject("QuestTracker", typeof(RectTransform), typeof(Image));
+            trackerGo.transform.SetParent(root, false);
+            var trackerRect = Rect(trackerGo);
+            trackerRect.anchorMin = trackerRect.anchorMax = new Vector2(0.5f, 1f);
+            trackerRect.pivot = new Vector2(0.5f, 1f);
+            trackerRect.anchoredPosition = new Vector2(0f, -8f);
+            trackerRect.sizeDelta = new Vector2(520f, 50f);
+            ui.questTrackerBg = trackerGo.GetComponent<Image>();
+            ui.questTrackerBg.color = new Color(0f, 0f, 0f, 0.45f);
+            ui.questTrackerBg.raycastTarget = false;
+            ui.questTrackerText = Label("Text", trackerGo.transform, "", 16, Color.white, Vector2.zero, Vector2.zero, true);
+            Stretch(Rect(ui.questTrackerText.gameObject), 10, 3);
+            ui.questTrackerText.supportRichText = true;
+            ui.questTrackerText.alignment = TextAnchor.MiddleCenter;
+            ui.questTrackerText.resizeTextForBestFit = true;
+            ui.questTrackerText.resizeTextMinSize = 11;
+            ui.questTrackerText.resizeTextMaxSize = 16;
+            AddOutline(ui.questTrackerText.gameObject, 1f);
+            trackerGo.SetActive(false);
+
             // ---- the shop of an NPC (Urôn): a second panel on the left, under the popup (the menu panel moves to the right while it is open)
             ui.shop = BuildShop(root, ui);
             ui.smith = BuildSmith(root, ui);
+            ui.attendance = BuildAttendance(root, ui);
+            ui.quest = BuildQuest(root, ui);
 
             // ---- the popup (skin, mail, notice), the Chức năng tab and its password form
             ui.popup = BuildPopup(root);
@@ -618,20 +641,37 @@ namespace BattleBall.EditorTools
             for (int i = 0; i < count; i++)
             {
                 var row = Image("Row" + i, box.transform, "nro_cell_bag", true);
-                TopLeft(row.rectTransform, 20, 92 + i * 54, BoxW - 40, 50);
+                TopLeft(row.rectTransform, 20, 88 + i * 47, BoxW - 40, 44);
                 var button = row.gameObject.AddComponent<Button>();
                 button.targetGraphic = row;
                 picker.rows[i] = button;
                 picker.rowImages[i] = row;
-                picker.rowNames[i] = PlacedText("Name", row.transform, "", 22, Color.white, 14, 0, 380, 50, TextAnchor.MiddleLeft);
+                picker.rowNames[i] = PlacedText("Name", row.transform, "", 22, Color.white, 14, 0, 380, 44, TextAnchor.MiddleLeft);
                 AddOutline(picker.rowNames[i].gameObject, 1f);
-                picker.rowInfos[i] = PlacedText("Info", row.transform, "", 19, StatYellow, 394, 0, BoxW - 40 - 394 - 12, 50, TextAnchor.MiddleRight);
+                picker.rowInfos[i] = PlacedText("Info", row.transform, "", 19, StatYellow, 394, 0, BoxW - 40 - 394 - 12, 44, TextAnchor.MiddleRight);
                 AddOutline(picker.rowInfos[i].gameObject, 1f);
             }
-            picker.prev = NroButton("Prev", box.transform, 20, 420, 90, 40, "<", 22, false);
-            picker.next = NroButton("Next", box.transform, BoxW - 110, 420, 90, 40, ">", 22, false);
-            picker.pageText = PlacedText("Page", box.transform, "", 20, Dark, BoxW * 0.5f - 60, 420, 120, 40, TextAnchor.MiddleCenter);
-            picker.detailText = PlacedText("Detail", box.transform, "", 19, Dark, 24, 466, BoxW - 48, 84, TextAnchor.UpperCenter, false);
+            picker.prev = NroButton("Prev", box.transform, 20, 374, 90, 36, "<", 22, false);
+            picker.next = NroButton("Next", box.transform, BoxW - 110, 374, 90, 36, ">", 22, false);
+            picker.pageText = PlacedText("Page", box.transform, "", 20, Dark, BoxW * 0.5f - 60, 374, 120, 36, TextAnchor.MiddleCenter);
+            // the difficulty of the run (docs 15.33): Dễ / Khó / Địa ngục, the chosen one lit like a chosen row
+            const int levels = 3;
+            picker.difficultyButtons = new Button[levels];
+            picker.difficultyImages = new UnityEngine.UI.Image[levels];
+            picker.difficultyLabels = new Text[levels];
+            float levelW = (BoxW - 40 - 2 * 10) / levels;
+            for (int i = 0; i < levels; i++)
+            {
+                var lv = Image("Level" + i, box.transform, "nro_cell_bag", true);
+                TopLeft(lv.rectTransform, 20 + i * (levelW + 10), 414, levelW, 44);
+                var lb = lv.gameObject.AddComponent<Button>();
+                lb.targetGraphic = lv;
+                picker.difficultyButtons[i] = lb;
+                picker.difficultyImages[i] = lv;
+                picker.difficultyLabels[i] = PlacedText("Name", lv.transform, "", 22, Color.white, 0, 0, levelW, 44, TextAnchor.MiddleCenter);
+                AddOutline(picker.difficultyLabels[i].gameObject, 1f);
+            }
+            picker.detailText = PlacedText("Detail", box.transform, "", 19, Dark, 24, 462, BoxW - 48, 90, TextAnchor.UpperCenter, false);
             picker.detailText.resizeTextForBestFit = true;
             picker.detailText.resizeTextMinSize = 14;
             picker.detailText.resizeTextMaxSize = 19;
@@ -1310,11 +1350,11 @@ namespace BattleBall.EditorTools
 
             // the GEN lines to choose from (the change of a GEN line) and what will happen
             float linesY = y + 66 * 2 + 8;
-            smith.lineButtons = new Button[3];
-            smith.lineLabels = new Text[3];
-            for (int i = 0; i < 3; i++)
+            smith.lineButtons = new Button[4];                                  // the GEN lines (3) or the extra lines of a piece (3 stat lines and the red one)
+            smith.lineLabels = new Text[4];
+            for (int i = 0; i < 4; i++)
             {
-                var b = RowButton("Line" + i, panel, 6, linesY + i * 44, PW - 12, 40, "", 16);
+                var b = RowButton("Line" + i, panel, 6, linesY + i * 40, PW - 12, 36, "", 15);
                 smith.lineButtons[i] = b;
                 smith.lineLabels[i] = b.GetComponentInChildren<Text>();
                 b.gameObject.SetActive(false);
@@ -1348,8 +1388,324 @@ namespace BattleBall.EditorTools
             action.colors = ac;
             smith.actionButton = action;
             smith.actionLabel = action.GetComponentInChildren<Text>();
+            var alt = NroButton("Alt", panel, 0, 0, 140, 66, "", 17, true);                // "Đổi loại" of Ép sao, beside the main button
+            var altRect = alt.GetComponent<RectTransform>();
+            altRect.anchorMin = altRect.anchorMax = new Vector2(0.5f, 0f);
+            altRect.pivot = new Vector2(0.5f, 0f);
+            altRect.anchoredPosition = new Vector2(80f, G(15) + 8f);
+            altRect.sizeDelta = new Vector2(140, 66);
+            alt.colors = ac;
+            smith.altButton = alt;
+            smith.altLabel = alt.GetComponentInChildren<Text>();
+            alt.gameObject.SetActive(false);
             panelGo.SetActive(false);
             return smith;
+        }
+
+        /// <summary>
+        /// The table of the daily check-in of the village elder (docs 15.25): the frame of the NPC panels (his portrait and the month at the top, the money strip at the bottom), a title tab,
+        /// the days of the month as a grid of 7 by 5 cells (the day, the picture of the free item or the gems, a tick when claimed), the reward of the chosen day and the button.
+        /// </summary>
+        static BbAttendancePanel BuildAttendance(Transform canvasRoot, BbMenuUi ui)
+        {
+            var panelGo = new GameObject("AttendancePanel", typeof(RectTransform), typeof(Image), typeof(BbAttendancePanel));
+            panelGo.transform.SetParent(canvasRoot, false);
+            var rect = Rect(panelGo);
+            rect.anchorMin = new Vector2(0f, 0f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.sizeDelta = new Vector2(PW, 0f);
+            rect.anchoredPosition = new Vector2(-PW, 0f);
+            var bg = panelGo.GetComponent<Image>();
+            bg.sprite = Sprite("white");
+            bg.color = NroPanel;
+            var panel = panelGo.transform;
+            var att = panelGo.GetComponent<BbAttendancePanel>();
+            att.root = panelGo;
+            att.panelRect = rect;
+            att.menu = ui;
+            att.goldSprite = Sprite("nro_gold");
+            att.gemSprite = Sprite("nro_gem");
+            var edge = Image("Edge", panel, "white", false);
+            edge.rectTransform.anchorMin = new Vector2(1f, 0f);
+            edge.rectTransform.anchorMax = new Vector2(1f, 1f);
+            edge.rectTransform.pivot = new Vector2(1f, 0.5f);
+            edge.rectTransform.sizeDelta = new Vector2(2f, 0f);
+            edge.rectTransform.anchoredPosition = Vector2.zero;
+            edge.color = NroEdge;
+            edge.raycastTarget = false;
+
+            Flat("HeaderBg", panel, 0, 0, PW, G(50), NroHeader);
+            var footerGo = new GameObject("Footer", typeof(RectTransform));
+            footerGo.transform.SetParent(panel, false);
+            var footerRect = Rect(footerGo);
+            footerRect.anchorMin = new Vector2(0f, 0f);
+            footerRect.anchorMax = new Vector2(1f, 0f);
+            footerRect.pivot = new Vector2(0.5f, 0f);
+            footerRect.sizeDelta = new Vector2(0f, G(15));
+            footerRect.anchoredPosition = Vector2.zero;
+            Stretch(Flat("FooterBg", footerGo.transform, 0, 0, PW, G(15), NroBag).rectTransform, 0, 0);
+            Flat("FooterLine", footerGo.transform, 0, 0, PW, 2, NroLine);
+            var goldIcon = Image("GoldIcon", footerGo.transform, "nro_gold", false);
+            TopLeft(goldIcon.rectTransform, G(11) - 12, 6, 24, 18);
+            goldIcon.preserveAspect = true;
+            goldIcon.raycastTarget = false;
+            att.goldText = Label("GoldText", footerGo.transform, "0", 15, StatYellow, Vector2.zero, Vector2.zero, true);
+            TopLeft(att.goldText.rectTransform, G(24), 2, 100, G(15) - 2);
+            att.goldText.alignment = TextAnchor.MiddleLeft;
+            AddOutline(att.goldText.gameObject, 1f);
+            var gemIcon = Image("GemIcon", footerGo.transform, "nro_gem", false);
+            TopLeft(gemIcon.rectTransform, G(75) - 11, 6, 22, 18);
+            gemIcon.preserveAspect = true;
+            gemIcon.raycastTarget = false;
+            att.gemText = Label("GemText", footerGo.transform, "0", 15, StatYellow, Vector2.zero, Vector2.zero, true);
+            TopLeft(att.gemText.rectTransform, G(85), 2, 140, G(15) - 2);
+            att.gemText.alignment = TextAnchor.MiddleLeft;
+            AddOutline(att.gemText.gameObject, 1f);
+
+            att.portrait = Image("Portrait", panel, "white", false);
+            TopLeft(att.portrait.rectTransform, 2, 2, G(50) - 4, G(50) - 4);
+            att.portrait.preserveAspect = true;
+            att.portrait.raycastTarget = false;
+            att.headerText = Label("HeaderText", panel, "", 16, StatYellow, Vector2.zero, Vector2.zero, false);
+            TopLeft(att.headerText.rectTransform, G(60), 3, PW - G(60) - G(17) - 8, G(50) - 5);
+            att.headerText.alignment = TextAnchor.MiddleLeft;
+            att.headerText.lineSpacing = 1.1f;
+            att.headerText.resizeTextForBestFit = true;
+            att.headerText.resizeTextMinSize = 11;
+            att.headerText.resizeTextMaxSize = 16;
+            att.headerText.verticalOverflow = VerticalWrapMode.Truncate;
+            AddOutline(att.headerText.gameObject, 1f);
+            var close = Image("Close", panel, "nro_close", false);
+            TopLeft(close.rectTransform, PW - G(17) - 4, 4, G(17), G(17));
+            att.closeButton = close.gameObject.AddComponent<Button>();
+            att.closeButton.targetGraphic = BigTouchArea(close);
+
+            float tabY = G(50) + 4f;
+            var tab = Image("Title", panel, "nro_tab_on", true);
+            TopLeft(tab.rectTransform, 4, tabY, 150, G(25));
+            att.titleText = Label("Text", tab.transform, "", 17, new Color(0.45f, 0.18f, 0.05f), Vector2.zero, Vector2.zero, true);
+            Stretch(Rect(att.titleText.gameObject), 1, 1);
+            Flat("TabLine", panel, 2, tabY + G(25) + 1, PW - 4, 2, NroLine);
+
+            // the grid of the days: 7 columns, up to 5 rows (31 days)
+            const int cols = 7, cellCount = 31;
+            float cw = 42f, ch = 54f, gx = 2f, gy = 3f;
+            float x0 = (PW - (cols * cw + (cols - 1) * gx)) * 0.5f, y0 = tabY + G(25) + 12f;
+            att.cellButtons = new Button[cellCount];
+            att.cellBg = new UnityEngine.UI.Image[cellCount];
+            att.cellIcon = new UnityEngine.UI.Image[cellCount];
+            att.cellDay = new Text[cellCount];
+            att.cellQty = new Text[cellCount];
+            att.cellCheck = new Text[cellCount];
+            for (int i = 0; i < cellCount; i++)
+            {
+                int row = i / cols, col = i % cols;
+                var cell = Image("Day" + (i + 1), panel, "white", false);
+                TopLeft(cell.rectTransform, x0 + col * (cw + gx), y0 + row * (ch + gy), cw, ch);
+                cell.color = NroRow;
+                var b = cell.gameObject.AddComponent<Button>();
+                b.targetGraphic = cell;
+                att.cellButtons[i] = b;
+                att.cellBg[i] = cell;
+                att.cellDay[i] = PlacedText("Day", cell.transform, (i + 1).ToString(), 13, Dark, 3, 1, 26, 16, TextAnchor.UpperLeft);
+                att.cellDay[i].raycastTarget = false;
+                var icon = Image("Icon", cell.transform, "white", false);
+                TopLeft(icon.rectTransform, 8, 13, 26, 26);
+                icon.preserveAspect = true;
+                icon.raycastTarget = false;
+                icon.enabled = false;
+                att.cellIcon[i] = icon;
+                att.cellQty[i] = PlacedText("Qty", cell.transform, "", 12, Dark, 0, 39, cw, 14, TextAnchor.MiddleCenter);
+                att.cellQty[i].raycastTarget = false;
+                att.cellCheck[i] = PlacedText("Check", cell.transform, "Đã", 18, new Color(0.05f, 0.45f, 0.05f), 0, 14, cw, 24, TextAnchor.MiddleCenter);
+                att.cellCheck[i].raycastTarget = false;
+                att.cellCheck[i].gameObject.SetActive(false);
+                b.gameObject.SetActive(false);
+            }
+
+            float infoY = y0 + 5 * (ch + gy) + 6f;
+            att.infoText = PlacedText("Info", panel, "", 15, Dark, 10, infoY, PW - 20, 90, TextAnchor.UpperLeft, false);
+            att.infoText.lineSpacing = 1.05f;
+            att.infoText.resizeTextForBestFit = true;
+            att.infoText.resizeTextMinSize = 11;
+            att.infoText.resizeTextMaxSize = 15;
+            att.infoText.verticalOverflow = VerticalWrapMode.Truncate;
+
+            att.resultText = PlacedText("Result", panel, "", 15, Dark, 10, 0, PW - 20, 44, TextAnchor.MiddleCenter);
+            var rr = att.resultText.rectTransform;
+            rr.anchorMin = rr.anchorMax = new Vector2(0.5f, 0f);
+            rr.pivot = new Vector2(0.5f, 0f);
+            rr.anchoredPosition = new Vector2(0f, G(15) + 78f);
+            rr.sizeDelta = new Vector2(PW - 20, 44);
+            att.resultText.resizeTextForBestFit = true;
+            att.resultText.resizeTextMinSize = 11;
+            att.resultText.resizeTextMaxSize = 15;
+            var action = NroButton("Action", panel, 0, 0, 150, 66, "", 19, true);
+            var ar = action.GetComponent<RectTransform>();
+            ar.anchorMin = ar.anchorMax = new Vector2(0.5f, 0f);
+            ar.pivot = new Vector2(0.5f, 0f);
+            ar.anchoredPosition = new Vector2(0f, G(15) + 8f);
+            ar.sizeDelta = new Vector2(150, 66);
+            var ac = action.colors;
+            ac.disabledColor = new Color(0.6f, 0.6f, 0.6f, 1f);
+            action.colors = ac;
+            att.actionButton = action;
+            att.actionLabel = action.GetComponentInChildren<Text>();
+            panelGo.SetActive(false);
+            return att;
+        }
+
+        /// <summary>
+        /// The list of quests of Ông Gôhan (docs 15.32): the frame of the NPC panels (his portrait and the count at the top, the money strip with the skill cards at the bottom), a title tab,
+        /// a scrolling list (the rows are made at run time by BbQuestPanel), the result of a claim and a button that takes every finished reward.
+        /// </summary>
+        static BbQuestPanel BuildQuest(Transform canvasRoot, BbMenuUi ui)
+        {
+            var panelGo = new GameObject("QuestPanel", typeof(RectTransform), typeof(Image), typeof(BbQuestPanel));
+            panelGo.transform.SetParent(canvasRoot, false);
+            var rect = Rect(panelGo);
+            rect.anchorMin = new Vector2(0f, 0f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.sizeDelta = new Vector2(PW, 0f);
+            rect.anchoredPosition = new Vector2(-PW, 0f);
+            var bg = panelGo.GetComponent<Image>();
+            bg.sprite = Sprite("white");
+            bg.color = NroPanel;
+            var panel = panelGo.transform;
+            var q = panelGo.GetComponent<BbQuestPanel>();
+            q.root = panelGo;
+            q.panelRect = rect;
+            q.menu = ui;
+            q.font = BuiltinFont;
+            q.rowSprite = Sprite("white");
+            q.buttonSprite = Sprite("nro_btn_green");
+            var edge = Image("Edge", panel, "white", false);
+            edge.rectTransform.anchorMin = new Vector2(1f, 0f);
+            edge.rectTransform.anchorMax = new Vector2(1f, 1f);
+            edge.rectTransform.pivot = new Vector2(1f, 0.5f);
+            edge.rectTransform.sizeDelta = new Vector2(2f, 0f);
+            edge.rectTransform.anchoredPosition = Vector2.zero;
+            edge.color = NroEdge;
+            edge.raycastTarget = false;
+
+            Flat("HeaderBg", panel, 0, 0, PW, G(50), NroHeader);
+            var footerGo = new GameObject("Footer", typeof(RectTransform));
+            footerGo.transform.SetParent(panel, false);
+            var footerRect = Rect(footerGo);
+            footerRect.anchorMin = new Vector2(0f, 0f);
+            footerRect.anchorMax = new Vector2(1f, 0f);
+            footerRect.pivot = new Vector2(0.5f, 0f);
+            footerRect.sizeDelta = new Vector2(0f, G(15));
+            footerRect.anchoredPosition = Vector2.zero;
+            Stretch(Flat("FooterBg", footerGo.transform, 0, 0, PW, G(15), NroBag).rectTransform, 0, 0);
+            Flat("FooterLine", footerGo.transform, 0, 0, PW, 2, NroLine);
+            var goldIcon = Image("GoldIcon", footerGo.transform, "nro_gold", false);
+            TopLeft(goldIcon.rectTransform, 6, 6, 24, 18);
+            goldIcon.preserveAspect = true;
+            goldIcon.raycastTarget = false;
+            q.goldText = Label("GoldText", footerGo.transform, "0", 14, StatYellow, Vector2.zero, Vector2.zero, true);
+            TopLeft(q.goldText.rectTransform, 32, 2, 96, G(15) - 2);
+            q.goldText.alignment = TextAnchor.MiddleLeft;
+            AddOutline(q.goldText.gameObject, 1f);
+            var gemIcon = Image("GemIcon", footerGo.transform, "nro_gem", false);
+            TopLeft(gemIcon.rectTransform, 128, 6, 22, 18);
+            gemIcon.preserveAspect = true;
+            gemIcon.raycastTarget = false;
+            q.gemText = Label("GemText", footerGo.transform, "0", 14, StatYellow, Vector2.zero, Vector2.zero, true);
+            TopLeft(q.gemText.rectTransform, 152, 2, 80, G(15) - 2);
+            q.gemText.alignment = TextAnchor.MiddleLeft;
+            AddOutline(q.gemText.gameObject, 1f);
+            q.cardText = Label("CardText", footerGo.transform, "Thẻ: 0", 14, new Color(0.62f, 0.9f, 1f), Vector2.zero, Vector2.zero, true);
+            TopLeft(q.cardText.rectTransform, 232, 2, 86, G(15) - 2);
+            q.cardText.alignment = TextAnchor.MiddleLeft;
+            AddOutline(q.cardText.gameObject, 1f);
+
+            q.portrait = Image("Portrait", panel, "white", false);
+            TopLeft(q.portrait.rectTransform, 2, 2, G(50) - 4, G(50) - 4);
+            q.portrait.preserveAspect = true;
+            q.portrait.raycastTarget = false;
+            q.headerText = Label("HeaderText", panel, "", 16, StatYellow, Vector2.zero, Vector2.zero, false);
+            TopLeft(q.headerText.rectTransform, G(60), 3, PW - G(60) - G(17) - 8, G(50) - 5);
+            q.headerText.alignment = TextAnchor.MiddleLeft;
+            q.headerText.lineSpacing = 1.1f;
+            q.headerText.resizeTextForBestFit = true;
+            q.headerText.resizeTextMinSize = 11;
+            q.headerText.resizeTextMaxSize = 16;
+            q.headerText.verticalOverflow = VerticalWrapMode.Truncate;
+            AddOutline(q.headerText.gameObject, 1f);
+            var close = Image("Close", panel, "nro_close", false);
+            TopLeft(close.rectTransform, PW - G(17) - 4, 4, G(17), G(17));
+            q.closeButton = close.gameObject.AddComponent<Button>();
+            q.closeButton.targetGraphic = BigTouchArea(close);
+
+            float tabY = G(50) + 4f;
+            var tab = Image("Title", panel, "nro_tab_on", true);
+            TopLeft(tab.rectTransform, 4, tabY, 150, G(25));
+            q.titleText = Label("Text", tab.transform, "", 17, new Color(0.45f, 0.18f, 0.05f), Vector2.zero, Vector2.zero, true);
+            Stretch(Rect(q.titleText.gameObject), 1, 1);
+            Flat("TabLine", panel, 2, tabY + G(25) + 1, PW - 4, 2, NroLine);
+
+            // the list: rows are added to Content by BbQuestPanel
+            float bottomZone = G(15) + 8f + 56f + 6f + 40f;
+            var scrollGo = new GameObject("Scroll", typeof(RectTransform), typeof(Image), typeof(ScrollRect));
+            scrollGo.transform.SetParent(panel, false);
+            var sr = scrollGo.GetComponent<RectTransform>();
+            sr.anchorMin = Vector2.zero;
+            sr.anchorMax = Vector2.one;
+            sr.offsetMin = new Vector2(2f, bottomZone);
+            sr.offsetMax = new Vector2(-2f, -(tabY + G(25) + 5f));
+            scrollGo.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
+            var viewport = new GameObject("Viewport", typeof(RectTransform), typeof(RectMask2D));
+            viewport.transform.SetParent(scrollGo.transform, false);
+            Stretch(Rect(viewport), 0, 0);
+            var content = new GameObject("Content", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+            content.transform.SetParent(viewport.transform, false);
+            var cr = Rect(content);
+            cr.anchorMin = new Vector2(0f, 1f);
+            cr.anchorMax = new Vector2(1f, 1f);
+            cr.pivot = new Vector2(0.5f, 1f);
+            cr.anchoredPosition = Vector2.zero;
+            cr.sizeDelta = Vector2.zero;
+            var layout = content.GetComponent<VerticalLayoutGroup>();
+            layout.spacing = 3;
+            layout.childControlHeight = true;
+            layout.childControlWidth = true;
+            layout.childForceExpandHeight = false;
+            layout.childForceExpandWidth = true;
+            content.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            var scroll = scrollGo.GetComponent<ScrollRect>();
+            scroll.viewport = Rect(viewport);
+            scroll.content = cr;
+            scroll.horizontal = false;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 30f;
+            q.scroll = scroll;
+            q.content = cr;
+
+            q.resultText = PlacedText("Result", panel, "", 15, Dark, 10, 0, PW - 20, 40, TextAnchor.MiddleCenter);
+            var rr = q.resultText.rectTransform;
+            rr.anchorMin = rr.anchorMax = new Vector2(0.5f, 0f);
+            rr.pivot = new Vector2(0.5f, 0f);
+            rr.anchoredPosition = new Vector2(0f, G(15) + 8f + 56f + 4f);
+            rr.sizeDelta = new Vector2(PW - 20, 40);
+            q.resultText.resizeTextForBestFit = true;
+            q.resultText.resizeTextMinSize = 11;
+            q.resultText.resizeTextMaxSize = 15;
+            var action = NroButton("ClaimAll", panel, 0, 0, 170, 56, "", 18, true);
+            var ar = action.GetComponent<RectTransform>();
+            ar.anchorMin = ar.anchorMax = new Vector2(0.5f, 0f);
+            ar.pivot = new Vector2(0.5f, 0f);
+            ar.anchoredPosition = new Vector2(0f, G(15) + 8f);
+            ar.sizeDelta = new Vector2(170, 56);
+            var ac = action.colors;
+            ac.disabledColor = new Color(0.6f, 0.6f, 0.6f, 1f);
+            action.colors = ac;
+            q.claimAllButton = action;
+            q.claimAllLabel = action.GetComponentInChildren<Text>();
+            panelGo.SetActive(false);
+            return q;
         }
 
         /// <summary>The Chức năng tab as the tool list of Nro (paintTools): full-width light rows with the name centred; the mail and notice lists, the account and the sprite scale.</summary>

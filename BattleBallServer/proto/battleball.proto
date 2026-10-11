@@ -77,11 +77,19 @@ message Envelope {
     ShopRequest shop_request = 65;           // an authenticated player taps the NPC; answered by ShopContent (or ActionResult NOT_FOUND for an NPC that sells nothing)
     ShopContent shop_content = 66;
     ShopBuyRequest shop_buy_request = 67;    // buys gear or a material in a shop (skins are bought with BuySkinRequest); answered by ActionResult, then a fresh PlayerDataSnapshot
+    // ---- the daily check-in of the village elder (docs 15.25) ----
+    AttendanceRequest attendance_request = 80;           // the table of the month: answered by AttendanceInfo
+    AttendanceInfo attendance_info = 81;
+    ClaimAttendanceRequest claim_attendance_request = 82;   // checks in for today: ActionResult (ALREADY_OWNED when it was done), then a fresh AttendanceInfo and PlayerDataSnapshot
+    // ---- the quests of Ong Gohan (docs 15.32): the list comes inside every PlayerDataSnapshot (PlayerDataSnapshot.quests) ----
+    ClaimQuestRequest claim_quest_request = 83;          // the reward of a finished quest (an empty id = every finished one); ActionResult, then a fresh PlayerDataSnapshot
     // ---- GEN (docs 15.21) ----
     RerollGenRequest reroll_gen_request = 68;           // a GEN stone changes one line of a piece to another random set of its planet; ActionResult, then a fresh PlayerDataSnapshot
     UnlockGenSlotRequest unlock_gen_slot_request = 69;  // GEN slot stones open one more line on a piece
     SwitchControlRequest switch_control_request = 70;   // in a match or a training session: the player controls another character of the squad (nothing is reset); answered by ControlSwitched
     ControlSwitched control_switched = 71;
+    StatStoneRequest stat_stone_request = 72;           // Ba Hat Mit, "Ep sao": a stat stone adds a stat line, raises one or changes its type; ActionResult (success = the chance-based raise worked), then a fresh PlayerDataSnapshot
+    CrystalizeRequest crystalize_request = 73;          // Ba Hat Mit, "Pha le hoa": a crystal stone makes (or makes again) the red line of a piece; ActionResult, then a fresh PlayerDataSnapshot
   }
 }
 
@@ -256,6 +264,12 @@ message StatLine {
   double value = 2;
   string source = 3;                // BASE, UPGRADE_STONE, STAT_STONE, CRYSTAL_STONE, GEN, BOOK
   string text = 4;                  // the line ready to show ("Sức đánh +100%"); only filled where the client shows it (the lines of a skin)
+  // the extra lines of a piece (source STAT_STONE or CRYSTAL_STONE, docs 15.27):
+  uint32 line_no = 5;               // 1 to 3 the stat lines, 4 the crystal (red) line; what StatStoneRequest names
+  double cap = 6;                   // the most this line can reach
+  double success_pct = 7;           // the chance that one more stat stone raises it; 0 when it is at its maximum
+  double step_min = 8;              // what one success adds: between these two (percent)
+  double step_max = 9;
 }
 
 message CharacterStats {            // final numbers computed by the server (the client only displays them)
@@ -287,6 +301,7 @@ message ItemInfo {                  // one gear piece (item_instance)
   repeated GenLine gens = 13;       // one entry per GEN slot of the piece, in order; an empty slot has gen_key ""
   uint32 gen_slots = 14;            // slots the piece has now (rules: initial plus the ones opened with stones)
   uint32 gen_unlock_cost = 15;      // GEN slot stones the next slot costs; 0 when no slot can be opened any more
+  uint32 stat_lines_max = 16;       // stat lines (not counting the crystal line) a piece may carry
 }
 
 message GenLine {
@@ -402,6 +417,19 @@ message PlayerDataSnapshot {
   repeated GenSetInfo gen_sets = 16;               // every GEN set with its steps (what a set does, for the popups)
   GenRulesInfo gen_rules = 17;
   repeated DungeonInfo dungeons = 18;            // every enabled dungeon that has bosses, for the list of the NPC Cui (docs 15.25)
+  repeated DifficultyInfo difficulties = 21;     // the difficulties a dungeon can be run at, easiest first (docs 15.33)
+  StatStoneRulesInfo stat_stone_rules = 19;      // what the stat stone and the crystal stone cost (docs 15.27)
+  repeated QuestEntry quests = 20;               // the quest being done of the chain, then the daily quests (docs 15.32); the arrow of the village points where `npc` says
+}
+
+message StatStoneRulesInfo {
+  uint32 add_stones = 1;            // stat stones for a new line
+  uint32 raise_stones = 2;          // ... to try to raise a line
+  uint32 retype_stones = 3;         // ... to change the type of a line
+  uint32 crystal_stones = 4;        // crystal stones for the red line
+  double crystal_start = 5;         // where the red line starts (%)
+  uint32 stat_stone_template_id = 6;
+  uint32 crystal_stone_template_id = 7;
 }
 
 message DungeonInfo {
@@ -411,6 +439,17 @@ message DungeonInfo {
   uint32 recommended_level = 4;     // the reference level of the tier (match_rules.tier_level)
   uint32 boss_count = 5;            // bosses met in one match
   uint32 time_limit_s = 6;          // 0 = none
+}
+
+// One difficulty of a dungeon (balance_config dungeon_difficulty): what it does to the monsters and to the reward.
+message DifficultyInfo {
+  string key = 1;                   // EASY, HARD or HELL
+  string name = 2;                  // Dễ, Khó, Địa ngục
+  double hp_mult = 3;               // multiplier of the HP of every monster and boss
+  double atk_mult = 4;              // multiplier of the damage of every monster and boss
+  double reward_mult = 5;           // multiplier of the gold and the EXP of the run
+  double drop_mult = 6;             // multiplier of the chance of every drop
+  string note = 7;                  // one line for the player
 }
 
 message SkillCatalogEntry {
@@ -430,6 +469,7 @@ message SkillLevelInfo {
   double damage_pct_atk = 3;        // 0 when the skill does not hit by % of attack
   uint32 cooldown_ms = 4;
   double ki_cost_pct = 5;           // % of the maximum Ki
+  uint32 card_cost = 7;             // skill cards (material 206) to reach this level, paid with the gold (0 = none; docs 15.32)
   uint32 range_px = 6;              // Nro px: how close to the target (centre to centre, a dummy's radius included) the skill is worth using; 0 = no target needed
 }
 
@@ -553,6 +593,10 @@ message UnequipItemRequest { uint64 character_id = 1; string slot = 2; }
 message SellItemsRequest { uint64 character_id = 1; repeated uint64 item_ids = 2; bool destroy = 3; }   // destroy = true: no gold
 message RerollGenRequest { uint64 character_id = 1; uint64 item_id = 2; uint32 line_no = 3; }   // costs gen_rules.reroll_stones GEN stones; the new set is random among the sets of the planet of the piece
 message UnlockGenSlotRequest { uint64 character_id = 1; uint64 item_id = 2; }                    // costs ItemInfo.gen_unlock_cost GEN slot stones
+// action: "ADD" (a new stat line of a random type, line_no ignored), "RAISE" (line_no 1 to 3 the stat lines, 4 the crystal line: chance-based, the stone is spent either way),
+// "RETYPE" (the stat line line_no gets another random type). Each costs the stones of balance_config stat_stone_rules.
+message StatStoneRequest { uint64 character_id = 1; uint64 item_id = 2; string action = 3; uint32 line_no = 4; }
+message CrystalizeRequest { uint64 character_id = 1; uint64 item_id = 2; }                       // one crystal stone: a red line of a random type at its starting value (again: another type, back to the start)
 message UpgradeItemRequest { uint64 character_id = 1; uint64 item_id = 2; }              // one upgrade stone: +5% of the base stat (max 75%)
 message BuySupportRequest { uint64 character_id = 1; uint32 support_id = 2; }            // gems
 message EquipSupportRequest { uint64 character_id = 1; uint64 instance_id = 2; }
@@ -576,6 +620,7 @@ message StartMatchRequest {
   uint32 dungeon_id = 1;
   uint64 controlled_character_id = 2;   // the character the player moves; the other two are AI
   uint64 fusion_partner_id = 3;         // 0 = no fusion; otherwise the secondary of a Potara fusion (both level 50 or more, earring owned)
+  string difficulty = 4;                // a key of PlayerDataSnapshot.difficulties (EASY, HARD, HELL); empty = the default one (docs 15.33)
 }
 
 message Arena {
@@ -623,6 +668,7 @@ message MatchStarted {
   uint32 boss_count = 10;           // real bosses in this match
   repeated SkillSlot skills = 11;   // skills of the controlled character, by slot
   bool training = 12;               // a training session of the village: no time limit, no reward, nothing recorded; ends with MatchEnded ABANDONED
+  string difficulty = 13;           // the difficulty of this dungeon run (a key of PlayerDataSnapshot.difficulties); empty in training
 }
 
 // Starts a training session in the starter village: the squad of the account against the training dummies (balance_config training).
@@ -675,6 +721,7 @@ enum Effect {
   WAVE = 17;                        // dungeon: a wave of small monsters comes (skill_id = number of the wave, length = number of waves of the stage, width = monsters in it)
   BOSS_COMING = 18;                 // dungeon: the last monster of the stage fell, the boss comes (target_id = the boss, x, y = where it stands)
   SUMMON = 19;                      // dungeon: a boss calls a small monster (source_id = the boss, target_id = the monster, x, y)
+  BOSS_EVOLVE = 21;                 // dungeon: a boss turned into its next form (target_id = the boss, skill_id = the form now, 1 based, length = how many forms; the new look comes as an EntitySpawn of the same id)
   DIED = 20;                        // an entity died (target_id = who, source_id = what killed it, x, y = where; dir = the way the blow came)
 }
 
@@ -839,4 +886,50 @@ message MatchResumed {
   bool ok = 1;
   MatchStarted match = 2;           // the full picture again (entities with their current state)
   string error = 3;
+}
+
+// ---- the daily check-in (docs 15.25) ----
+// A quest of Ong Gohan (docs 15.32). TUTORIAL: a chain done once, only the one being done is sent; DAILY: restart at 00:00 in Vietnam.
+message QuestEntry {
+  string id = 1;
+  string kind = 2;                  // TUTORIAL or DAILY
+  string title = 3;
+  string description = 4;           // what to do
+  string type = 5;                  // what is counted (ATTENDANCE, UPGRADE_SKILL, GET_GEAR, EQUIP_ITEM, UPGRADE_ITEM, GEN_REROLL, TRAINING, DUNGEON_WIN, BOSS_KILL, LEVEL, BUY_SHARDS, OWN_EARRING)
+  uint32 progress = 6;              // never above target
+  uint32 target = 7;
+  string npc_id = 8;                // the NPC to go to (the id of the map; empty = none, it is done from the panel): the arrow of the village points to it
+  uint64 gold = 9;                  // the reward, already worked out for the level of the account
+  uint32 gems = 10;
+  repeated RewardItem items = 11;   // the skill cards and the stones
+  bool claimed = 12;
+}
+message ClaimQuestRequest { string quest_id = 1; }
+
+message AttendanceRequest {}
+message ClaimAttendanceRequest {}
+
+message RewardItem {
+  uint32 template_id = 1;           // material_template id
+  string name = 2;                  // "Đá nâng cấp"
+  uint32 icon_id = 3;               // Nro small image
+  uint64 quantity = 4;
+}
+
+message AttendanceDay {
+  uint32 day = 1;                   // day of the month
+  uint64 gold = 2;                  // what the day gives (the gold follows the level of the highest character)
+  uint64 gems = 3;
+  repeated RewardItem items = 4;    // free items of the day
+  bool claimed = 5;
+}
+
+message AttendanceInfo {
+  uint32 year = 1;
+  uint32 month = 2;
+  uint32 today = 3;                 // day of the month in Vietnam time (the day changes at 00:00 UTC+7)
+  uint32 days_in_month = 4;
+  repeated AttendanceDay days = 5;  // every day of the month, in order
+  bool claimed_today = 6;
+  uint32 claimed_count = 7;         // days claimed this month
 }

@@ -346,6 +346,105 @@ namespace BattleBall.Net
             Shoot("gen_worn");
         }
 
+        /// <summary>The daily check-in of the elder with the real server (docs 15.25): his dialog, the claim, the table of the month, a second claim refused.</summary>
+        async Task AttendRun(BbMenuUi menu, BbVillageView village, BbClient client)
+        {
+            NpcSpec elder = null;
+            foreach (var n in village.Map.Npcs) if (n.Id == "elder") elder = n;
+            if (elder == null) { Log("FAILED: no elder in the village map"); return; }
+            Log("elder: action " + elder.Action + ", x " + elder.X);
+            menu.SetPanelOpen(false, true);
+            village.TeleportMain(elder.X - 80f);
+            await Wait(1.2f);
+            ulong goldBefore = client.Snapshot.Gold, gemsBefore = client.Snapshot.Gems;
+            menu.DemoNpc(village.Map.Npcs.IndexOf(elder));
+            await WaitFor(() => menu.popup.IsOpen, 8f);
+            await Wait(0.6f);
+            Log("his dialog is open: " + menu.popup.IsOpen);
+            Shoot("attend_dialog");
+            menu.popup.buttons[0].onClick.Invoke();                                      // "Điểm danh": the table opens and checks in
+            await WaitFor(() => menu.attendance.IsOpen && menu.attendance.DebugClaimed, 10f);
+            await Wait(1.0f);
+            Log("table open: " + menu.attendance.IsOpen + ", result: " + menu.attendance.DebugResult.Replace("\n", " | "));
+            Log("gold " + goldBefore + " -> " + client.Snapshot.Gold + ", gems " + gemsBefore + " -> " + client.Snapshot.Gems);
+            Shoot("attend_table");
+            menu.attendance.DebugClaim();
+            await Wait(0.6f);
+            menu.attendance.Close();
+            await Wait(0.8f);
+            menu.DemoNpc(village.Map.Npcs.IndexOf(elder));
+            await WaitFor(() => menu.popup.IsOpen, 8f);
+            await Wait(0.6f);
+            Log("second visit: button 1 enabled " + menu.popup.buttons[0].interactable);
+            Shoot("attend_again");
+        }
+
+        /// <summary>
+        /// The quests of Ông Gôhan with the real server (docs 15.32): the first quest and where the arrow points, the arrow at the edge of the screen, a finished quest (the arrow goes back to
+        /// Gôhan), his dialog, the reward, and the skill cards that learning a skill takes.
+        /// </summary>
+        async Task QuestRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            menu.SetPanelOpen(false, true);
+            NpcSpec gohan = village.NpcOfId("gohan"), elder = village.NpcOfId("elder");
+            if (gohan == null || elder == null) { Log("FAILED: no Gôhan or elder in the map"); return; }
+            Log("gohan: action " + gohan.Action + ", x " + gohan.X + "; quests " + client.Snapshot.Quests.Count);
+            foreach (var q in client.Snapshot.Quests) Log("quest " + q.Id + " " + q.Kind + " " + q.Progress + "/" + q.Target + " npc '" + q.NpcId + "' reward " + BbQuestPanel.RewardText(q));
+            var active = menu.ActiveQuest();
+            Log("active quest " + (active != null ? active.Id : "none") + ", tracked " + menu.TrackedQuestId);
+            village.TeleportMain(gohan.X - 150f);
+            await Wait(1.4f);
+            Log("arrow points to " + menu.DebugGuideNpc + " (the elder is in view)");
+            Log("view width " + village.ViewWidth + ", canvas width " + ((RectTransform)menu.transform).rect.width);
+            Shoot("quest_arrow_world");
+            menu.TrackQuest("d02");                                                     // the dungeon NPC Cui is off the screen: the arrow goes to the edge
+            await Wait(0.8f);
+            Log("tracked d02: arrow points to " + menu.DebugGuideNpc);
+            Shoot("quest_arrow_edge");
+            menu.TrackQuest("d02");                                                     // back to the automatic choice
+            ulong goldBefore = client.Snapshot.Gold, gemsBefore = client.Snapshot.Gems;
+            var check = await client.ClaimAttendanceAsync();                            // the first quest: check in at the elder
+            Log("check-in ok " + check.Ok);
+            await WaitFor(() => { var a = menu.ActiveQuest(); return a != null && a.Id == "t01" && a.Progress >= a.Target; }, 8f);
+            await Wait(0.8f);
+            Log("quest t01 finished: arrow points to " + menu.DebugGuideNpc + ", tracker: " + (menu.questTrackerText != null ? menu.questTrackerText.text.Replace("\n", " | ") : ""));
+            Shoot("quest_back_to_gohan");
+            menu.DemoNpc(village.Map.Npcs.IndexOf(gohan));
+            await WaitFor(() => menu.popup.IsOpen, 8f);
+            await Wait(0.6f);
+            Log("his dialog is open: " + menu.popup.IsOpen + ", button 1 enabled " + menu.popup.buttons[0].interactable);
+            Shoot("quest_dialog");
+            menu.popup.buttons[0].onClick.Invoke();                                     // take the reward of everything finished
+            await WaitFor(() => menu.quest.IsOpen && menu.quest.DebugResult.Length > 0, 10f);
+            await Wait(1.0f);
+            Log("list open: " + menu.quest.IsOpen + ", rows " + menu.quest.DebugRows + ", result: " + menu.quest.DebugResult.Replace("\n", " | "));
+            Log("gold " + goldBefore + " -> " + client.Snapshot.Gold + ", gems " + gemsBefore + " -> " + client.Snapshot.Gems + ", cards " + BbQuestPanel.CardsOf(client.Snapshot));
+            Shoot("quest_list");
+            menu.quest.Close();
+            await Wait(0.8f);
+            active = menu.ActiveQuest();
+            Log("next quest " + (active != null ? active.Id + " " + active.Title : "none") + ", arrow points to '" + menu.DebugGuideNpc + "'");
+            // learning a skill takes the cards: Kamejoko (the second skill of the list) costs 2 cards a level
+            ulong earth = 0;
+            foreach (var c in client.Snapshot.Characters) if (c.Race == "EARTH") earth = c.CharacterId;
+            ulong cardsBefore = BbQuestPanel.CardsOf(client.Snapshot);
+            var learn = await client.UpgradeSkillAsync(earth, 1);
+            await Wait(0.8f);
+            Log("learn Kamejoko: ok " + learn.Ok + " (" + learn.Error + "), cards " + cardsBefore + " -> " + BbQuestPanel.CardsOf(client.Snapshot));
+            var learnAgain = await client.UpgradeSkillAsync(earth, 24);                 // the ultimate costs 9 cards a level and only 3 are left
+            Log("learn the ultimate without enough cards: ok " + learnAgain.Ok + " (" + learnAgain.Error + ")");
+            await WaitFor(() => { var a = menu.ActiveQuest(); return a != null && a.Id == "t02" && a.Progress >= a.Target; }, 8f);
+            Log("quest t02 (learn a skill) finished: " + (menu.ActiveQuest() != null && menu.ActiveQuest().Progress >= menu.ActiveQuest().Target));
+            // the daily quest "tập đánh Mộc nhân" counts the first blow on a dummy of a training session
+            village.TeleportMain(village.NpcOfId("moc_nhan").X - 100f);
+            await Wait(1.2f);
+            training.Focus("moc_nhan");
+            await Wait(0.3f);
+            training.DebugFist();
+            bool trained = await WaitFor(() => { foreach (var q in client.Snapshot.Quests) if (q.Id == "d04" && q.Progress >= 1) return true; return false; }, 20f);
+            Log("quest d04 (hit the dummy) counted by the server: " + trained);
+        }
+
         /// <summary>Pictures of the places that were added to the village (owner request 2026-10-11): the capsule behind Bunma, Cui in front of the two ships, the end of the map.</summary>
         async Task SightsRun(BbMenuUi menu, BbVillageView village)
         {
@@ -774,6 +873,74 @@ namespace BattleBall.Net
             Shoot("dg_back");
         }
 
+        /// <summary>
+        /// The evolving ape boss of dungeon 3 (docs 15.30) with the real server: the waves, then the boss; the charge (banner "gồng", the glow) and the evolution are photographed.
+        /// The run script lowers the waves and the HP of the bosses by SQL so that this takes a minute (the server must be restarted after that).
+        /// </summary>
+        async Task DungeonApeRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            menu.DebugOpenDungeonList();
+            await Wait(0.5f);
+            menu.dungeonPicker.DemoSelect(3);
+            await Wait(0.2f);
+            menu.dungeonPicker.DemoEnter();
+            bool arena = await WaitFor(() => village.InArena && training.InDungeon && !menu.transport.IsPlaying, 25f);
+            Log("in the arena: " + arena + "; " + menu.DebugDungeon());
+            if (!arena) return;
+            training.DebugFist();
+            int charges = 0, evolutions = 0;
+            string last = "";
+            for (int i = 0; i < 400 && menu.DebugDungeon().Contains("InDungeon"); i++)
+            {
+                await Wait(0.5f);
+                string banner = training.DebugBanner.Replace("\n", " ");
+                if (banner != last && banner.Length > 0)
+                {
+                    last = banner;
+                    Log("t=" + (i / 2f) + "s banner '" + banner + "'; focus " + (training.FocusKey ?? "none") + "; " + Party(training, village));
+                    if (banner.Contains("gồng")) { charges++; await Wait(1.0f); Shoot("ape_charge_" + charges); }
+                    else if (banner.Contains("(") && banner.Contains("/")) { evolutions++; await Wait(1.2f); Shoot("ape_evolve_" + evolutions); }
+                    else if (banner.StartsWith("BOSS")) { await Wait(1.5f); Shoot("ape_boss"); }
+                }
+                if (evolutions >= 2) break;
+            }
+            Log("charges " + charges + ", evolutions " + evolutions);
+            menu.DebugLeaveDungeon();
+            await WaitFor(() => menu.popup.IsOpen, 10f);
+            menu.popup.buttons[0].onClick.Invoke();
+            await WaitFor(() => !menu.InDungeon, 15f);
+            Log("back: " + menu.DebugDungeon());
+        }
+
+        /// <summary>
+        /// The difficulty of a dungeon (docs 15.33) with the real server: the list of Cui shows Dễ / Khó / Địa ngục, the chosen one is lit; the run starts at the one chosen
+        /// (the server says which one in MatchStarted) and every skill is ready.
+        /// </summary>
+        async Task DungeonLevelsRun(BbMenuUi menu, BbTraining training, BbVillageView village)
+        {
+            menu.DebugOpenDungeonList();
+            await Wait(0.5f);
+            menu.dungeonPicker.DemoSelect(12);
+            await Wait(0.3f);
+            Shoot("levels_default");
+            menu.dungeonPicker.DemoDifficulty(2);
+            await Wait(0.3f);
+            Shoot("levels_hell");
+            menu.dungeonPicker.DemoDifficulty(1);
+            await Wait(0.3f);
+            Shoot("levels_hard");
+            menu.dungeonPicker.DemoEnter();
+            bool arena = await WaitFor(() => village.InArena && training.InDungeon && !menu.transport.IsPlaying, 25f);
+            Log("in the arena: " + arena + "; difficulty " + menu.DebugDifficulty + "; " + menu.DebugDungeon());
+            await Wait(2f);
+            Shoot("levels_arena");
+            menu.DebugLeaveDungeon();
+            await WaitFor(() => menu.popup.IsOpen, 10f);
+            menu.popup.buttons[0].onClick.Invoke();
+            await WaitFor(() => !menu.InDungeon, 15f);
+            Log("back: " + menu.DebugDungeon());
+        }
+
         /// <summary>The panel of Bà Hạt Mít with the real server: the piece and the stone are put in, the button runs the request (docs 15.22).</summary>
         async Task SmithRun(BbMenuUi menu, BbVillageView village, BbClient client)
         {
@@ -819,6 +986,99 @@ namespace BattleBall.Net
                 await Wait(0.8f);
                 piece = menu.ItemById(piece.ItemId) ?? piece;
             }
+        }
+
+        /// <summary>
+        /// Ép sao and Pha lê hóa of Bà Hạt Mít with the real server (docs 15.27). The account needs a piece in the bag, stat stones (202) and crystal stones (203): the run script gives
+        /// them by SQL before it lets the scenario go.
+        /// </summary>
+        async Task SmithStarRun(BbMenuUi menu, BbVillageView village, BbClient client)
+        {
+            menu.DemoSelect(0);
+            await Wait(1.0f);
+            menu.DebugToggleGear();
+            await WaitFor(() => menu.DebugGearLoaded, 8f);
+            await Wait(0.6f);
+            var piece = menu.DebugFirstGearOfOpenPlanet();
+            if (piece == null) { Log("FAILED: no piece for the Earth character in the bag"); return; }
+            var smith = menu.smith;
+            MaterialAmount Stone(string kind) { foreach (var m in client.Snapshot.Materials) if (m.Kind == kind) return m; return null; }
+            string Lines(ItemInfo it) { var sb = new System.Text.StringBuilder(); foreach (var l in it.Lines) sb.Append(l.LineNo).Append('=').Append(l.StatKey).Append(' ').Append(l.Value).Append('/').Append(l.Cap).Append(' ').Append(l.SuccessPct).Append("% ").Append(l.Source).Append("; "); return sb.ToString(); }
+            menu.DemoSmithMenu();
+            await Wait(0.8f);
+            Shoot("star_menu");
+            menu.popup.Hide();
+            menu.DemoSmith(BbSmithPanel.Mode.Star);
+            await Wait(0.6f);
+            smith.PutItem(piece);
+            smith.PutStone(Stone("STAT_STONE"));
+            await Wait(0.3f);
+            Log("star, empty: rows " + smith.DebugRows + "can press " + smith.DebugCanPress + ", alt " + smith.DebugAltVisible + ", info: " + smith.DebugInfo.Replace("\n", " / "));
+            Shoot("star_empty");
+            for (int row = 0; row < 3; row++)
+            {
+                smith.DebugLine(row);
+                await Wait(0.2f);
+                smith.DebugPress();
+                await Wait(1.2f);
+                piece = menu.ItemById(piece.ItemId) ?? piece;
+                Log("added a line (row " + row + "): " + Lines(piece) + " result \"" + smith.DebugResult + "\"");
+            }
+            ulong earthId = 0;
+            foreach (var ch in client.Snapshot.Characters) if (ch.Race == "EARTH") earthId = ch.CharacterId;
+            var worn = await client.EquipItemAsync(earthId, piece.ItemId);                          // worn, so that the preview shows the stat of the character too
+            Log("worn: " + worn.Ok);
+            await Wait(1.5f);
+            piece = menu.ItemById(piece.ItemId) ?? piece;
+            smith.DebugLine(0);
+            await Wait(0.3f);
+            Log("a filled line: rows " + smith.DebugRows + "alt " + smith.DebugAltVisible + ", info: " + smith.DebugInfo.Replace("\n", " / "));
+            Shoot("star_lines");
+            for (int i = 0; i < 4; i++)
+            {
+                smith.DebugPress();
+                await Wait(1.2f);
+                piece = menu.ItemById(piece.ItemId) ?? piece;
+                Log("raise " + i + ": " + Lines(piece) + " result \"" + smith.DebugResult + "\"");
+            }
+            smith.DebugAlt();
+            await Wait(1.2f);
+            piece = menu.ItemById(piece.ItemId) ?? piece;
+            Log("retype: " + Lines(piece) + " result \"" + smith.DebugResult + "\"");
+            Shoot("star_retype");
+            smith.Close();
+            await Wait(0.8f);
+            menu.DemoSmith(BbSmithPanel.Mode.Crystal);
+            await Wait(0.6f);
+            smith.PutItem(piece);
+            smith.PutStone(Stone("CRYSTAL_STONE"));
+            await Wait(0.3f);
+            Log("crystal: can press " + smith.DebugCanPress + ", info: " + smith.DebugInfo.Replace("\n", " / "));
+            Shoot("crystal_ready");
+            smith.DebugPress();
+            await Wait(1.5f);
+            piece = menu.ItemById(piece.ItemId) ?? piece;
+            Log("crystallised: " + Lines(piece) + " result \"" + smith.DebugResult + "\"");
+            Shoot("crystal_done");
+            smith.Close();
+            await Wait(0.8f);
+            menu.DemoSmith(BbSmithPanel.Mode.Star);
+            await Wait(0.6f);
+            smith.PutItem(piece);
+            smith.PutStone(Stone("STAT_STONE"));
+            smith.DebugLine(3);
+            await Wait(0.3f);
+            Log("the red line: rows " + smith.DebugRows + "alt " + smith.DebugAltVisible + ", info: " + smith.DebugInfo.Replace("\n", " / "));
+            smith.DebugPress();
+            await Wait(1.2f);
+            piece = menu.ItemById(piece.ItemId) ?? piece;
+            Log("the red line raised: " + Lines(piece) + " result \"" + smith.DebugResult + "\"");
+            Shoot("star_red");
+            smith.Close();
+            await Wait(0.6f);
+            menu.DebugShowGearPopup(piece);
+            await Wait(0.5f);
+            Shoot("star_popup");
         }
 
         static ulong StoneCount(BbClient client, uint template)
@@ -967,6 +1227,31 @@ namespace BattleBall.Net
             training.DebugUse(0);
             training.DebugUse(0);
             await Observe("order", 4.0f, village, 0.2f, 0.5f, 0.8f, 1.2f, 1.8f);
+        }
+
+        /// <summary>Khiên năng lượng (owner remark 2026-10-11: "thiếu hoạt ảnh"): the bubble of Nro (Effect 33) follows the character for as long as the shield lasts, also while it walks.</summary>
+        async Task ShieldRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            await Learn(client, "EARTH", 19);
+            menu.DemoSelect(0);
+            await Wait(2.5f);
+            village.TeleportMain(1800f);
+            await WaitFor(() => training.Active, 10f);
+            training.Focus("moc_nhan");
+            await Wait(1.0f);
+            Shoot("shield_before");
+            training.DebugUse(19);
+            float[] at = { 0.3f, 0.5f, 0.7f, 1.0f, 3.0f };
+            float last = 0f;
+            foreach (float t in at)
+            {
+                await Wait(t - last);
+                last = t;
+                Shoot("shield_" + (int)(t * 10));
+            }
+            Log("shield walking: " + Where(village));
+            await ObserveWalking("shield_walk", 1.5f, village, 0.4f, 1.0f);
+            Shoot("shield_end");
         }
 
         /// <summary>The fusion effects of the Nro client (owner request 2026-10-10): the character vanishes under the white blinking, the Potara effect rises, then the aura of the merged form.</summary>
@@ -1328,8 +1613,13 @@ namespace BattleBall.Net
             if (scenario == "gear") { await GearRun(menu, village); return; }
             if (scenario == "gen") { await GenRun(menu, village, client); return; }
             if (scenario == "smith") { await SmithRun(menu, village, client); return; }
+            if (scenario == "attend") { await AttendRun(menu, village, client); return; }
+            if (scenario == "quest") { await QuestRun(menu, training, village, client); return; }
+            if (scenario == "smithstar") { await SmithStarRun(menu, village, client); return; }
             if (scenario == "focus") { await FocusRun(menu, training, village); return; }
             if (scenario == "dungeon") { await DungeonRun(menu, training, village, client); return; }
+            if (scenario == "dungeonape") { await DungeonApeRun(menu, training, village, client); return; }
+            if (scenario == "dungeonlevels") { await DungeonLevelsRun(menu, training, village); return; }
             if (scenario == "dungeonfight") { await DungeonFightRun(menu, training, village, client); return; }
             if (scenario == "dungeonfusion") { await DungeonFusionRun(menu, training, village, client); return; }
             if (scenario == "trainswitch") { await TrainSwitchRun(menu, training, village); return; }
@@ -1342,6 +1632,7 @@ namespace BattleBall.Net
             if (scenario == "beams") { await Beams(menu, training, village); return; }
             if (scenario == "gong") { await Gong(menu, training, village, client); return; }
             if (scenario == "order") { await Order(menu, training, village, client); return; }
+            if (scenario == "shield") { await ShieldRun(menu, training, village, client); return; }
             if (scenario == "fusionfx") { await FusionFxRun(menu, village); return; }
             if (scenario == "ultvar") { await UltVariants(menu, training, village, client); return; }
             if (scenario == "autoult") { await AutoUlt(menu, training, village, client); return; }

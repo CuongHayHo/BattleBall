@@ -176,6 +176,25 @@ public final class MatchManager implements AutoCloseable {
                 reply(channel, requestId, ActionError.INVALID_ARGUMENT, "a match is already running");
                 return;
             }
+            r.engine.onFirstDummyHit(() -> {                      // the quest "tập đánh Mộc nhân" (docs 15.32); the engine thread only hands the work over
+                Runnable count = () -> {
+                    try {
+                        if (playerActions.recordQuest(accountId, "TRAINING", 1)) {
+                            Channel ch = r.channel;
+                            if (ch != null && ch.isActive()) {
+                                ch.writeAndFlush(playerActions.snapshotEnvelope(accountId, 0));
+                            }
+                        }
+                    } catch (SQLException | RuntimeException e) {
+                        LOG.warn("cannot tell the client about the training quest", e);
+                    }
+                };
+                try {
+                    dbExecutor.execute(count);
+                } catch (RuntimeException e) {
+                    LOG.warn("cannot count the training quest", e);
+                }
+            });
             channel.writeAndFlush(Envelope.newBuilder().setRequestId(requestId).setMatchStarted(MatchStarter.toProto(s, r.engine, true)).build());
             r.task = pool.scheduleAtFixedRate(() -> tick(r), periodMicros, periodMicros, TimeUnit.MICROSECONDS);
         } catch (MatchStarter.StartException e) {
@@ -313,6 +332,9 @@ public final class MatchManager implements AutoCloseable {
     // ---------------------------------------------------------------------------------------------------------------- the tick
 
     private void tick(Running r) {
+        if (r.settling) {
+            return;                 // the match is over and settled (or being settled): a tick that was already queued must not send one more frame with the same tick number
+        }
         try {
             if (r.pausedAtMs != 0) {
                 long maxMs = (long) (Json.num(r.started.data().balanceObj("match_rules"), "pause_max_s", 30) * 1000);
@@ -362,6 +384,12 @@ public final class MatchManager implements AutoCloseable {
         Runnable work = () -> {
             try {
                 MatchEnded ended = settlement.settle(r.started, out, random);
+                if (out.result() == com.battleball.proto.MatchResult.WON) {         // the quests of Ông Gôhan (docs 15.32)
+                    playerActions.recordQuest(r.started.accountId(), "DUNGEON_WIN", 1);
+                }
+                if (out.bossesDefeated() > 0) {
+                    playerActions.recordQuest(r.started.accountId(), "BOSS_KILL", out.bossesDefeated());
+                }
                 Channel ch = r.channel;
                 if (ch != null && ch.isActive()) {
                     ch.writeAndFlush(Envelope.newBuilder().setMatchEnded(ended).build());

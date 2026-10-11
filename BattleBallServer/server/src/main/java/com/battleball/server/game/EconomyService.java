@@ -394,7 +394,14 @@ public final class EconomyService {
             if (ch.gold() < next.goldCost()) {
                 return fail(ActionError.NOT_ENOUGH_GOLD, "not enough gold");
             }
+            if (next.cardCost() > 0 && materialQty(c, ch.accountId(), QuestService.SKILL_CARD) < next.cardCost()) {       // skill cards, given by the quests (docs 15.32)
+                return fail(ActionError.NOT_ENOUGH_MATERIAL, "not enough skill cards");
+            }
             spend(c, ch, "GOLD", next.goldCost(), "UPGRADE_SKILL", "skill:" + skillId + ":" + (current + 1));
+            if (next.cardCost() > 0) {
+                addMaterial(c, ch.accountId(), QuestService.SKILL_CARD, -next.cardCost());
+                itemLog(c, ch.id(), "UPGRADE", "MATERIAL", QuestService.SKILL_CARD, null, next.cardCost(), null);
+            }
             try (PreparedStatement ps = c.prepareStatement("INSERT INTO character_skill (character_id, skill_id, `level`) VALUES (?,?,?) "
                     + "ON DUPLICATE KEY UPDATE `level` = VALUES(`level`)")) {
                 ps.setLong(1, ch.id());
@@ -484,6 +491,7 @@ public final class EconomyService {
                     itemId = rs.getLong(1);
                 }
             }
+            ItemRolls.rollNew(c, d, random, itemId, t);
             itemLog(c, ch.id(), "BUY", "ITEM", itemTemplateId, itemId, 1, null);
             return ok(itemId, true);
         });
@@ -522,6 +530,7 @@ public final class EconomyService {
                     itemId = rs.getLong(1);
                 }
             }
+            ItemRolls.rollNew(c, d, random, itemId, t);
             itemLog(c, ch.id(), "ASSEMBLE", "ITEM", itemTemplateId, itemId, 1, null);
             return ok(itemId, true);
         });
@@ -651,6 +660,183 @@ public final class EconomyService {
                 ps.executeUpdate();
             }
             itemLog(c, ch.id(), "UPGRADE", "ITEM", it.templateId, itemId, 1, null);
+            return ok(itemId, true);
+        });
+    }
+
+    // ---- stat stone and crystal stone (docs 15.27) -----------------------------------------------------------------------------------
+
+    private static List<PlayerRepository.LineRow> itemLineRows(Connection c, long itemId) throws SQLException {
+        List<PlayerRepository.LineRow> out = new ArrayList<>();
+        try (PreparedStatement ps = c.prepareStatement("SELECT line_no, stat_key, `value`, source FROM item_stat_line WHERE item_id = ? ORDER BY line_no")) {
+            ps.setLong(1, itemId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new PlayerRepository.LineRow(rs.getInt(1), rs.getString(2), rs.getDouble(3), rs.getString(4)));
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void putLine(Connection c, long itemId, int lineNo, String key, double value, String source) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("INSERT INTO item_stat_line (item_id, line_no, stat_key, `value`, source) VALUES (?,?,?,?,?) "
+                + "ON DUPLICATE KEY UPDATE stat_key = VALUES(stat_key), `value` = VALUES(`value`), source = VALUES(source)")) {
+            ps.setLong(1, itemId);
+            ps.setInt(2, lineNo);
+            ps.setString(3, key);
+            ps.setDouble(4, value);
+            ps.setString(5, source);
+            ps.executeUpdate();
+        }
+    }
+
+    private static StaticData.Material stoneOfKind(StaticData d, String kind) {
+        return d.materials().values().stream().filter(m -> m.kind().equals(kind)).findFirst().orElse(null);
+    }
+
+    /** One step of a line: a random amount between the step bounds, in tenths of a percent. */
+    private double step(double min, double max) {
+        return Math.max(0.1, StatStones.round1(min + random.nextDouble() * (max - min)));
+    }
+
+    /**
+     * "Ép sao": a stat stone works on the stat lines of a piece. ADD makes a new line of a random type (never a type another stat line already has) at one step; RAISE raises
+     * a line by one step with the chance the line's fullness allows (the stone is spent either way); RETYPE gives a stat line another random type, keeping its value up to the
+     * new maximum. The crystal (red) line can be raised but not retyped. Costs and numbers: balance_config stat_stone_rules.
+     */
+    public ActionResult statStone(long accountId, long characterId, long itemId, String action, int lineNo) {
+        return tx(accountId, characterId, (c, d, ch) -> {
+            ItemRowLite it = lockItem(c, ch.accountId(), itemId);
+            if (it == null || d.items().get(it.templateId) == null) {
+                return fail(ActionError.NOT_FOUND, "item not found");
+            }
+            StatStones.Rules rules = StatStones.rules(d);
+            List<PlayerRepository.LineRow> statLines = new ArrayList<>();
+            PlayerRepository.LineRow target = null;
+            for (PlayerRepository.LineRow l : itemLineRows(c, itemId)) {
+                if (StatStones.STAT_SOURCE.equals(l.source())) {
+                    statLines.add(l);
+                }
+                if (l.lineNo() == lineNo) {
+                    target = l;
+                }
+            }
+            String act = action == null ? "" : action;
+            int cost;
+            switch (act) {
+                case "ADD" -> cost = rules.addStones();
+                case "RAISE" -> cost = rules.raiseStones();
+                case "RETYPE" -> cost = rules.retypeStones();
+                default -> {
+                    return fail(ActionError.INVALID_ARGUMENT, "unknown action");
+                }
+            }
+            // what the request names must make sense before a stone is spent
+            if (act.equals("ADD") && statLines.size() >= rules.maxLines()) {
+                return fail(ActionError.MAXED, "no free stat line");
+            }
+            if (!act.equals("ADD") && target == null) {
+                return fail(ActionError.INVALID_ARGUMENT, "no such line");
+            }
+            if (act.equals("RETYPE") && !StatStones.STAT_SOURCE.equals(target.source())) {
+                return fail(ActionError.INVALID_ARGUMENT, "the crystal line keeps its type");
+            }
+            double cap = target == null ? 0 : StatStones.cap(rules, target);
+            if (act.equals("RAISE") && target.value() + 1e-9 >= cap) {
+                return fail(ActionError.MAXED, "already at the maximum");
+            }
+            List<StatStones.Type> candidates = new ArrayList<>();
+            if (!act.equals("RAISE")) {
+                for (StatStones.Type t : rules.types()) {
+                    boolean used = false;
+                    for (PlayerRepository.LineRow l : statLines) {
+                        used |= l.key().equals(t.key());                // the same type on another line, or the line's own type (no change)
+                    }
+                    if (!used && d.statEnabled(t.key())) {
+                        candidates.add(t);
+                    }
+                }
+                if (candidates.isEmpty()) {
+                    return fail(ActionError.DISABLED, "no other type");
+                }
+            }
+            StaticData.Material stone = stoneOfKind(d, "STAT_STONE");
+            if (stone == null || materialQty(c, ch.accountId(), stone.id()) < cost) {
+                return fail(ActionError.NOT_ENOUGH_MATERIAL, "not enough stat stones");
+            }
+            addMaterial(c, ch.accountId(), stone.id(), -cost);
+            boolean success = true;
+            switch (act) {
+                case "ADD" -> {
+                    StatStones.Type t = candidates.get(random.nextInt(candidates.size()));
+                    int free = 1;
+                    while (true) {
+                        final int n = free;
+                        if (statLines.stream().noneMatch(l -> l.lineNo() == n)) {
+                            break;
+                        }
+                        free++;
+                    }
+                    putLine(c, itemId, free, t.key(), Math.min(t.cap(), step(t.stepMin(), t.stepMax())), StatStones.STAT_SOURCE);
+                    itemLog(c, ch.id(), "STAT_ADD", "ITEM", it.templateId, itemId, cost, null);
+                }
+                case "RAISE" -> {
+                    double chance = rules.successPct(target.value(), cap);
+                    success = random.nextDouble() * 100.0 < chance;
+                    if (success) {
+                        boolean red = StatStones.CRYSTAL_SOURCE.equals(target.source());
+                        StatStones.Type t = rules.type(target.key());
+                        double amount = red ? step(rules.crystalStepMin(), rules.crystalStepMax()) : step(t == null ? 1.5 : t.stepMin(), t == null ? 2.0 : t.stepMax());
+                        putLine(c, itemId, target.lineNo(), target.key(), Math.min(cap, StatStones.round1(target.value() + amount)), target.source());
+                    }
+                    itemLog(c, ch.id(), "STAT_RAISE", "ITEM", it.templateId, itemId, cost, null);
+                }
+                default -> {
+                    StatStones.Type t = candidates.get(random.nextInt(candidates.size()));
+                    putLine(c, itemId, target.lineNo(), t.key(), Math.min(t.cap(), target.value()), StatStones.STAT_SOURCE);
+                    itemLog(c, ch.id(), "STAT_RETYPE", "ITEM", it.templateId, itemId, cost, null);
+                }
+            }
+            touchItem(c, itemId);
+            return ok(itemId, success);
+        });
+    }
+
+    /**
+     * "Pha lê hóa": a crystal stone makes the red line of a piece, a random type (never the critical rate) at its starting value; a piece that has one gets another type and starts
+     * again. The red line is raised with stat stones (statStone RAISE on line 4).
+     */
+    public ActionResult crystalize(long accountId, long characterId, long itemId) {
+        return tx(accountId, characterId, (c, d, ch) -> {
+            ItemRowLite it = lockItem(c, ch.accountId(), itemId);
+            if (it == null || d.items().get(it.templateId) == null) {
+                return fail(ActionError.NOT_FOUND, "item not found");
+            }
+            StatStones.Rules rules = StatStones.rules(d);
+            String current = null;
+            for (PlayerRepository.LineRow l : itemLineRows(c, itemId)) {
+                if (l.lineNo() == StatStones.CRYSTAL_LINE) {
+                    current = l.key();
+                }
+            }
+            List<String> candidates = new ArrayList<>();
+            for (String t : rules.crystalTypes()) {
+                if (!t.equals(current) && d.statEnabled(t)) {
+                    candidates.add(t);
+                }
+            }
+            if (candidates.isEmpty()) {
+                return fail(ActionError.DISABLED, "no type for the crystal line");
+            }
+            StaticData.Material stone = stoneOfKind(d, "CRYSTAL_STONE");
+            if (stone == null || materialQty(c, ch.accountId(), stone.id()) < rules.crystalStones()) {
+                return fail(ActionError.NOT_ENOUGH_MATERIAL, "no crystal stone");
+            }
+            addMaterial(c, ch.accountId(), stone.id(), -rules.crystalStones());
+            putLine(c, itemId, StatStones.CRYSTAL_LINE, candidates.get(random.nextInt(candidates.size())), rules.crystalStart(), StatStones.CRYSTAL_SOURCE);
+            touchItem(c, itemId);
+            itemLog(c, ch.id(), "CRYSTAL", "ITEM", it.templateId, itemId, rules.crystalStones(), null);
             return ok(itemId, true);
         });
     }
@@ -1006,13 +1192,14 @@ public final class EconomyService {
                 return InventoryPage.newBuilder().setCharacterId(characterId).build();
             }
             Map<Long, Map<String, Double>> lines = new java.util.HashMap<>();
-            try (PreparedStatement ps = c.prepareStatement("SELECT l.item_id, l.stat_key, l.`value` FROM item_stat_line l JOIN item_instance i USING (item_id) "
-                    + "WHERE i.account_id = ? AND i.location = 'BAG' AND i.item_id > ?")) {
+            Map<Long, List<PlayerRepository.LineRow>> lineRows = new java.util.HashMap<>();
+            try (PreparedStatement ps = c.prepareStatement("SELECT l.item_id, l.line_no, l.stat_key, l.`value`, l.source FROM item_stat_line l JOIN item_instance i USING (item_id) "
+                    + "WHERE i.account_id = ? AND i.location = 'BAG' AND i.item_id > ? ORDER BY l.item_id, l.line_no")) {
                 ps.setLong(1, accountId);
                 ps.setLong(2, afterItemId);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
-                        lines.computeIfAbsent(rs.getLong(1), k -> new java.util.LinkedHashMap<>()).merge(rs.getString(2), rs.getDouble(3), Double::sum);
+                        PlayerRepository.addLineRow(lines, lineRows, rs);
                     }
                 }
             }
@@ -1041,7 +1228,8 @@ public final class EconomyService {
                             break;
                         }
                         b.addItems(PlayerRepository.itemProto(d, new PlayerRepository.ItemRow(rs.getLong(1), rs.getInt(2), rs.getString(3), rs.getDouble(4), "BAG",
-                                lines.getOrDefault(rs.getLong(1), Map.of()), PlayerRepository.gensList(gens.get(rs.getLong(1))), rs.getInt(5))));
+                                lines.getOrDefault(rs.getLong(1), Map.of()), PlayerRepository.gensList(gens.get(rs.getLong(1))), rs.getInt(5),
+                                lineRows.getOrDefault(rs.getLong(1), List.of()))));
                     }
                 }
             }

@@ -174,7 +174,7 @@ namespace BattleBall.Net
             {
                 var stone = _stoneView[index - _gearView.Count];
                 if (smith != null && smith.IsOpen) { smith.PutStone(stone); return; }
-                popup.Show(MaterialIcon(stone), stone.Name, "", (stone.Note.Length > 0 ? stone.Note + "\n" : "") + "Có " + stone.Quantity + " viên. Dùng ở Bà Hạt Mít (nâng cấp, đổi GEN, mở ô GEN).",
+                popup.Show(MaterialIcon(stone), stone.Name, "", (stone.Note.Length > 0 ? stone.Note + "\n" : "") + "Có " + stone.Quantity + " viên. Dùng ở Bà Hạt Mít (nâng cấp, ép sao, pha lê hóa, đổi GEN, mở ô GEN).",
                     null, null, new List<BbPopup.ButtonSpec>(), null);
                 _selectedCell = slot;
                 RefreshSelection();
@@ -240,13 +240,19 @@ namespace BattleBall.Net
         // ---------------------------------------------------------------------------------------------------------------- the popup of a piece
 
         /// <summary>The popup of a piece: its main stat and lines, the upgrade, who may wear it, and the buttons. <paramref name="wearer"/>: the character that wears it (a worn piece), or null (the bag).</summary>
+        public void DebugShowGearPopup(ItemInfo it) { ShowGearPopup(it, null); }
+
         void ShowGearPopup(ItemInfo it, ProtoCharacter wearer)
         {
             var lines = new StringBuilder();
             string main = it.MainStat != null && it.MainStat.Text.Length > 0 ? it.MainStat.Text : it.Slot;
             lines.Append("<color=#1E8F1E>").Append(main).Append("</color>");
             foreach (var l in it.Lines)
-                lines.Append("\n<color=#1E8F1E>").Append(l.Text.Length > 0 ? l.Text : l.StatKey + " +" + Percent(l.Value)).Append("</color>");
+            {
+                bool red = l.Source == "CRYSTAL_STONE";                                       // the crystal line is red (docs 15.27)
+                lines.Append(red ? "\n<color=#D02020>" : "\n<color=#1E8F1E>").Append(l.Text.Length > 0 ? l.Text : l.StatKey + " +" + Percent(l.Value))
+                     .Append(l.Cap > 0 ? " / " + Percent(l.Cap) + "%" : "").Append("</color>");
+            }
             lines.Append("\n<color=#1E5AB4>Nâng cấp: +").Append(Percent(it.UpgradePercent)).Append("% / ").Append(Percent(UpgradeMaxPct)).Append("%</color>");
             AppendGenLines(lines, it, wearer);
             var desc = new StringBuilder("Bộ ").Append(SetOf(it)).Append(" của ").Append(PlanetOf(it.Race)).Append(".\nCấp yêu cầu: ").Append(it.MinLevel).Append('.');
@@ -274,7 +280,7 @@ namespace BattleBall.Net
                 specs.Add(new BbPopup.ButtonSpec("Bán", true, false));
                 actions.Add(() => ConfirmSellGear(it));
             }
-            desc.Append("\nNâng cấp và đổi GEN: đến Bà Hạt Mít.");
+            desc.Append("\nNâng cấp, ép sao, pha lê hóa, đổi GEN: đến Bà Hạt Mít.");
             popup.Show(ItemIcon(it), it.Name.Length > 0 ? it.Name : "Đồ #" + it.ItemId, lines.ToString(), desc.ToString(), null, null, specs,
                 i => { if (i < actions.Count) actions[i](); });
         }

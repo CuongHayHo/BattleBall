@@ -337,6 +337,7 @@ public final class MailService {
                                 itemId = rs.getLong(1);
                             }
                         }
+                        ItemRolls.rollNew(c, d, java.util.concurrent.ThreadLocalRandom.current(), itemId, t);
                         EconomyService.itemLog(c, anchor, "REWARD", "ITEM", l.ref(), itemId, 1, null);
                     }
                 }

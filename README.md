@@ -17,7 +17,7 @@ Game hack & slash chơi đơn cho Android: đội 3 nhân vật (1 người chơ
 **Server** (`BattleBallServer/server/`): Java 21, Netty, TLS, Protobuf, MariaDB.
 - Đăng ký, đăng nhập, đổi mật khẩu; một kho đồ dùng chung cho cả tài khoản.
 - Dữ liệu tĩnh (kỹ năng, quái, boss, phó bản, vật phẩm, aura) nạp từ DB, có thể nạp lại khi đang chạy.
-- Kinh tế: học và nâng kỹ năng bằng vàng, chế tạo, thư và thông báo, mua cải trang bằng đá quý.
+- Kinh tế: học và nâng kỹ năng bằng vàng và thẻ nâng cấp (thẻ nhận từ nhiệm vụ; số thẻ tăng dần theo vị trí kỹ năng), chế tạo, thư và thông báo, mua cải trang bằng đá quý.
 - Đồ trang bị: ba bộ (Thần Linh, Hủy Diệt, Thiên Sứ) cho từng hành tinh (45 món), mặc đúng hành tinh và đúng cấp, nâng cấp bằng đá, đổi mảnh lấy món, bán. Chỉ số mặc đồ cập nhật ngay cả trong phiên huấn luyện đang chạy, kể cả khi hợp thể.
 - GEN: 13 bộ kích hoạt như game gốc (đủ số món cùng bộ thì kỹ năng mạnh hơn); mỗi món có nhiều dòng GEN, đổi ngẫu nhiên bằng đá GEN, mở thêm ô bằng đá mở ô.
 - Hợp thể bằng Bông tai Potara; tài nguyên game gửi qua chính kết nối game (không dùng HTTP).
@@ -31,7 +31,7 @@ Game hack & slash chơi đơn cho Android: đội 3 nhân vật (1 người chơ
 
 **Client** (`BattleBall/Assets/`):
 - `BattleNet`: tầng mạng (Protobuf, TLS, đăng ký/đăng nhập, tải tài nguyên qua kết nối game) và giao diện menu: làng tân thủ, bảng nhân vật và túi (xem skin hoặc xem đồ và đá), tab Aura, tab Kỹ năng, tab Chức năng (thư, thông báo, tài khoản).
-- NPC trong làng: Urôn bán cải trang, Bunma bán đồ và đá, Bà Hạt Mít nâng cấp đồ, đổi GEN và mở ô GEN (bỏ đồ và đá vào bảng của bà), Cui (chọn phó bản; màn tàu bay vào và ra), hai mục tiêu huấn luyện. Focus tự chọn mục tiêu hoặc NPC gần nhất; nút nắm đấm nói chuyện với NPC đang focus.
+- NPC trong làng: Ông Trưởng làng (điểm danh hằng ngày, bảng điểm danh của tháng), Ông Gôhan (nhiệm vụ: chuỗi 13 nhiệm vụ đầu và 6 nhiệm vụ hằng ngày, thưởng vàng, ngọc, đá và thẻ nâng cấp kỹ năng; mũi tên vàng chỉ tới NPC cần gặp), Urôn bán cải trang, Bunma bán đồ và đá, Bà Hạt Mít nâng cấp đồ, đổi GEN và mở ô GEN (bỏ đồ và đá vào bảng của bà), Cui (chọn phó bản; màn tàu bay vào và ra), hai mục tiêu huấn luyện. Focus tự chọn mục tiêu hoặc NPC gần nhất; nút nắm đấm nói chuyện với NPC đang focus.
 - Huấn luyện với mộc nhân: kỹ năng có hình, số sát thương, thanh máu mục tiêu, khung HP/KI của đội, tự động dùng kỹ năng.
 - `NroMannequin`: công cụ xem trước bộ trang phục. Hình ảnh trang phục tải từ server qua kết nối game, không nằm trong client.
 

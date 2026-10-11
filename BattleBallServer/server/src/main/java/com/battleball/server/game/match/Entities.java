@@ -247,9 +247,19 @@ public final class Entities {
 
     public static final class Monster extends Entity {
         public final MonsterKind kind;
-        public final StaticData.Boss boss;
-        public final String classKey;          // BOSS, MINI, FINAL, MOB, ELITE
-        public final String role;              // NORMAL, MINI, FINAL, MINION
+        public StaticData.Boss boss;           // changes when an evolving boss turns into its next form
+        public String classKey;                // BOSS, MINI, FINAL, MOB, ELITE
+        public String role;                    // NORMAL, MINI, FINAL, MINION
+        /** An evolving boss (docs 15.30): its forms in order, the one it is in, and until when it charges (cannot be hurt) before the next one. */
+        public java.util.List<StaticData.Boss> forms;
+        public int formIdx;
+        public long evolveUntil;
+        /** Huýt sáo of a boss: its blows are stronger until this moment; Tái tạo năng lượng: it heals and stands still until this moment. */
+        public long rageUntil;
+        public double rageMult = 1.0;
+        public long regenUntil;
+        /** The kit of moves in balance_config boss_planet_kits when it is not the planet's own ("APE"); null = the planet's. */
+        public String kitKey;
         public double homeX;
         public double homeY;
         public double atkPerHit;

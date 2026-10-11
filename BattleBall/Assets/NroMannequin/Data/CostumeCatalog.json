@@ -1,5 +1,5 @@
 {
-  "totalCostumes": 366,
+  "totalCostumes": 367,
   "costumes": [
     {
       "id": 196,
@@ -6691,6 +6691,24 @@
       "headPartId": 48,
       "bodyPartId": 49,
       "legPartId": 50,
+      "bodyGroup": "Standard",
+      "bodyGroupId": 1,
+      "isHeadOnly": false,
+      "isMultiFrameHead": false,
+      "headCyclePartIds": [],
+      "dyHead": 0,
+      "charHeight": 42,
+      "hpBarOffsetY": 49
+    },
+    {
+      "id": 9024,
+      "name": "Ông Gôhan",
+      "gender": 3,
+      "genderName": "Mọi Giới Tính",
+      "iconId": 349,
+      "headPartId": 18,
+      "bodyPartId": 19,
+      "legPartId": 20,
       "bodyGroup": "Standard",
       "bodyGroupId": 1,
       "isHeadOnly": false,

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Adds the Nro look of NPCs to the client catalogs as costumes that are not skins: 9022 Bà Hạt Mít (owner request 2026-10-10: she upgrades gear, as in the original game) and
-9023 Cui (owner request 2026-10-11: the NPC of the dungeons).
+9023 Cui (owner request 2026-10-11: the NPC of the dungeons) and 9024 Ông Gôhan (owner request 2026-10-11: he gives the quests).
 
-Source (CONFIRMED, Teamobi2026 `npc_template`): row 21 Bà Hạt Mít: head part 117, body part 118, leg part 119, avatar (portrait icon) 1410; row 12 Cui: parts 48, 49, 50, avatar 639.
+Source (CONFIRMED, Teamobi2026 `npc_template`): row 21 Bà Hạt Mít: head part 117, body part 118, leg part 119, avatar (portrait icon) 1410; row 12 Cui: parts 48, 49, 50, avatar 639; row 0 Ông Gôhan: parts 18, 19, 20, avatar 349.
 The parts come from the `part` table (SourceData/tables/json/part.json). Like Urôn (9020) and Bunma (9021) she is not a skin: not sold and not in the server's skin_template.
 It is idempotent: run it again after the catalogs are rebuilt.
 """
@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PART = os.path.normpath(os.path.join(HERE, "..", "tables", "json", "part.json"))
 DATA = os.path.normpath(os.path.join(HERE, "..", "..", "Assets", "NroMannequin", "Data"))
 # (costume id, name, head part, body part, leg part, avatar)
-NPCS = [(9022, "Bà Hạt Mít", 117, 118, 119, 1410), (9023, "Cui", 48, 49, 50, 639)]
+NPCS = [(9022, "Bà Hạt Mít", 117, 118, 119, 1410), (9023, "Cui", 48, 49, 50, 639), (9024, "Ông Gôhan", 18, 19, 20, 349)]
 
 
 def load(path):

@@ -87,10 +87,10 @@ public final class StaticDataLoader {
 
         Map<Integer, Map<Integer, StaticData.SkillLevel>> levels = new HashMap<>();
         for (Object[] r : rows(c, "SELECT skill_id, `level`, damage_pct_atk, damage_pct_max_ki, ki_cost_pct, cooldown_ms, COALESCE(gold_cost, 0), "
-                + "length_px, width_px, radius_px, projectile_speed, params FROM skill_level", rs -> new Object[]{rs.getInt(1),
+                + "length_px, width_px, radius_px, projectile_speed, params, card_cost FROM skill_level", rs -> new Object[]{rs.getInt(1),
                 new StaticData.SkillLevel(rs.getInt(2), (Double) nullableDouble(rs, 3), (Double) nullableDouble(rs, 4), (Double) nullableDouble(rs, 5),
                         rs.getInt(6), rs.getLong(7), (Integer) nullableInt(rs, 8), (Integer) nullableInt(rs, 9), (Integer) nullableInt(rs, 10),
-                        (Integer) nullableInt(rs, 11), Json.parseObject(rs.getString(12)))})) {
+                        (Integer) nullableInt(rs, 11), Json.parseObject(rs.getString(12)), rs.getInt(13))})) {
             var lv = (StaticData.SkillLevel) r[1];
             levels.computeIfAbsent((Integer) r[0], k -> new TreeMap<>()).put(lv.level(), lv);
         }

@@ -13,6 +13,7 @@ namespace BattleBall.Net
     /// The Kỹ năng tab (owner request 2026-10-08): the skills of the three characters in one list, grouped by planet (Trái Đất, Xayda, Namếc), each row as the skill
     /// list of the Nro panel (icon, name, level and what the next level costs). A skill is learned (level 1) and raised one level at a time with the gold of the
     /// account (UpgradeSkillRequest, EconomyService.upgradeSkill); the punches and skills stop at level 7, the ultimates at 9 (GDD 4, skill_template.max_level).
+    /// Every step also costs skill cards (owner request 2026-10-11, docs 15.32): as many as the place of the skill in the list of its planet (1 for the punch ... 9 for the ultimate); the cards come from quests.
     /// A tap on a row opens the details of the current and the next level in the popup. The list is made at run time under <see cref="content"/>.
     /// </summary>
     public sealed class BbMenuSkills : MonoBehaviour
@@ -53,7 +54,7 @@ namespace BattleBall.Net
             _snapshot = snapshot;
             foreach (var r in _rows) Kill(r);
             _rows.Clear();
-            ulong gold = snapshot != null ? snapshot.Gold : 0;
+            ulong gold = snapshot != null ? snapshot.Gold : 0, cards = BbQuestPanel.CardsOf(snapshot);
             int learned = 0, total = 0;
             if (snapshot != null)
             {
@@ -67,11 +68,11 @@ namespace BattleBall.Net
                         uint lv = LevelOf(ch, entry.SkillId);
                         total++;
                         if (lv > 0) learned++;
-                        AddRow(ch, entry, lv, gold);
+                        AddRow(ch, entry, lv, gold, cards);
                     }
                 }
             }
-            headerText.text = "Kỹ năng\nĐã học " + learned + " / " + total + "\nVàng: " + Money(gold);
+            headerText.text = "Kỹ năng\nĐã học " + learned + " / " + total + "\nVàng: " + Money(gold) + "   Thẻ: " + Money(cards);
         }
 
         CharacterInfo CharacterOf(string race)
@@ -118,7 +119,7 @@ namespace BattleBall.Net
             _rows.Add(go.gameObject);
         }
 
-        void AddRow(CharacterInfo ch, SkillCatalogEntry e, uint level, ulong gold)
+        void AddRow(CharacterInfo ch, SkillCatalogEntry e, uint level, ulong gold, ulong cards)
         {
             var go = NewRect("Skill" + e.SkillId, content);
             go.gameObject.AddComponent<LayoutElement>().preferredHeight = 56f;
@@ -155,7 +156,7 @@ namespace BattleBall.Net
             Place(name.rectTransform, 58f, 4f, 180f, 24f);
             var next = Level(e, level + 1);
             string info = level == 0 ? "Chưa học" : "Cấp " + level + "/" + e.MaxLevel;
-            if (next != null) info += "   " + (level == 0 ? "Học: " : "Nâng: ") + Money(next.GoldCost) + " vàng";
+            if (next != null) info += "  " + Money(next.GoldCost) + " vàng" + (next.CardCost > 0 ? " + " + next.CardCost + " thẻ" : "");
             else info += "   Đã đạt cấp tối đa";
             var line = NewText(go, info, 13, Ink, TextAnchor.MiddleLeft, false);
             Place(line.rectTransform, 58f, 28f, 190f, 22f);
@@ -167,7 +168,7 @@ namespace BattleBall.Net
                 Place(br, 312f - 66f, 9f, 60f, 38f);
                 var bi = br.gameObject.AddComponent<Image>();
                 bi.sprite = buttonSprite;
-                bi.color = gold >= next.GoldCost ? Color.white : new Color(0.62f, 0.62f, 0.62f);     // grey: the gold is short (the server says so if pressed)
+                bi.color = gold >= next.GoldCost && cards >= next.CardCost ? Color.white : new Color(0.62f, 0.62f, 0.62f);     // grey: the gold or the cards are short (the server says so if pressed)
                 bi.type = Image.Type.Sliced;
                 var b = br.gameObject.AddComponent<Button>();
                 b.targetGraphic = bi;
@@ -194,9 +195,10 @@ namespace BattleBall.Net
             if (shown != null && shown.DamagePctAtk > 0) desc = desc.Replace("#", Num(shown.DamagePctAtk));
             desc = desc.Replace("#", "...");
             var specs = new List<BbPopup.ButtonSpec>();
-            ulong gold = _snapshot != null ? _snapshot.Gold : 0;
+            ulong gold = _snapshot != null ? _snapshot.Gold : 0, cards = BbQuestPanel.CardsOf(_snapshot);
             if (next != null)
-                specs.Add(new BbPopup.ButtonSpec((level == 0 ? "Học\n" : "Nâng cấp\n") + Money(next.GoldCost) + " vàng", gold >= next.GoldCost, true));
+                specs.Add(new BbPopup.ButtonSpec((level == 0 ? "Học\n" : "Nâng cấp\n") + Money(next.GoldCost) + " vàng" + (next.CardCost > 0 ? " + " + next.CardCost + " thẻ" : ""),
+                                                 gold >= next.GoldCost && cards >= next.CardCost, true));
             var resolver = NroSpriteResolver.Instance;
             Sprite icon = e.IconId > 0 && resolver != null ? resolver.ResolveSprite((int)e.IconId, BbAssetCache.Scale) : null;
             popup.Show(icon, e.Name, lines.ToString(), Titles[Array.IndexOf(Races, ch.Race) < 0 ? 0 : Array.IndexOf(Races, ch.Race)] + ". " + desc, null, null, specs,

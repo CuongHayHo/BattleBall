@@ -36,10 +36,27 @@ public final class PlayerRepository {
     private PlayerRepository() {
     }
 
-    public record ItemRow(long id, int templateId, String slot, double upgradePct, String location, Map<String, Double> lines, List<String> gens, int extraSlots) {
-        public ItemRow(long id, int templateId, String slot, double upgradePct, String location, Map<String, Double> lines) {
-            this(id, templateId, slot, upgradePct, location, lines, List.of(), 0);
+    /** One extra line of a piece: 1 to 3 the stat lines of the stat stone, 4 the crystal (red) line (docs 15.27). */
+    public record LineRow(int lineNo, String key, double value, String source) {
+    }
+
+    /** {@code lines} is the sum by stat (what the stats of the character add up); {@code lineRows} are the lines themselves (a stat may appear on two of them). */
+    public record ItemRow(long id, int templateId, String slot, double upgradePct, String location, Map<String, Double> lines, List<String> gens, int extraSlots,
+                          List<LineRow> lineRows) {
+        public ItemRow(long id, int templateId, String slot, double upgradePct, String location, Map<String, Double> lines, List<String> gens, int extraSlots) {
+            this(id, templateId, slot, upgradePct, location, lines, gens, extraSlots, List.of());
         }
+
+        public ItemRow(long id, int templateId, String slot, double upgradePct, String location, Map<String, Double> lines) {
+            this(id, templateId, slot, upgradePct, location, lines, List.of(), 0, List.of());
+        }
+    }
+
+    /** Folds the rows of item_stat_line (item_id, line_no, stat_key, value, source) into the sum by stat and the list of lines of each piece. */
+    public static void addLineRow(Map<Long, Map<String, Double>> sums, Map<Long, List<LineRow>> rows, ResultSet rs) throws SQLException {
+        long item = rs.getLong(1);
+        sums.computeIfAbsent(item, k -> new LinkedHashMap<>()).merge(rs.getString(3), rs.getDouble(4), Double::sum);
+        rows.computeIfAbsent(item, k -> new ArrayList<>()).add(new LineRow(rs.getInt(2), rs.getString(3), rs.getDouble(4), rs.getString(5)));
     }
 
     public record SupportRow(long instanceId, int supportId, int chargePoints, boolean appraised, Map<String, Double> lines) {
@@ -156,15 +173,17 @@ public final class PlayerRepository {
                     rs -> equipment.computeIfAbsent(rs.getLong(1), k -> new LinkedHashMap<>()).put(rs.getString(2),
                             new EquipRef(nullableLong(rs, 3), (Integer) nullableInt(rs, 4), nullableLong(rs, 5))));
             Map<Long, Map<String, Double>> itemLines = new HashMap<>();
-            query(c, "SELECT l.item_id, l.stat_key, l.`value` FROM item_stat_line l JOIN item_instance i USING (item_id) WHERE i.location = 'EQUIPPED' AND i.account_id = ?", owner,
-                    rs -> itemLines.computeIfAbsent(rs.getLong(1), k -> new LinkedHashMap<>()).merge(rs.getString(2), rs.getDouble(3), Double::sum));
+            Map<Long, List<LineRow>> itemLineRows = new HashMap<>();
+            query(c, "SELECT l.item_id, l.line_no, l.stat_key, l.`value`, l.source FROM item_stat_line l JOIN item_instance i USING (item_id) WHERE i.location = 'EQUIPPED' AND i.account_id = ? "
+                    + "ORDER BY l.item_id, l.line_no", owner, rs -> addLineRow(itemLines, itemLineRows, rs));
             Map<Long, Map<Integer, String>> itemGens = new HashMap<>();
             query(c, "SELECT g.item_id, g.line_no, g.gen_key FROM item_gen_line g JOIN item_instance i USING (item_id) WHERE i.location = 'EQUIPPED' AND i.account_id = ?", owner,
                     rs -> itemGens.computeIfAbsent(rs.getLong(1), k -> new TreeMap<>()).put(rs.getInt(2), rs.getString(3)));
             query(c, "SELECT i.item_id, e.character_id, i.template_id, i.slot, i.upgrade_percent, i.location, i.gen_extra_slots FROM character_equipment e JOIN item_instance i ON i.item_id = e.item_id "
                     + "WHERE e.character_id IN (" + in + ")", ids,
                     rs -> equippedItems.computeIfAbsent(rs.getLong(2), k -> new ArrayList<>()).add(new ItemRow(rs.getLong(1), rs.getInt(3), rs.getString(4),
-                            rs.getDouble(5), rs.getString(6), itemLines.getOrDefault(rs.getLong(1), Map.of()), gensList(itemGens.get(rs.getLong(1))), rs.getInt(7))));
+                            rs.getDouble(5), rs.getString(6), itemLines.getOrDefault(rs.getLong(1), Map.of()), gensList(itemGens.get(rs.getLong(1))), rs.getInt(7),
+                            itemLineRows.getOrDefault(rs.getLong(1), List.of()))));
             query(c, "SELECT character_id, skill_id, ready_at_ms FROM character_skill_cooldown WHERE ready_at_ms > " + System.currentTimeMillis()
                     + " AND character_id IN (" + in + ")", ids,
                     rs -> cooldowns.computeIfAbsent(rs.getLong(1), k -> new TreeMap<>()).put(rs.getInt(2), rs.getLong(3)));
@@ -362,6 +381,17 @@ public final class PlayerRepository {
             }
         }
         b.setGenRules(rb);
+        StatStones.Rules ss = StatStones.rules(d);
+        com.battleball.proto.StatStoneRulesInfo.Builder ssb = com.battleball.proto.StatStoneRulesInfo.newBuilder().setAddStones(ss.addStones()).setRaiseStones(ss.raiseStones())
+                .setRetypeStones(ss.retypeStones()).setCrystalStones(ss.crystalStones()).setCrystalStart(ss.crystalStart());
+        for (StaticData.Material m : d.materials().values()) {
+            if (m.kind().equals("STAT_STONE")) {
+                ssb.setStatStoneTemplateId(m.id());
+            } else if (m.kind().equals("CRYSTAL_STONE")) {
+                ssb.setCrystalStoneTemplateId(m.id());
+            }
+        }
+        b.setStatStoneRules(ssb);
         Shared sh = p.shared();
         b.setGold(sh.gold()).setGems(sh.gems()).setBagCount(sh.bagCount());
         for (Auras.Aura a : Auras.all(d)) {
@@ -380,7 +410,7 @@ public final class PlayerRepository {
                             .setName(sk.name()).setIconId(Math.max(0, sk.iconId())).setSlot(sk.slot()).setMaxLevel(sk.maxLevel()).setDescription(sk.damInfo());
                     new TreeMap<>(sk.levels()).forEach((lv, L) -> e.addLevels(com.battleball.proto.SkillLevelInfo.newBuilder().setLevel(lv).setGoldCost(L.goldCost())
                             .setDamagePctAtk(L.damagePctAtk() == null ? 0 : L.damagePctAtk()).setCooldownMs(L.cooldownMs())
-                            .setKiCostPct(L.kiCostPct() == null ? 0 : L.kiCostPct()).setRangePx((int) Math.round(reachPx(sk, L)))));
+                            .setKiCostPct(L.kiCostPct() == null ? 0 : L.kiCostPct()).setRangePx((int) Math.round(reachPx(sk, L))).setCardCost(L.cardCost())));
                     b.addSkillCatalog(e);
                 });
         // the dungeons of the list of the NPC Cui: enabled ones that have at least one real boss (minions do not count)
@@ -397,6 +427,10 @@ public final class PlayerRepository {
                     .setRecommendedLevel((int) Json.num(tierLevels, dg.tier(), 30)).setBossCount((int) Math.min(Math.max(1, dg.bossesPerMatch()), real))
                     .setTimeLimitS(dg.timeLimitS() == null ? 0 : dg.timeLimitS()));
         });
+        for (com.battleball.server.game.match.Difficulty df : com.battleball.server.game.match.Difficulty.all(d)) {                    // the difficulties of a dungeon (docs 15.33)
+            b.addDifficulties(com.battleball.proto.DifficultyInfo.newBuilder().setKey(df.key()).setName(df.name()).setHpMult(df.hpMult()).setAtkMult(df.atkMult())
+                    .setRewardMult(df.rewardMult()).setDropMult(df.dropMult()).setNote(df.note()));
+        }
         sh.materials().forEach((id, q) -> {
             MaterialAmount.Builder mb = MaterialAmount.newBuilder().setTemplateId(id).setQuantity(q);
             StaticData.Material m = d.materials().get(id);
@@ -470,7 +504,16 @@ public final class PlayerRepository {
             b.setName(t.name()).setIconId(t.iconId()).setRace(t.race()).setTier(t.tier()).setMinLevel(t.minLevel())
                     .setMainStat(StatLine.newBuilder().setStatKey(t.baseStatKey()).setValue(main).setSource("BASE").setText(d.statText(t.baseStatKey(), main)));
         }
-        it.lines().forEach((k, v) -> b.addLines(StatLine.newBuilder().setStatKey(k).setValue(v).setSource("STAT_STONE")));
+        StatStones.Rules stat = StatStones.rules(d);
+        for (LineRow l : it.lineRows()) {
+            double cap = StatStones.cap(stat, l);
+            boolean red = StatStones.CRYSTAL_SOURCE.equals(l.source());
+            StatStones.Type type = stat.type(l.key());
+            b.addLines(StatLine.newBuilder().setStatKey(l.key()).setValue(l.value()).setSource(l.source()).setText(d.statText(l.key(), l.value())).setLineNo(l.lineNo())
+                    .setCap(cap).setSuccessPct(stat.successPct(l.value(), cap))
+                    .setStepMin(red ? stat.crystalStepMin() : type == null ? 0 : type.stepMin()).setStepMax(red ? stat.crystalStepMax() : type == null ? 0 : type.stepMax()));
+        }
+        b.setStatLinesMax(stat.maxLines());
         GenSets.Rules rules = GenSets.rules(d);
         int slots = rules.initialSlots() + it.extraSlots();
         for (int i = 0; i < slots; i++) {

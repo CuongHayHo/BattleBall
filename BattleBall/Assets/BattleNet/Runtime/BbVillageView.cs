@@ -59,9 +59,12 @@ namespace BattleBall.Net
             public float tx, ty;
             public bool remote;
             public bool boss;
+            public float chargeUntil;            // an evolving boss that charges (docs 15.30): it glows until then
+            public Image chargeGlow;
             public Image hpFill, hpBack;
             public float hpRatio = 1f;
             public bool dying;
+            public float deathX, deathY;         // where the body fell in the arena: the ghost lands back there, because the server keeps the body at that place (Trị thương revives from there)
             public float dyingAge;
             public Vector2 dyingVelocity;
             public bool ghost;
@@ -472,6 +475,24 @@ namespace BattleBall.Net
 
         /// <summary>The key is the id of an NPC that can be talked to (a dummy is not).</summary>
         public bool IsNpc(string key) { return key != null && _npcs.ContainsKey(key); }
+
+        /// <summary>The map entry of an NPC or a training dummy by its id (null when the map has none): the quests name the NPC they send the player to.</summary>
+        public NpcSpec NpcOfId(string id)
+        {
+            return _map != null && id != null ? _map.Npcs.Find(n => n.Id == id) : null;
+        }
+
+        /// <summary>The part of the world the player sees, between the panels (world canvas pixels), and how far the panels cover the screen on each side.</summary>
+        public void VisibleRange(out float left, out float right, out float insetLeft, out float insetRight)
+        {
+            left = Mathf.Max(0f, _camX) + _inset;
+            right = Mathf.Max(0f, _camX) + _width - _insetRight;
+            insetLeft = _inset;
+            insetRight = _insetRight;
+        }
+
+        /// <summary>The width of the view in canvas pixels.</summary>
+        public float ViewWidth { get { return _width; } }
 
         public NpcSpec NpcOf(string key)
         {

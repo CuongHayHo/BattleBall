@@ -407,6 +407,32 @@ namespace BattleBall.EditorTools
             Canvas.ForceUpdateCanvases();
             BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_smith_unlock.png");
             ui.smith.Close();
+
+            // the daily check-in of the elder (docs 15.25): his dialog and the table of the month
+            var attInfo = FakeAttendance(false);
+            ui.DemoAttendanceDialog(attInfo);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_attendance_dialog.png");
+            ui.popup.Hide();
+            ui.DemoAttendance(FakeAttendance(true));
+            ui.attendance.DemoSelect(14);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_attendance_table.png");
+            ui.attendance.Close();
+
+            // the quests of Ông Gôhan (docs 15.32): his dialog, the list and the skill cards in the Kỹ năng tab
+            var quests = all;
+            quests.Quests.Clear();
+            quests.Quests.AddRange(FakeQuests());
+            quests.Materials.Add(new MaterialAmount { TemplateId = 206, Quantity = 14, Name = "Thẻ nâng cấp", IconId = 13538, Kind = "SKILL_CARD" });
+            ui.DemoQuestDialog(quests);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_quest_dialog.png");
+            ui.popup.Hide();
+            ui.DemoQuest(quests);
+            Canvas.ForceUpdateCanvases();
+            BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_quest_list.png");
+            ui.quest.Close();
             ui.popup.Hide();
             ui.DemoGearSlot(0);
             Canvas.ForceUpdateCanvases();
@@ -454,6 +480,54 @@ namespace BattleBall.EditorTools
             ui.popup.Hide();
             ui.shop.Close();
 
+        }
+
+        /// <summary>Made-up quests: the one of the chain being done and the six daily ones in different states.</summary>
+        static List<QuestEntry> FakeQuests()
+        {
+            System.Func<string, string, string, string, uint, uint, string, ulong, uint, QuestEntry> make = (id, kind, title, desc, progress, target, npc, gold, gems) =>
+                new QuestEntry { Id = id, Kind = kind, Title = title, Description = desc, Progress = progress, Target = target, NpcId = npc, Gold = gold, Gems = gems };
+            var list = new List<QuestEntry>();
+            var t = make("t05", "TUTORIAL", "Nâng cấp đồ", "Đến Bà Hạt Mít, đặt món đồ và đá nâng cấp vào bảng rồi nâng cấp.", 0, 1, "shop", 2000, 5);
+            t.Items.Add(new RewardItem { TemplateId = 206, Name = "Thẻ nâng cấp", IconId = 13538, Quantity = 4 });
+            t.Items.Add(new RewardItem { TemplateId = 204, Name = "Đá GEN", IconId = 10208, Quantity = 2 });
+            list.Add(t);
+            var d1 = make("d01", "DAILY", "Điểm danh", "Gặp Ông Trưởng làng và điểm danh hôm nay.", 1, 1, "elder", 500, 1);
+            d1.Items.Add(new RewardItem { TemplateId = 206, Name = "Thẻ nâng cấp", IconId = 13538, Quantity = 2 });
+            list.Add(d1);
+            var d2 = make("d02", "DAILY", "Thắng một phó bản", "Đến Cui và thắng một phó bản.", 0, 1, "cui", 1000, 2);
+            d2.Items.Add(new RewardItem { TemplateId = 206, Name = "Thẻ nâng cấp", IconId = 13538, Quantity = 4 });
+            list.Add(d2);
+            var d3 = make("d03", "DAILY", "Hạ 5 boss phó bản", "Hạ tổng cộng 5 boss trong các phó bản (thắng hay thua đều tính).", 2, 5, "cui", 1500, 3);
+            d3.Items.Add(new RewardItem { TemplateId = 206, Name = "Thẻ nâng cấp", IconId = 13538, Quantity = 5 });
+            list.Add(d3);
+            var d4 = make("d04", "DAILY", "Tập đánh Mộc nhân", "Đến Mộc nhân và đánh thử một lượt.", 1, 1, "moc_nhan", 250, 1);
+            d4.Claimed = true;
+            d4.Items.Add(new RewardItem { TemplateId = 206, Name = "Thẻ nâng cấp", IconId = 13538, Quantity = 1 });
+            list.Add(d4);
+            var d6 = make("d06", "DAILY", "Nâng cấp một kỹ năng", "Mở bảng nhân vật, tab Kỹ năng, dùng thẻ để học hoặc nâng một kỹ năng.", 0, 1, "", 500, 1);
+            d6.Items.Add(new RewardItem { TemplateId = 206, Name = "Thẻ nâng cấp", IconId = 13538, Quantity = 3 });
+            list.Add(d6);
+            return list;
+        }
+
+        /// <summary>A made-up table of check-in: the 10th of a month of 31 days, the first nine days claimed except the 4th and the 6th.</summary>
+        static AttendanceInfo FakeAttendance(bool claimedToday)
+        {
+            var info = new AttendanceInfo { Year = 2026, Month = 10, Today = 10, DaysInMonth = 31, ClaimedToday = claimedToday };
+            uint claimed = 0;
+            for (uint day = 1; day <= 31; day++)
+            {
+                var d = new AttendanceDay { Day = day, Gold = 250, Gems = day == 7 ? 8u : day == 14 ? 13u : 3u };
+                if (day == 1 || day == 3 || day == 7 || day == 14) d.Items.Add(new RewardItem { TemplateId = 201, Name = "Đá nâng cấp", IconId = 10204, Quantity = day == 1 ? 1u : day == 3 ? 2u : day == 7 ? 3u : 5u });
+                if (day == 5 || day == 12) d.Items.Add(new RewardItem { TemplateId = 204, Name = "Đá GEN", IconId = 10208, Quantity = day == 5 ? 1u : 2u });
+                if (day == 10) d.Items.Add(new RewardItem { TemplateId = 205, Name = "Đá mở ô GEN", IconId = 10209, Quantity = 1 });
+                d.Claimed = day < 10 && day != 4 && day != 6 || (day == 10 && claimedToday);
+                if (d.Claimed) claimed++;
+                info.Days.Add(d);
+            }
+            info.ClaimedCount = claimed;
+            return info;
         }
 
         static GenTierInfo Tier(uint pieces, string text) { return new GenTierInfo { Pieces = pieces, Text = text }; }
@@ -639,7 +713,7 @@ namespace BattleBall.EditorTools
         {
             var e = new SkillCatalogEntry { SkillId = id, Race = race, Name = name, IconId = icon, Slot = slot, MaxLevel = maxLevel, Description = description };
             for (int i = 0; i < levels.GetLength(0); i++)
-                e.Levels.Add(new SkillLevelInfo { Level = (uint)(i + 1), GoldCost = (ulong)levels[i, 0], DamagePctAtk = levels[i, 1], CooldownMs = (uint)levels[i, 2], KiCostPct = levels[i, 3] });
+                e.Levels.Add(new SkillLevelInfo { Level = (uint)(i + 1), GoldCost = (ulong)levels[i, 0], DamagePctAtk = levels[i, 1], CooldownMs = (uint)levels[i, 2], KiCostPct = levels[i, 3], CardCost = (uint)(slot + 1) });
             s.SkillCatalog.Add(e);
         }
 

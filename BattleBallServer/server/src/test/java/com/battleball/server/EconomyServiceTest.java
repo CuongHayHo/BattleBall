@@ -173,18 +173,25 @@ class EconomyServiceTest {
     }
 
     @Test
-    void learningAndRaisingASkillCostsGold() throws Exception {
+    void learningAndRaisingASkillCostsGoldAndSkillCards() throws Exception {
         long[] a = newAccount();
         var d = data.get();
         long cost1 = d.skills().get(1).level(1).goldCost();
         long cost2 = d.skills().get(1).level(2).goldCost();
+        int cards = d.skills().get(1).level(1).cardCost();
+        assertEquals(2, cards, "Kamejoko is the second skill of the list of its planet: 2 cards a level (V045)");
+        assertEquals(9, d.skills().get(24).level(1).cardCost(), "the ultimate is the ninth");
         assertError(ActionError.NOT_ENOUGH_GOLD, eco.upgradeSkill(a[0], a[1], 1));
         assertError(ActionError.NOT_FOUND, eco.upgradeSkill(a[0], a[1], 3));                  // Masenko is a Namek skill
         give(a[1], cost1 + cost2, 0);
+        assertError(ActionError.NOT_ENOUGH_MATERIAL, eco.upgradeSkill(a[0], a[1], 1));         // gold is not enough: the cards are needed too
+        assertEquals(cost1 + cost2, character(a[0], a[1]).gold(), "nothing was paid");
+        giveMaterial(a[1], 206, 2 * cards + 1);
         assertTrue(eco.upgradeSkill(a[0], a[1], 1).getOk());
         assertTrue(eco.upgradeSkill(a[0], a[1], 1).getOk());
         assertEquals(2, character(a[0], a[1]).skills().get(1));
         assertEquals(0, character(a[0], a[1]).gold());
+        assertEquals(1, scalar("SELECT quantity FROM material_stack WHERE account_id = ? AND template_id = 206", a[0]), "two raises took 2 x 2 cards");
     }
 
     @Test
@@ -232,6 +239,8 @@ class EconomyServiceTest {
         assertTrue(made.getOk());
         assertError(ActionError.NOT_ENOUGH_MATERIAL, eco.assembleItem(a[0], a[1], 3));
         long itemId = made.getNewId();
+        assertTrue(itemInfo(a[0], a[1], itemId).getLinesCount() > 0, "a new piece starts with a stat line (V042)");
+        update("DELETE FROM item_stat_line WHERE item_id = ?", itemId);                       // this test is about the main stat only
         assertTrue(eco.equipItem(a[0], a[1], itemId).getOk());
         long after = PlayerRepository.stats(d, character(a[0], a[1]), false).atk();
         assertEquals(before + 20_000, after, "gloves add 20,000 ATK");
@@ -605,5 +614,182 @@ class EconomyServiceTest {
         assertEquals(auras.stream().filter(x -> x.enabled()).count(), snapshot.getAurasCount());
         assertTrue(eco.equipAura(a[0], a[1], 0).getOk(), "0 takes it off");
         assertEquals(0, PlayerRepository.toProto(data.get(), load(a[0]), 5).getEquippedAuraId());
+    }
+
+    // ---- the stat stone and the crystal stone (docs 15.27) ----
+
+    private static com.battleball.proto.ItemInfo itemInfo(long account, long character, long itemId) throws Exception {
+        for (var it : eco.inventory(account, character, 0, 0).getItemsList()) {
+            if (it.getItemId() == itemId) {
+                return it;
+            }
+        }
+        throw new AssertionError("item not in the bag");
+    }
+
+    private static com.battleball.proto.StatLine lineOf(long account, long character, long itemId, int lineNo) throws Exception {
+        for (var l : itemInfo(account, character, itemId).getLinesList()) {
+            if (l.getLineNo() == lineNo) {
+                return l;
+            }
+        }
+        return null;
+    }
+
+    @Test
+    void aStatStoneAddsRaisesAndRetypesLinesWithinTheRulesOfTheGdd() throws Exception {
+        long[] a = newAccount();
+        long item = gearPiece(a[0], "EARTH", 1, "GLOVES");
+        RANDOM.value = 0.0;                                                          // the lowest step, and every chance-based action works
+        assertError(ActionError.NOT_ENOUGH_MATERIAL, eco.statStone(a[0], a[1], item, "ADD", 0));
+        giveMaterial(a[1], 202, 40);
+        assertError(ActionError.INVALID_ARGUMENT, eco.statStone(a[0], a[1], item, "MELT", 1));
+        assertError(ActionError.INVALID_ARGUMENT, eco.statStone(a[0], a[1], item, "RAISE", 1));            // no such line yet
+        assertEquals(40, character(a[0], a[1]).materials().get(202).intValue(), "a refused action costs nothing");
+        assertTrue(eco.statStone(a[0], a[1], item, "ADD", 0).getOk());
+        assertTrue(eco.statStone(a[0], a[1], item, "ADD", 0).getOk());
+        assertTrue(eco.statStone(a[0], a[1], item, "ADD", 0).getOk());
+        assertError(ActionError.MAXED, eco.statStone(a[0], a[1], item, "ADD", 0));                        // three stat lines at most
+        assertEquals(37, character(a[0], a[1]).materials().get(202).intValue(), "one stone each");
+        var info = itemInfo(a[0], a[1], item);
+        assertEquals(3, info.getStatLinesMax());
+        assertEquals(3, info.getLinesCount());
+        var types = new java.util.HashSet<String>();
+        for (var l : info.getLinesList()) {
+            types.add(l.getStatKey());
+            assertEquals("STAT_STONE", l.getSource());
+            assertEquals(1.5, l.getValue(), 1e-9, "the first step is the lowest of 1.5 to 2");
+            assertEquals(25.0, l.getCap(), 1e-9);
+            assertEquals(100.0, l.getSuccessPct(), 1e-9, "a line that is far from full is always raised");
+        }
+        assertEquals(3, types.size(), "no two lines of the same type");
+
+        // raising: +1.5 now; a line near its maximum is raised only sometimes, and the stone is spent either way
+        assertTrue(eco.statStone(a[0], a[1], item, "RAISE", 1).getSuccess());
+        assertEquals(3.0, lineOf(a[0], a[1], item, 1).getValue(), 1e-9);
+        update("UPDATE item_stat_line SET `value` = 20 WHERE item_id = ? AND line_no = 1", item);          // 80% of the maximum: 65% chance (V042)
+        assertEquals(65.0, lineOf(a[0], a[1], item, 1).getSuccessPct(), 1e-9);
+        RANDOM.value = 0.999;
+        var failed = eco.statStone(a[0], a[1], item, "RAISE", 1);
+        assertTrue(failed.getOk());
+        assertFalse(failed.getSuccess(), "the chance missed");
+        assertEquals(20.0, lineOf(a[0], a[1], item, 1).getValue(), 1e-9, "a miss changes nothing but the stone");
+        long stones = character(a[0], a[1]).materials().get(202);
+        assertEquals(37 - 2, stones);
+        RANDOM.value = 0.0;
+        update("UPDATE item_stat_line SET `value` = 24 WHERE item_id = ? AND line_no = 1", item);
+        assertTrue(eco.statStone(a[0], a[1], item, "RAISE", 1).getSuccess());
+        assertEquals(lineOf(a[0], a[1], item, 1).getCap(), lineOf(a[0], a[1], item, 1).getValue(), 1e-9, "never above the maximum");
+        assertError(ActionError.MAXED, eco.statStone(a[0], a[1], item, "RAISE", 1));
+        assertEquals(0.0, lineOf(a[0], a[1], item, 1).getSuccessPct(), 1e-9);
+
+        // retype: another type that no line has, the value stays
+        String before = lineOf(a[0], a[1], item, 2).getStatKey();
+        assertTrue(eco.statStone(a[0], a[1], item, "RETYPE", 2).getOk());
+        var after = lineOf(a[0], a[1], item, 2);
+        assertFalse(after.getStatKey().equals(before));
+        assertEquals(1.5, after.getValue(), 1e-9);
+        assertError(ActionError.INVALID_ARGUMENT, eco.statStone(a[0], a[1], item, "RETYPE", 4));          // there is no crystal line, and it could not be retyped anyway
+
+        // the critical rate has its own maximum (5) and its own small steps (0.1 to 0.5)
+        update("UPDATE item_stat_line SET stat_key = 'CRIT_RATE_PCT', `value` = 4.8 WHERE item_id = ? AND line_no = 3", item);
+        assertEquals(5.0, lineOf(a[0], a[1], item, 3).getCap(), 1e-9);
+        assertTrue(eco.statStone(a[0], a[1], item, "RAISE", 3).getSuccess());
+        assertEquals(4.9, lineOf(a[0], a[1], item, 3).getValue(), 1e-9);
+        update("UPDATE item_stat_line SET `value` = 4.95 WHERE item_id = ? AND line_no = 3", item);
+        assertTrue(eco.statStone(a[0], a[1], item, "RAISE", 3).getSuccess());
+        assertEquals(5.0, lineOf(a[0], a[1], item, 3).getValue(), 1e-9, "never above 5");
+    }
+
+    @Test
+    void theStatLinesCountInTheStatsOfTheCharacterAsPercentOfTheTotal() throws Exception {
+        long[] a = newAccount();
+        var d = data.get();
+        long item = gearPiece(a[0], "EARTH", 1, "ARMOR");
+        assertTrue(eco.equipItem(a[0], a[1], item).getOk());
+        long atk = PlayerRepository.stats(d, character(a[0], a[1]), false).atk();
+        update("INSERT INTO item_stat_line (item_id, line_no, stat_key, `value`, source) VALUES (?,1,'ATK_PCT',10,'STAT_STONE')", item);
+        update("INSERT INTO item_stat_line (item_id, line_no, stat_key, `value`, source) VALUES (?,4,'ATK_PCT',20,'CRYSTAL_STONE')", item);
+        long with = PlayerRepository.stats(d, character(a[0], a[1]), false).atk();
+        assertEquals(atk * 1.30, with, atk * 0.001, "10% and 20% are added together (never compounded)");
+        var snap = PlayerRepository.toProto(d, load(a[0]), 20).getCharactersList().stream().filter(c -> c.getRace().equals("EARTH")).findFirst().orElseThrow();
+        var worn = snap.getEquippedItems(0);
+        assertEquals(2, worn.getLinesCount(), "both lines are shown, even of the same type");
+        assertEquals("CRYSTAL_STONE", worn.getLines(1).getSource());
+        assertEquals(50.0, worn.getLines(1).getCap(), 1e-9);
+    }
+
+    @Test
+    void aCrystalStoneMakesTheRedLineAndStatStonesRaiseIt() throws Exception {
+        long[] a = newAccount();
+        long item = gearPiece(a[0], "EARTH", 1, "RING");
+        RANDOM.value = 0.0;
+        assertError(ActionError.NOT_ENOUGH_MATERIAL, eco.crystalize(a[0], a[1], item));
+        giveMaterial(a[1], 203, 2);
+        giveMaterial(a[1], 202, 40);
+        assertTrue(eco.statStone(a[0], a[1], item, "ADD", 0).getOk());                       // a stat line first: the red line may repeat its type
+        String statType = lineOf(a[0], a[1], item, 1).getStatKey();
+        assertTrue(eco.crystalize(a[0], a[1], item).getOk());
+        var red = lineOf(a[0], a[1], item, 4);
+        assertEquals("CRYSTAL_STONE", red.getSource());
+        assertEquals(10.0, red.getValue(), 1e-9, "it starts at 10%");
+        assertEquals(50.0, red.getCap(), 1e-9);
+        assertFalse(red.getStatKey().equals("CRIT_RATE_PCT"), "never the critical rate");
+        assertEquals(1, character(a[0], a[1]).materials().get(203).intValue());
+        assertEquals(statType, lineOf(a[0], a[1], item, 1).getStatKey(), "the stat line is untouched");
+        // two more stat lines, and the red line still counts apart: a piece has 3 + 1 lines at most
+        assertTrue(eco.statStone(a[0], a[1], item, "ADD", 0).getOk());
+        assertTrue(eco.statStone(a[0], a[1], item, "ADD", 0).getOk());
+        assertEquals(4, itemInfo(a[0], a[1], item).getLinesCount());
+        // raised by stat stones: 2 to 3 % a success (the lowest here), at most 50
+        assertTrue(eco.statStone(a[0], a[1], item, "RAISE", 4).getSuccess());
+        assertEquals(12.0, lineOf(a[0], a[1], item, 4).getValue(), 1e-9);
+        assertEquals(100.0, lineOf(a[0], a[1], item, 4).getSuccessPct(), 1e-9);
+        update("UPDATE item_stat_line SET `value` = 49 WHERE item_id = ? AND line_no = 4", item);
+        assertEquals(30.0, lineOf(a[0], a[1], item, 4).getSuccessPct(), 1e-9, "near the maximum only three tries in ten work");
+        assertTrue(eco.statStone(a[0], a[1], item, "RAISE", 4).getSuccess());
+        assertEquals(50.0, lineOf(a[0], a[1], item, 4).getValue(), 1e-9);
+        assertError(ActionError.MAXED, eco.statStone(a[0], a[1], item, "RAISE", 4));
+        // crystallising again: another type and back to the start
+        String oldType = lineOf(a[0], a[1], item, 4).getStatKey();
+        assertTrue(eco.crystalize(a[0], a[1], item).getOk());
+        assertFalse(lineOf(a[0], a[1], item, 4).getStatKey().equals(oldType));
+        assertEquals(10.0, lineOf(a[0], a[1], item, 4).getValue(), 1e-9);
+        assertError(ActionError.NOT_ENOUGH_MATERIAL, eco.crystalize(a[0], a[1], item));
+    }
+
+    @Test
+    void aNewPieceStartsWithAGenSetAndStatLinesThatGrowWithItsSet() throws Exception {
+        long[] a = newAccount();
+        RANDOM.value = 0.0;
+        update("UPDATE game_character SET level = 100 WHERE character_id = ?", a[1]);
+        update("UPDATE account_wallet SET gold = 900000000 WHERE account_id = ?", a[0]);
+        for (int tier = 1; tier <= 3; tier++) {
+            int template = (int) scalar("SELECT template_id FROM item_template WHERE race = 'EARTH' AND tier = ? AND slot = 'ARMOR'", tier);
+            var bought = eco.buyGear(a[0], a[1], template);
+            assertTrue(bought.getOk(), bought.getMessage());
+            var info = itemInfo(a[0], a[1], bought.getNewId());
+            assertEquals(tier, info.getLinesCount(), "Than Linh 1 line, Huy Diet 2, Thien Su 3");
+            var types = new java.util.HashSet<String>();
+            for (var l : info.getLinesList()) {
+                assertEquals("STAT_STONE", l.getSource(), "a new piece never starts with the red line");
+                assertTrue(types.add(l.getStatKey()), "no type twice");
+                assertTrue(l.getValue() >= 1.5 - 1e-9 && l.getValue() <= l.getCap() + 1e-9);
+            }
+            assertFalse(info.getGens(0).getGenKey().isEmpty(), "the first GEN slot holds a set");
+            var set = com.battleball.server.game.GenSets.find(data.get(), info.getGens(0).getGenKey());
+            assertTrue(set.race().equals("EARTH") || set.race().equals("ALL"), "a set of the planet of the piece");
+            assertEquals(1, info.getGenSlots(), "no extra slot");
+        }
+        // the lines are rolled with the real random: whatever they are, they stay inside the rules
+        update("UPDATE game_character SET level = 100 WHERE character_id = ?", a[2]);
+        RANDOM.value = 0.7;
+        int template = (int) scalar("SELECT template_id FROM item_template WHERE race = 'NAMEC' AND tier = 3 AND slot = 'RING'");
+        var rolled = eco.buyGear(a[0], a[2], template);
+        assertTrue(rolled.getOk(), rolled.getMessage());
+        for (var l : itemInfo(a[0], a[2], rolled.getNewId()).getLinesList()) {
+            assertTrue(l.getValue() > 0 && l.getValue() <= l.getCap() + 1e-9);
+        }
+        RANDOM.value = 0.0;
     }
 }

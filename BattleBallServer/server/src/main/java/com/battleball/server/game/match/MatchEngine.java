@@ -185,6 +185,14 @@ public final class MatchEngine {
     // ---------------------------------------------------------------------------------------------------------------- public API
 
     /** Queue an input from the network thread; it runs at the start of the next tick. */
+    private volatile Runnable firstDummyHit;       // training: told once, when a character of the squad first hurts a dummy (the quests of Ông Gôhan, docs 15.32)
+    private boolean dummyHitTold;
+
+    /** Training: {@code r} runs once, on the engine thread, the first time a dummy takes a blow from the squad. */
+    public void onFirstDummyHit(Runnable r) {
+        this.firstDummyHit = r;
+    }
+
     public void submit(Runnable r) {
         inputs.add(r);
     }
@@ -237,7 +245,17 @@ public final class MatchEngine {
         return bossesDefeated;
     }
 
+    /** The bosses of the match: an evolving boss counts every form (every form pays like a boss). */
     public int bossCount() {
+        int n = 0;
+        for (MatchSetup.Encounter e : setup.encounters()) {
+            n += e.bosses();
+        }
+        return n;
+    }
+
+    /** The stages of the match: each has its waves of small monsters before its boss (an evolving boss is one stage). */
+    private int stageCount() {
         return setup.encounters().size();
     }
 
@@ -463,7 +481,11 @@ public final class MatchEngine {
         while ((r = inputs.poll()) != null) {
             r.run();
         }
-        if (finished || paused) {
+        if (paused) {
+            return;
+        }
+        if (finished) {
+            tick++;                                          // the match was ended by an input (a blow of the player): the last frame still gets a tick number of its own
             return;
         }
         now += TICK_MS;
@@ -904,12 +926,18 @@ public final class MatchEngine {
                 long ms = (long) Json.num(p, "durationMs", 30000);
                 long eff = controlMs(t, ms);
                 t.chocolateUntil = now + eff;
+                if (t instanceof Monster tm && tm.kind == MonsterKind.BOSS && eff > 0) {
+                    interruptBoss(tm);
+                }
                 addEffect(Effect.CHOCOLATE, f, t, (int) eff, id);
             }
             case 22 -> {                                                                   // Thôi miên: the target falls asleep (Nro: the target only, no area)
                 long ms = (long) Json.num(p, "sleepMs", 5000);
                 long eff = controlMs(t, ms);
                 t.sleepUntil = now + eff;
+                if (t instanceof Monster tm && tm.kind == MonsterKind.BOSS && eff > 0) {
+                    interruptBoss(tm);
+                }
                 addEffect(Effect.SLEEP, f, t, (int) eff, id);
             }
             case 23 -> {                                                                   // Trói: the target cannot move while the caster stands there (Nro setUseTroi)
@@ -985,9 +1013,15 @@ public final class MatchEngine {
                 }
                 double ax = aim.x;
                 double ay = aim.y;
+                // docs 15.33: the part taken from the HP of the victim is capped by a multiple of the caster's attack, so it cannot take a tenth of the HP of a boss (owner report 2026-10-11:
+                // the damage looked unreal); the part of the attack grows with the level of the skill
+                Map<String, Object> bp = L.params();
+                double atkPart = f.atk * Json.num(bp, "atkMult", 10);
+                double hpPct = Json.num(bp, "hpPct", 10) / 100.0;
+                double hpCap = f.atk * Json.num(bp, "hpTermCapAtkMult", 1e9);
                 for (Entity e : enemiesOf(f)) {
                     if (Math.hypot(e.x - ax, e.y - ay) <= radius + e.radius) {
-                        hit(f, e, e.hp * 0.10 + 10 * f.atk, id, false, false, false);
+                        hit(f, e, atkPart + Math.min(e.hp * hpPct, hpCap), id, false, false, false);
                     }
                 }
             }
@@ -1099,6 +1133,9 @@ public final class MatchEngine {
                 continue;
             }
             long jar = controlMs(e, jarMs);
+            if (e instanceof Monster em && em.kind == MonsterKind.BOSS && jar > 0) {
+                interruptBoss(em);
+            }
             e.jarFrom = now;
             e.jarGatherEnd = now + gather;
             e.jarUntil = now + gather + jar;
@@ -1233,14 +1270,20 @@ public final class MatchEngine {
         }
     }
 
+    /**
+     * Who the heal of the Namek (Trị thương) takes: the ally the caster aims at, else the one in reach that needs it most; a dead ally comes first. A dead ally can be revived from
+     * farther away than a living one is healed (balance_config match_rules revive_skill_reach_px, owner report 2026-10-11: the body lies where it fell, often far from the healer).
+     */
     private Fighter healTarget(Fighter caster, Entity target, StaticData.SkillLevel L) {
-        double reach = L.radiusPx() == null ? 130 : L.radiusPx();
-        if (target instanceof Fighter t && t.team == Team.PLAYER && caster.distance(t) <= reach + 40) {
+        double reach = (L.radiusPx() == null ? 130 : L.radiusPx()) + 40;
+        double reviveReach = Math.max(reach, rule("revive_skill_reach_px", 320));
+        if (target instanceof Fighter t && t.team == Team.PLAYER && caster.distance(t) <= (t.alive ? reach : reviveReach)) {
             return t;
         }
         Fighter best = null;
         for (Fighter o : squad) {
-            if (caster.distance(o) <= reach + 40 && (best == null || ratio(o) < ratio(best))) {
+            double d = caster.distance(o);
+            if (d <= (o.alive ? reach : reviveReach) && (best == null || ratio(o) < ratio(best) || (ratio(o) == ratio(best) && d < caster.distance(best)))) {
                 best = o;
             }
         }
@@ -1275,7 +1318,7 @@ public final class MatchEngine {
         if (target == null || !target.alive) {
             return;
         }
-        if (target.shielded(now)) {
+        if (target.shielded(now) || (target instanceof Monster em && now < em.evolveUntil)) {         // an evolving boss cannot be hurt while it charges
             damageBuf.add(DamageEvent.newBuilder().setSourceId(src.id).setTargetId(target.id).setAbsorbed(true).setSkillId(skillId).build());
             return;
         }
@@ -1302,6 +1345,18 @@ public final class MatchEngine {
         long amount = Math.max(1, Math.round(dmg));
         long dealt = Math.min(amount, target.hp);
         target.hp -= dealt;
+        if (target instanceof Monster em && em.forms != null && em.formIdx < em.forms.size() - 1) {
+            if (em.hp <= 0) {
+                em.hp = 1;                                  // a form of an evolving boss is never killed: it evolves when its HP is nearly gone
+            }
+            if (em.evolveUntil == 0 && em.hp <= em.hpMax * evolutionRule(em, "hp_trigger_pct", 10) / 100.0) {
+                beginEvolve(em);
+            }
+        }
+        if (target instanceof Dummy && !dummyHitTold && firstDummyHit != null && (src instanceof Fighter || src instanceof PetEntity)) {
+            dummyHitTold = true;
+            firstDummyHit.run();
+        }
         if (target instanceof Dummy && target.hp <= 0) {
             target.hp = target.hpMax;                      // a training dummy gets all its HP back when it runs out
             addEffect(Effect.REGEN, target, target, 0, 0);
@@ -1388,20 +1443,7 @@ public final class MatchEngine {
         streak = now - lastKillAt <= windowMs ? streak + 1 : 1;
         lastKillAt = now;
         if (real) {
-            bossesDefeated++;
-            double hasMinions = setup.minionPool().isEmpty() ? 0 : 1;
-            double bossShare = hasMinions == 0 ? 1.0 : Json.num(split, "boss_share", 0.6);
-            goldEarned += Math.round(winGold * bossShare / Math.max(1, bossCount()));
-            fastestBossKillS = Math.min(fastestBossKillS, (now - bossSpawnedAt) / 1000.0);
-            double perBoss = expPerBoss();
-            double bonus = streakBonus();
-            for (Fighter f : squad) {
-                double over = overlevelFactor(f.level);
-                addExp(f.characterId, perBoss * over * (1 + bonus));
-                if (f.partnerCharacterId != 0) {
-                    addExp(f.partnerCharacterId, perBoss * overlevelFactor(partnerLevel(f)) * (1 + bonus));
-                }
-            }
+            payBoss(winGold);
             if (m.role.equals("FINAL")) {
                 finalDefeated = true;
             }
@@ -1437,6 +1479,84 @@ public final class MatchEngine {
         }
     }
 
+    /** What one boss kill pays: its share of the gold of a win, the EXP of the characters, and the time of the fight (the form of an evolving boss pays the same). */
+    private void payBoss(double winGold) {
+        Map<String, Object> split = d.balanceObj("gold_split");
+        bossesDefeated++;
+        double hasMinions = setup.minionPool().isEmpty() ? 0 : 1;
+        double bossShare = hasMinions == 0 ? 1.0 : Json.num(split, "boss_share", 0.6);
+        goldEarned += Math.round(winGold * bossShare / Math.max(1, bossCount()));
+        fastestBossKillS = Math.min(fastestBossKillS, (now - bossSpawnedAt) / 1000.0);
+        double perBoss = expPerBoss();
+        double bonus = streakBonus();
+        for (Fighter f : squad) {
+            double over = overlevelFactor(f.level);
+            addExp(f.characterId, perBoss * over * (1 + bonus));
+            if (f.partnerCharacterId != 0) {
+                addExp(f.partnerCharacterId, perBoss * overlevelFactor(partnerLevel(f)) * (1 + bonus));
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------- the evolving boss (docs 15.30)
+
+    @SuppressWarnings("unchecked")
+    private double evolutionRule(Monster m, String key, double fallback) {
+        Map<String, Object> all = Json.obj(d.balanceObj("boss_evolutions"), String.valueOf(setup.dungeon() == null ? 0 : setup.dungeon().id()));
+        return Json.num(all, key, fallback);
+    }
+
+    /**
+     * The HP of the form is nearly gone: the boss charges like the Tự phát nổ (the client plays the charge) but hurts nobody and cannot be hurt, then turns into the next
+     * form ({@link #completeEvolve}).
+     */
+    private void beginEvolve(Monster m) {
+        long ms = (long) (evolutionRule(m, "charge_s", 3.0) * 1000);
+        m.evolveUntil = now + ms;
+        m.regenUntil = 0;
+        m.shieldUntil = 0;
+        telegraphs.removeIf(t -> t.ownerId() == m.id);
+        effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.CAST_START).setSourceId(m.id).setTargetId(m.id).setDurationMs((int) ms).setX((float) m.x).setY((float) m.y)
+                .setDirX((float) m.dirX).setDirY((float) m.dirY).setSkillId(14).build());
+    }
+
+    /** The charge is over: the form counts as a boss killed, the boss gets the look and the numbers of the next one and all its HP back. */
+    private void completeEvolve(Monster m) {
+        m.evolveUntil = 0;
+        double winGold = d.balanceNum("gold_per_win_per_level", 1000) * tierLevel();
+        kills.add(new MatchOutcome.Kill(m.classKey, m.boss.id(), true));
+        double windowMs = Json.num(d.balanceObj("exp_rules"), "streak_window_s", 5) * 1000;
+        streak = now - lastKillAt <= windowMs ? streak + 1 : 1;
+        lastKillAt = now;
+        payBoss(winGold);
+        m.formIdx++;
+        boolean last = m.formIdx == m.forms.size() - 1;
+        m.boss = m.forms.get(m.formIdx);
+        m.name = m.boss.name();
+        m.role = last ? "FINAL" : "NORMAL";
+        m.classKey = last ? "FINAL" : "BOSS";
+        applyMonsterStats(m, d.monsterStat(m.classKey, setup.dungeon().tier()), m.boss);          // all its HP back, the attack of the new form
+        m.enraged = false;
+        m.stunUntil = m.holdUntil = m.sleepUntil = m.chocolateUntil = 0;
+        m.rageUntil = 0;
+        bossSpawnedAt = now;
+        m.nextActionAt = now + 1200;
+        spawnBuf.add(spawnProto(m));                          // the client draws the new form from this (same id, new parts)
+        effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.BOSS_EVOLVE).setSourceId(m.id).setTargetId(m.id).setX((float) m.x).setY((float) m.y)
+                .setSkillId(m.formIdx + 1).setLength(m.forms.size()).build());
+    }
+
+    private boolean bannedBossSkill(int skill) {
+        if (d.balance().get("boss_banned_skills") instanceof List<?> l) {
+            for (Object o : l) {
+                if (o instanceof Number n && n.intValue() == skill) {
+                    return true;
+                }
+            }
+        }
+        return skill == 14;                                   // the Tự phát nổ of the Xayda: no boss has it, even if the data forgets to say so
+    }
+
     /** The small monsters a match is expected to have (the waves of every stage, never above the cap of the match): the 40% of the gold of the match for them is shared out by this. */
     private double expectedWaveMinions() {
         int cap = (int) d.balanceNum("minion_cap_per_match", 20);
@@ -1444,7 +1564,7 @@ public final class MatchEngine {
         for (int n : waveSizes()) {
             total += n;
         }
-        return Math.min(cap, total * Math.max(1, bossCount()));
+        return Math.min(cap, total * Math.max(1, stageCount()));
     }
 
     private double averagePoolWeight(Map<String, Object> split) {
@@ -1526,10 +1646,23 @@ public final class MatchEngine {
         for (Object s : slots) {
             int slot = ((Double) s).intValue();
             StaticData.Skill sk = f.skillBySlot.get(slot);
-            if (sk == null || never.contains((double) sk.id()) || !aiWants(f, sk, f.skillLevelBySlot.get(slot), target)) {
+            if (sk == null || never.contains((double) sk.id())) {
                 continue;
             }
-            if (tryUseSkill(f, slot, target.id, target.x - f.x, target.y - f.y)) {
+            Entity aim = target;
+            if (isAreaControlSkill(sk.id())) {
+                continue;                                        // owner request 2026-10-11: the AI never uses a control skill that takes more than one target (it would catch the small monsters)
+            }
+            if (isControlSkill(sk.id())) {
+                aim = controlTarget(f);                          // a single-target control skill is for a boss, never for the small monsters (even when one of them is the nearest)
+                if (aim == null) {
+                    continue;
+                }
+            }
+            if (!aiWants(f, sk, f.skillLevelBySlot.get(slot), aim)) {
+                continue;
+            }
+            if (tryUseSkill(f, slot, aim.id, aim.x - f.x, aim.y - f.y)) {
                 return;
             }
         }
@@ -1548,6 +1681,39 @@ public final class MatchEngine {
         return L == null || L.lengthPx() == null ? 36 : L.lengthPx();
     }
 
+    /** The control skills that take one target: Biến Sôcôla, Dịch chuyển tức thời (it stuns), Thôi miên and Trói. */
+    private static boolean isControlSkill(int id) {
+        return id == 18 || id == 20 || id == 22 || id == 23;
+    }
+
+    /** The control skills that take everyone in an area: Thái dương hạ san (the stun around the caster) and Ma phong ba (the jar). A player may cast them; the AI never does. */
+    private static boolean isAreaControlSkill(int id) {
+        return id == 6 || id == 26;
+    }
+
+    /**
+     * What an AI character may use a control skill on: the nearest boss (in a training session a dummy stands for it) that is on the screen of the player or near the character.
+     * Null when there is none: the small monsters never get a control skill from the AI.
+     */
+    private Entity controlTarget(Fighter f) {
+        double[] v = dungeon ? view() : null;
+        double defend = rule("dg_ai_defend_px", 220);
+        Entity best = null;
+        double bd = Double.MAX_VALUE;
+        for (Entity e : enemiesOf(f)) {
+            boolean boss = e instanceof Dummy || (e instanceof Monster m && m.kind == MonsterKind.BOSS);
+            if (!boss || !e.alive || (dungeon && !(inside(v, e) || f.distance(e) <= defend))) {
+                continue;
+            }
+            double dist = f.distance(e);
+            if (dist < bd) {
+                best = e;
+                bd = dist;
+            }
+        }
+        return best;
+    }
+
     /** Is it sensible for an AI ally to use this skill now? (the order of preference comes from the data; this only avoids wasting skills) */
     private boolean aiWants(Fighter f, StaticData.Skill sk, int level, Entity target) {
         StaticData.SkillLevel L = sk.level(level);
@@ -1560,17 +1726,15 @@ public final class MatchEngine {
             case 0, 2, 4, 9, 17 -> dist - target.radius <= (L.lengthPx() == null ? 36 : L.lengthPx()) - 2 && (sk.id() != 9 || f.hp > f.hpMax * 0.4);
             case 1, 3, 5 -> dist <= (L.lengthPx() == null ? 300 : L.lengthPx()) + target.radius - 20;
             case 24, 25, 11 -> dist <= (L.lengthPx() == null ? 200 : Math.min(L.lengthPx(), 600)) * 0.8;
-            case 26 -> dist <= (L.radiusPx() == null ? 500 : L.radiusPx()) * 0.8;
             case 10 -> bossAlive && dist <= (L.radiusPx() == null ? 380 : L.radiusPx()) * 0.8;
-            case 6 -> enemiesOf(f).stream().anyMatch(e -> f.distance(e) <= (L.radiusPx() == null ? 150 : L.radiusPx()) && e.canAct(now));
-            case 7 -> squad.stream().anyMatch(o -> (!o.alive || ratio(o) < 0.6) && f.distance(o) <= (L.radiusPx() == null ? 130 : L.radiusPx()) + 40);
+            case 7 -> squad.stream().anyMatch(o -> o.alive ? ratio(o) < 0.6 && f.distance(o) <= (L.radiusPx() == null ? 130 : L.radiusPx()) + 40
+                    : f.distance(o) <= Math.max((L.radiusPx() == null ? 130 : L.radiusPx()) + 40, rule("revive_skill_reach_px", 320)));
             case 8 -> ratio(f) < 0.7 && now >= f.regenUntil;
             case 12 -> bossAlive && dist <= 600;
             case 13 -> bossAlive && now >= f.monkeyUntil;
             case 19 -> ratio(f) < 0.5 || telegraphs.stream().anyMatch(t -> inTelegraph(t, f));
             case 21 -> bossAlive && squad.stream().filter(o -> o.alive).count() > 1 && f.hpBonusAmount == 0;
-            case 18, 22, 23 -> bossAlive && (target instanceof Dummy || target instanceof Monster m && m.kind == MonsterKind.BOSS)
-                    && dist <= (L.radiusPx() == null ? 300 : L.radiusPx()) && target.canMove(now);
+            case 18, 22, 23 -> bossAlive && dist <= (L.radiusPx() == null ? 300 : L.radiusPx()) && target.canMove(now);
             case 20 -> bossAlive && dist > 220 && target.canAct(now);
             default -> false;
         };
@@ -1759,6 +1923,12 @@ public final class MatchEngine {
         Monster m = new Monster(nextId++, enc.boss().name(), MonsterKind.BOSS, enc.boss(), enc.classKey(), enc.role(), rule("boss_radius", 34));
         applyMonsterStats(m, ms, enc.boss());
         m.planet = forcedPlanet != null ? forcedPlanet : PLANETS[rng.nextInt(PLANETS.length)];       // every boss draws a planet for the match and fights with its skills
+        if (enc.forms() != null) {
+            m.forms = enc.forms();                               // an evolving boss: a Xayda that fights with all the skills a boss can use (docs 15.30)
+            m.formIdx = 0;
+            m.planet = "XAYDA";
+            m.kitKey = Json.obj(d.balanceObj("boss_evolutions"), String.valueOf(setup.dungeon().id())).get("kit") instanceof String k ? k : "APE";
+        }
         double[] v = view();
         m.x = clamp(v[2] - 60, 100, arenaW - 100);                  // it appears on the screen, at its right edge
         m.y = clamp((v[1] + v[3]) / 2, 80, arenaH - 80);
@@ -1805,9 +1975,10 @@ public final class MatchEngine {
             m.armorReduction = 0.2;
             return;
         }
-        m.hpMax = m.hp = Math.max(1, Math.round(ms.hp() * boss.hpMult()));
+        Difficulty level = setup.difficulty();                  // docs 15.33: the difficulty of the run scales every monster and boss
+        m.hpMax = m.hp = Math.max(1, Math.round(ms.hp() * boss.hpMult() * level.hpMult()));
         double atkPct = ms.atkMin() + rng.nextDouble() * (ms.atkMax() - ms.atkMin());
-        m.atkPerHit = atkPct / 100.0 * d.balanceNum("max_atk_total", 500_000) * boss.atkMult();
+        m.atkPerHit = atkPct / 100.0 * d.balanceNum("max_atk_total", 500_000) * boss.atkMult() * level.atkMult();
         m.atk = m.atkPerHit;
         m.armorReduction = (ms.armorMin() + ms.armorMax()) / 2.0 / 100.0;
         m.critRatePct = 0;
@@ -1828,6 +1999,12 @@ public final class MatchEngine {
     }
 
     private void updateMonster(Monster m, double dt) {
+        if (m.evolveUntil != 0) {
+            if (now >= m.evolveUntil) {
+                completeEvolve(m);
+            }
+            return;                                          // charging: it does nothing else
+        }
         if (!m.canAct(now)) {
             return;
         }
@@ -1945,6 +2122,11 @@ public final class MatchEngine {
         } else {
             m.leashOvershoot = 0;
         }
+        if (now < m.regenUntil) {
+            heal(m, m.hpMax * Json.num(kitOf(m), "regen_pct_per_s", 3) / 100.0 * dt);
+            normalizeInto(m, target.x - m.x, target.y - m.y);
+            return;                                          // Tái tạo năng lượng: it stands still
+        }
         double meleeRange = rule("boss_melee_range", 60);
         if (now >= m.nextActionAt) {
             double gap = m.gapS * (m.enraged ? rule("enrage_gap_factor", 0.7) : 1.0);
@@ -1961,7 +2143,7 @@ public final class MatchEngine {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> kitOf(Monster m) {
-        if (d.balance().get("boss_planet_kits") instanceof Map<?, ?> all && all.get(m.planet) instanceof Map<?, ?> kit) {
+        if (d.balance().get("boss_planet_kits") instanceof Map<?, ?> all && all.get(m.kitKey != null ? m.kitKey : m.planet) instanceof Map<?, ?> kit) {
             return (Map<String, Object>) kit;
         }
         return Map.of();
@@ -1977,17 +2159,59 @@ public final class MatchEngine {
         return !(kitOf(m).get("actions") instanceof List<?> l) || l.isEmpty() || l.contains(action);
     }
 
+    /** The moves of a boss in priority order: the order of the kit's "actions" when it has one (the APE kit), else the order of balance_config boss_actions. */
+    private List<Map<String, Object>> orderedBossActions(Monster m) {
+        List<Map<String, Object>> all = bossActions();
+        if (!(kitOf(m).get("actions") instanceof List<?> order) || order.isEmpty() || m.kitKey == null) {
+            return all;
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Object o : order) {
+            for (Map<String, Object> a : all) {
+                if (o.equals(a.get("name"))) {
+                    out.add(a);
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The cooldown of a move of a kit that follows its skills ("cd_skills", the APE kit): the cooldown of the skill at the kit's level, divided by cd_divisor when it is at least
+     * cd_long_s seconds (owner request 2026-10-11: ten times quicker for the skills with a long cooldown); -1 when the kit does not say.
+     */
+    private double kitCooldownS(Monster m, String action) {
+        Map<String, Object> kit = kitOf(m);
+        if (!(kit.get("cd_skills") instanceof Map<?, ?> map) || !(map.get(action) instanceof Number id)) {
+            return -1;
+        }
+        StaticData.Skill sk = d.skills().get(id.intValue());
+        StaticData.SkillLevel L = sk == null ? null : sk.level((int) Json.num(kit, "skill_level", 7));
+        if (L == null) {
+            return -1;
+        }
+        double s = L.cooldownMs() / 1000.0;
+        return s >= Json.num(kit, "cd_long_s", 10) ? s / Math.max(1, Json.num(kit, "cd_divisor", 10)) : s;
+    }
+
     /**
      * One boss action: the first ready entry of the priority list that the planet of the boss has and that makes sense now (docs 7.5; the planets: docs 15.25). Returns false
      * when nothing was possible.
      */
     private boolean performBossAction(Monster m, Entity target, double meleeRange) {
-        for (Map<String, Object> a : bossActions()) {
+        for (Map<String, Object> a : orderedBossActions(m)) {
             String name = (String) a.get("name");
             if (!kitHas(m, name)) {
                 continue;
             }
             double cd = Json.num(a, "cooldown_s", 0);
+            double fromSkill = kitCooldownS(m, name);
+            if (fromSkill >= 0) {
+                cd = fromSkill;
+            }
+            if (bannedBossSkill(kitSkill(m, name, -1)) || bannedBossSkill((int) Json.num(Json.obj(kitOf(m), "cd_skills"), name, -1))) {
+                continue;                                                                   // no boss has the Tự phát nổ
+            }
             if (name.equals("stun") && m.enraged) {
                 cd = Math.min(cd, rule("enrage_stun_cooldown_s", 12));
             }
@@ -1995,8 +2219,46 @@ public final class MatchEngine {
                 continue;
             }
             double mult = Json.num(a, "damage_mult", 1.0);
-            double base = m.atkPerHit * mult;
+            double base = m.atkPerHit * mult * (now < m.rageUntil ? m.rageMult : 1.0);
             switch (name) {
+                case "bind" -> {                                                            // Trói (#23): ties one character for a few seconds; no damage
+                    Fighter prey = null;
+                    for (Fighter f : squad) {
+                        if (f.alive && f.holdUntil <= now && m.distance(f) <= 600 && (prey == null || m.distance(f) < m.distance(prey))) {
+                            prey = f;
+                        }
+                    }
+                    if (prey == null) {
+                        continue;
+                    }
+                    m.actionReadyAt.put(name, now + (long) (cd * 1000));
+                    long ms = (long) (Json.num(kitOf(m), "bind_s", 3) * 1000);
+                    normalizeInto(m, prey.x - m.x, prey.y - m.y);
+                    effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.CAST_START).setSourceId(m.id).setTargetId(prey.id).setSkillId(23).setDirX((float) m.dirX).setDirY((float) m.dirY).build());
+                    prey.holdUntil = now + ms;
+                    prey.holdById = m.id;
+                    addEffect(Effect.HOLD, m, prey, (int) ms, 23);
+                    return true;
+                }
+                case "whistle" -> {                                                         // Huýt sáo (#21): its blows are stronger for a while
+                    m.actionReadyAt.put(name, now + (long) (cd * 1000));
+                    long ms = (long) (Json.num(kitOf(m), "whistle_s", 8) * 1000);
+                    m.rageUntil = now + ms;
+                    m.rageMult = Json.num(kitOf(m), "whistle_mult", 1.5);
+                    effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.CAST_START).setSourceId(m.id).setTargetId(m.id).setSkillId(21).setDurationMs((int) ms).build());
+                    addEffect(Effect.BUFF, m, m, (int) ms, 21);
+                    return true;
+                }
+                case "regen" -> {                                                           // Tái tạo năng lượng (#8): it stands still and heals for a few seconds
+                    if ((double) m.hp / m.hpMax > 0.7) {
+                        continue;
+                    }
+                    m.actionReadyAt.put(name, now + (long) (cd * 1000));
+                    long ms = (long) (Json.num(kitOf(m), "regen_s", 3) * 1000);
+                    m.regenUntil = now + ms;
+                    effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.CAST_START).setSourceId(m.id).setTargetId(m.id).setSkillId(8).setDurationMs((int) ms).build());
+                    return true;
+                }
                 case "ultimate" -> {
                     if (m.distance(target) > 600) {
                         continue;
@@ -2263,6 +2525,9 @@ public final class MatchEngine {
 
     private void stun(Entity e, long ms) {
         e.stunUntil = Math.max(e.stunUntil, now + controlMs(e, ms));
+        if (e instanceof Monster mm && mm.kind == MonsterKind.BOSS && controlMs(e, ms) > 0) {
+            interruptBoss(mm);
+        }
         if (e instanceof Fighter f) {
             if (f.cast != null) {
                 addEffect(Effect.CAST_END, f, f, 0, f.cast.skill.id());
@@ -2274,8 +2539,24 @@ public final class MatchEngine {
         releaseHolds(e);
     }
 
-    /** Control effects on a boss are shortened (balance_config match_rules boss_control_factor / boss_control_max_ms). */
+    /**
+     * A boss that is stunned, put to sleep, turned into a sweet or sealed in a jar loses the blow it was preparing (the red zone of its ultimate or bomb goes away and the blow never
+     * lands), as a character's cast is broken by a stun; the client drops the red zone (CAST_END of the boss on itself, skill 0).
+     */
+    private void interruptBoss(Monster m) {
+        boolean had = telegraphs.removeIf(t -> t.ownerId() == m.id);
+        had |= delayed.removeIf(x -> x.owner == m);
+        m.regenUntil = 0;
+        if (had) {
+            effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.CAST_END).setSourceId(m.id).setTargetId(m.id).setSkillId(0).build());
+        }
+    }
+
+    /** Control effects on a boss are shortened (balance_config match_rules boss_control_factor / boss_control_max_ms); one that is evolving cannot be controlled. */
     private long controlMs(Entity e, long ms) {
+        if (e instanceof Monster em && now < em.evolveUntil) {
+            return 0;
+        }
         if (e instanceof Monster m && m.kind == MonsterKind.BOSS) {
             return Math.min((long) rule("boss_control_max_ms", 3000), Math.round(ms * rule("boss_control_factor", 0.3)));
         }

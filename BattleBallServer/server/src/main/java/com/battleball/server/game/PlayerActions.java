@@ -28,6 +28,8 @@ public final class PlayerActions {
     private final StaticDataStore data;
     private final EconomyService economy;
     private final MailService mail;
+    private final AttendanceService attendance;
+    private final QuestService quests;
     private volatile java.util.function.LongConsumer statsChanged = id -> { };
 
     /** Called (on the DB executor) after an action that can change the figures of a character; the match manager updates a running training session with it. */
@@ -40,6 +42,21 @@ public final class PlayerActions {
         this.data = data;
         this.economy = economy;
         this.mail = new MailService(db, data);
+        this.attendance = new AttendanceService(db, data);
+        this.quests = new QuestService(db, data);
+    }
+
+    /**
+     * Counts an event for the quests of the account (docs 15.32). Errors never reach the player: a quest that is not counted must not break the action that was paid.
+     * Returns true when a counter changed.
+     */
+    public boolean recordQuest(long accountId, String type, int amount) {
+        try {
+            return quests.record(accountId, type, amount);
+        } catch (SQLException | RuntimeException e) {
+            LOG.warn("cannot count the quest event {}", type, e);
+            return false;
+        }
     }
 
     public static boolean handles(Envelope.PayloadCase c) {
@@ -48,7 +65,7 @@ public final class PlayerActions {
                  ASSEMBLE_ITEM_REQUEST, EQUIP_ITEM_REQUEST, UNEQUIP_ITEM_REQUEST, SELL_ITEMS_REQUEST, UPGRADE_ITEM_REQUEST, BUY_SUPPORT_REQUEST,
                  EQUIP_SUPPORT_REQUEST, UNEQUIP_SUPPORT_REQUEST, CRAFT_REQUEST, BUY_POTARA_SHARDS_REQUEST, ASSEMBLE_POTARA_REQUEST,
                  MAIL_LIST_REQUEST, MAIL_ACTION_REQUEST, NOTICE_LIST_REQUEST, DISCARD_SKIN_REQUEST, EQUIP_AURA_REQUEST, SHOP_REQUEST, SHOP_BUY_REQUEST,
-                 REROLL_GEN_REQUEST, UNLOCK_GEN_SLOT_REQUEST -> true;
+                 REROLL_GEN_REQUEST, UNLOCK_GEN_SLOT_REQUEST, STAT_STONE_REQUEST, CRYSTALIZE_REQUEST, ATTENDANCE_REQUEST, CLAIM_ATTENDANCE_REQUEST, CLAIM_QUEST_REQUEST -> true;
             default -> false;
         };
     }
@@ -98,6 +115,23 @@ public final class PlayerActions {
                         r = economy.buyMaterial(accountId, buyer, q.getTemplateId(), q.getQuantity());
                     }
                 }
+                case ATTENDANCE_REQUEST -> {
+                    out.add(Envelope.newBuilder().setRequestId(rid).setAttendanceInfo(attendance.info(accountId)).build());
+                    return out;
+                }
+                case CLAIM_ATTENDANCE_REQUEST -> {
+                    r = attendance.claim(accountId);
+                    if (r.getOk()) {
+                        recordQuest(accountId, "ATTENDANCE", 1);
+                    }
+                    out.add(Envelope.newBuilder().setRequestId(rid).setActionResult(r).build());
+                    if (r.getOk()) {
+                        out.add(Envelope.newBuilder().setAttendanceInfo(attendance.info(accountId)).build());
+                        out.add(snapshotEnvelope(accountId, 0));
+                    }
+                    return out;
+                }
+                case CLAIM_QUEST_REQUEST -> r = quests.claim(accountId, req.getClaimQuestRequest().getQuestId());
                 case MAIL_ACTION_REQUEST -> {
                     var q = req.getMailActionRequest();
                     r = switch (q.getAction()) {
@@ -140,6 +174,11 @@ public final class PlayerActions {
                 }
                 case UPGRADE_ITEM_REQUEST -> r = economy.upgradeItem(accountId, req.getUpgradeItemRequest().getCharacterId(), req.getUpgradeItemRequest().getItemId());
                 case REROLL_GEN_REQUEST -> r = economy.rerollGen(accountId, req.getRerollGenRequest().getCharacterId(), req.getRerollGenRequest().getItemId(), req.getRerollGenRequest().getLineNo());
+                case STAT_STONE_REQUEST -> {
+                    var q = req.getStatStoneRequest();
+                    r = economy.statStone(accountId, q.getCharacterId(), q.getItemId(), q.getAction(), q.getLineNo());
+                }
+                case CRYSTALIZE_REQUEST -> r = economy.crystalize(accountId, req.getCrystalizeRequest().getCharacterId(), req.getCrystalizeRequest().getItemId());
                 case UNLOCK_GEN_SLOT_REQUEST -> r = economy.unlockGenSlot(accountId, req.getUnlockGenSlotRequest().getCharacterId(), req.getUnlockGenSlotRequest().getItemId());
                 case BUY_SUPPORT_REQUEST -> r = economy.buySupport(accountId, req.getBuySupportRequest().getCharacterId(), req.getBuySupportRequest().getSupportId());
                 case EQUIP_SUPPORT_REQUEST -> r = economy.equipSupport(accountId, req.getEquipSupportRequest().getCharacterId(), req.getEquipSupportRequest().getInstanceId());
@@ -155,11 +194,14 @@ public final class PlayerActions {
                 }
                 default -> r = ActionResult.newBuilder().setOk(false).setError(ActionError.INVALID_ARGUMENT).build();
             }
+            if (r.getOk()) {
+                countQuests(accountId, req);
+            }
             out.add(Envelope.newBuilder().setRequestId(rid).setActionResult(r).build());
             if (r.getOk()) {
                 out.add(snapshotEnvelope(accountId, 0));
                 switch (req.getPayloadCase()) {
-                    case EQUIP_ITEM_REQUEST, UNEQUIP_ITEM_REQUEST, UPGRADE_ITEM_REQUEST, REROLL_GEN_REQUEST, UNLOCK_GEN_SLOT_REQUEST, EQUIP_SKIN_REQUEST, EQUIP_AURA_REQUEST, EQUIP_SUPPORT_REQUEST, UNEQUIP_SUPPORT_REQUEST,
+                    case EQUIP_ITEM_REQUEST, UNEQUIP_ITEM_REQUEST, UPGRADE_ITEM_REQUEST, REROLL_GEN_REQUEST, UNLOCK_GEN_SLOT_REQUEST, STAT_STONE_REQUEST, CRYSTALIZE_REQUEST, EQUIP_SKIN_REQUEST, EQUIP_AURA_REQUEST, EQUIP_SUPPORT_REQUEST, UNEQUIP_SUPPORT_REQUEST,
                          DISCARD_SKIN_REQUEST -> statsChanged.accept(accountId);
                     default -> { }
                 }
@@ -172,13 +214,34 @@ public final class PlayerActions {
         return out;
     }
 
+    /** What a successful request means to the quests (docs 15.32). */
+    private void countQuests(long accountId, Envelope req) {
+        switch (req.getPayloadCase()) {
+            case SHOP_BUY_REQUEST -> {
+                String kind = req.getShopBuyRequest().getKind();
+                recordQuest(accountId, kind.equals("GEAR") || kind.equals("EXCHANGE") ? "GET_GEAR" : "BUY_MATERIAL", 1);
+            }
+            case ASSEMBLE_ITEM_REQUEST -> recordQuest(accountId, "GET_GEAR", 1);
+            case BUY_SKIN_REQUEST -> recordQuest(accountId, "BUY_SKIN", 1);
+            case EQUIP_ITEM_REQUEST -> recordQuest(accountId, "EQUIP_ITEM", 1);
+            case UPGRADE_ITEM_REQUEST -> recordQuest(accountId, "UPGRADE_ITEM", 1);
+            case REROLL_GEN_REQUEST -> recordQuest(accountId, "GEN_REROLL", 1);
+            case UNLOCK_GEN_SLOT_REQUEST -> recordQuest(accountId, "GEN_SLOT", 1);
+            case STAT_STONE_REQUEST -> recordQuest(accountId, "STAT_STONE", 1);
+            case UPGRADE_SKILL_REQUEST -> recordQuest(accountId, "UPGRADE_SKILL", 1);
+            case BUY_POTARA_SHARDS_REQUEST -> recordQuest(accountId, "BUY_SHARDS", 1);
+            case ASSEMBLE_POTARA_REQUEST -> recordQuest(accountId, "ASSEMBLE_EARRING", 1);
+            default -> { }
+        }
+    }
+
     public Envelope snapshotEnvelope(long accountId, int rid) throws SQLException {
         StaticData d = data.get();
         try (Connection c = db.connection()) {
             PlayerRepository.PlayerData p = PlayerRepository.load(c, accountId);
             int cap = (int) Json.num(d.balanceObj("potara"), "daily_cap", 20);
             return Envelope.newBuilder().setRequestId(rid).setPlayerDataSnapshot(
-                    PlayerRepository.toProto(d, p, cap).toBuilder().setUnreadMail(MailService.unread(c, accountId))).build();
+                    PlayerRepository.toProto(d, p, cap).toBuilder().setUnreadMail(MailService.unread(c, accountId)).addAllQuests(quests.entries(c, accountId))).build();
         }
     }
 

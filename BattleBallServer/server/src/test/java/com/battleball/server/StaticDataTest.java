@@ -55,6 +55,14 @@ class StaticDataTest {
             assertEquals(45, d.items().size(), "three sets of five pieces for each of the three planets");
             assertEquals(20000.0, d.items().get(3).baseValue());
             assertTrue(d.materials().containsKey(301));
+            for (int m : new int[]{101, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 202, 203, 204, 205}) {
+                final int material = m;
+                assertTrue(d.dropRules().stream().anyMatch(r -> r.materialId() == material), "something drops material " + material + " (V016, V041)");
+            }
+            assertTrue(d.dropRules().stream().noneMatch(r -> r.materialId() >= 111 && r.materialId() <= 115 && !r.tier().equals("late")), "the Thien Su fragments drop in the late dungeons only");
+            assertTrue(d.dropRules().stream().noneMatch(r -> r.materialId() >= 106 && r.materialId() <= 110 && !(r.tier().equals("mid") || r.tier().equals("late"))), "the Huy Diet fragments start in the middle dungeons");
+            assertEquals(3, com.battleball.server.game.StatStones.rules(d).maxLines());
+            assertEquals(6, com.battleball.server.game.StatStones.rules(d).types().size());
             assertEquals(6, d.recipes().size());
             assertEquals(2, d.recipes().get(0).inputs().size());
             assertEquals(13, d.dungeons().size());

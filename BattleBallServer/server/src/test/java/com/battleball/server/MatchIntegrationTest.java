@@ -132,6 +132,7 @@ class MatchIntegrationTest {
         boolean sawBossSpawn;
         long lastTick;
         boolean ticksIncrease = true;
+        String tickViolation = "";
     }
 
     private static Played playUntilEnd(TestClient c, MatchStarted started, long maxMillis) throws Exception {
@@ -157,6 +158,9 @@ class MatchIntegrationTest {
             out.frames++;
             if (f.getServerTick() <= out.lastTick) {
                 out.ticksIncrease = false;
+                if (out.tickViolation.isEmpty()) {
+                    out.tickViolation = "tick " + f.getServerTick() + " after " + out.lastTick + " (frame " + out.frames + ", spawns " + f.getSpawnsCount() + ", effects " + f.getEffectsCount() + ")";
+                }
             }
             out.lastTick = f.getServerTick();
             f.getSpawnsList().forEach(s -> {
@@ -237,6 +241,14 @@ class MatchIntegrationTest {
         }
     }
 
+    /** The match is removed a moment after MatchEnded is sent: wait for it before starting the next one. */
+    private static void waitNoMatch(Player p) throws Exception {
+        for (int i = 0; i < 100 && matches.hasMatch(p.accountId()); i++) {
+            Thread.sleep(50);
+        }
+        assertFalse(matches.hasMatch(p.accountId()), "the finished match is gone");
+    }
+
     // ---- tests ----
     @Test
     void aWholeMatchOverTheNetworkPaysItsRewardsOnce() throws Exception {
@@ -261,7 +273,7 @@ class MatchIntegrationTest {
             assertEquals(MatchResult.WON, played.ended.getResult());
             assertEquals(3, played.ended.getBossesDefeated());
             assertTrue(played.sawBossSpawn);
-            assertTrue(played.ticksIncrease, "server ticks only go up");
+            assertTrue(played.ticksIncrease, "server ticks only go up: " + played.tickViolation);
             assertTrue(played.frames > 100);
             assertTrue(played.ended.getGold() > 0);
             assertEquals(20, played.ended.getGems(), "first clear of a dungeon: 20 gems");
@@ -281,6 +293,11 @@ class MatchIntegrationTest {
             assertEquals(1, scalar("SELECT COUNT(*) FROM currency_ledger WHERE character_id = ? AND reason = 'MATCH_GEMS'", p.characters()[0]));
             assertTrue(scalar("SELECT exp FROM game_character WHERE character_id = ?", p.characters()[0]) > 0);
             assertFalse(matches.hasMatch(p.accountId()), "the finished match is gone");
+
+            // the quests of Ông Gôhan counted the win and the three bosses (docs 15.32), and the snapshot that was pushed already shows it
+            assertEquals(1, scalar("SELECT progress FROM quest_progress WHERE account_id = ? AND quest_id = 'd02'", p.accountId()));
+            assertEquals(3, scalar("SELECT progress FROM quest_progress WHERE account_id = ? AND quest_id = 'd03'", p.accountId()));
+            assertEquals(1, snapshot.getQuestsList().stream().filter(q -> q.getId().equals("d02")).findFirst().orElseThrow().getProgress());
 
             // a second match of the same dungeon: no first-clear gems again
             c.send(startRequest(11, 12, p.characters()[0]));
@@ -318,6 +335,57 @@ class MatchIntegrationTest {
             assertEquals(MatchResult.ABANDONED, ended.getResult());
             assertEquals(0, ended.getGems());
             assertEquals("ABANDONED", text("SELECT status FROM match_run WHERE run_id = ?", ended.getRunId()));
+        }
+    }
+
+    @Test
+    void aDungeonRunHasADifficultyEverySkillIsReadyAtTheStartAndAHarderRunPaysMore() throws Exception {
+        Player p = newPlayer();
+        // the village left the punch of the first character cooling down for a minute (kept on the real clock)
+        update("INSERT INTO character_skill_cooldown (character_id, skill_id, ready_at_ms) VALUES (?, 0, ?)", p.characters()[0], System.currentTimeMillis() + 60_000);
+        try (TestClient c = p.client()) {
+            c.send(Envelope.newBuilder().setRequestId(9).setPlayerDataRequest(com.battleball.proto.PlayerDataRequest.getDefaultInstance()).build());
+            var snap = c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            assertEquals(java.util.List.of("EASY", "HARD", "HELL"), snap.getDifficultiesList().stream().map(x -> x.getKey()).toList(), "the client learns the difficulties from the snapshot");
+            assertTrue(snap.getDifficulties(2).getAtkMult() > snap.getDifficulties(0).getAtkMult() && !snap.getDifficulties(1).getName().isEmpty());
+
+            c.send(Envelope.newBuilder().setRequestId(3).setStartMatchRequest(StartMatchRequest.newBuilder().setDungeonId(12).setControlledCharacterId(p.characters()[0])
+                    .setDifficulty("NIGHTMARE")).build());
+            assertEquals(ActionError.NOT_FOUND, c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getError(), "there is no such difficulty");
+
+            c.send(Envelope.newBuilder().setRequestId(4).setStartMatchRequest(StartMatchRequest.newBuilder().setDungeonId(12).setControlledCharacterId(p.characters()[0])
+                    .setDifficulty("HELL")).build());
+            MatchStarted started = c.expectCase(Envelope.PayloadCase.MATCH_STARTED, 8000).getMatchStarted();
+            assertEquals("HELL", started.getDifficulty());
+            assertEquals("HELL", text("SELECT difficulty FROM match_run WHERE run_id = ?", started.getRunId()));
+            assertTrue(started.getSkillsList().stream().anyMatch(sl -> sl.getSkillId() == 0), "the punch is there");
+            assertTrue(started.getSkillsList().stream().allMatch(sl -> sl.getCooldownLeftMs() == 0), "every skill is ready when the dungeon begins");
+            c.send(Envelope.newBuilder().setLeaveMatchRequest(LeaveMatchRequest.getDefaultInstance()).build());
+            c.expectCase(Envelope.PayloadCase.MATCH_ENDED, 8000);
+            waitNoMatch(p);
+
+            c.send(startRequest(5, 12, p.characters()[0]));                                   // no difficulty named: the easiest
+            MatchStarted plain = c.expectCase(Envelope.PayloadCase.MATCH_STARTED, 8000).getMatchStarted();
+            assertEquals("EASY", plain.getDifficulty());
+            c.send(Envelope.newBuilder().setLeaveMatchRequest(LeaveMatchRequest.getDefaultInstance()).build());
+            c.expectCase(Envelope.PayloadCase.MATCH_ENDED, 8000);
+            waitNoMatch(p);
+
+            // a harder run pays more (the same player, the same dungeon, both won)
+            MatchEnded[] ended = new MatchEnded[2];
+            String[] levels = {"EASY", "HARD"};
+            for (int i = 0; i < 2; i++) {
+                c.send(Envelope.newBuilder().setRequestId(20 + i).setStartMatchRequest(StartMatchRequest.newBuilder().setDungeonId(12).setControlledCharacterId(p.characters()[0])
+                        .setDifficulty(levels[i])).build());
+                MatchStarted run = c.expectCase(Envelope.PayloadCase.MATCH_STARTED, 8000).getMatchStarted();
+                ended[i] = playUntilEnd(c, run, 120_000).ended;
+                waitNoMatch(p);
+                assertEquals(MatchResult.WON, ended[i].getResult(), levels[i]);
+            }
+            double goldRatio = (double) ended[1].getGold() / ended[0].getGold();
+            double expRatio = (double) ended[1].getCharacters(0).getExpGained() / ended[0].getCharacters(0).getExpGained();
+            assertTrue(goldRatio > 1.3 && goldRatio < 1.9, "hard pays about 1.6 times the gold of easy: " + goldRatio);
+            assertTrue(expRatio > 1.3 && expRatio < 1.9, "...and the EXP: " + expRatio);
         }
     }
 

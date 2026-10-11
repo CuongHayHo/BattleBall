@@ -1,5 +1,5 @@
 {
-  "totalParts": 995,
+  "totalParts": 998,
   "parts": [
     {
       "partId": 0,
@@ -68528,6 +68528,228 @@
         {
           "subIndex": 13,
           "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 18,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 250,
+          "dx": 5,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 19,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 252,
+          "dx": -3,
+          "dy": -1
+        },
+        {
+          "subIndex": 2,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 14,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 15,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 16,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 20,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 251,
+          "dx": 0,
+          "dy": 6
+        },
+        {
+          "subIndex": 2,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 0,
           "dx": 0,
           "dy": 0
         }

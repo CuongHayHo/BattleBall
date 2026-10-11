@@ -58,6 +58,10 @@ public final class MatchStarter {
         if (dungeon == null || !dungeon.enabled()) {
             throw new StartException(ActionError.NOT_FOUND, "dungeon not found");
         }
+        Difficulty difficulty = Difficulty.find(d, req.getDifficulty());                 // docs 15.33: an empty key is the default (easy)
+        if (difficulty == null) {
+            throw new StartException(ActionError.NOT_FOUND, "unknown difficulty " + req.getDifficulty());
+        }
         PlayerRepository.PlayerData player;
         try (Connection c = db.connection()) {
             player = PlayerRepository.load(c, accountId);
@@ -97,9 +101,24 @@ public final class MatchStarter {
             order.add(new MatchSetup.Encounter(last.boss(), "FINAL", null));
         }
 
+        // ---- a dungeon whose boss evolves (balance_config boss_evolutions, docs 15.30): one encounter that goes through every form
+        Map<String, Object> evolution = Json.obj(d.balanceObj("boss_evolutions"), String.valueOf(dungeon.id()));
+        if (evolution.get("boss_ids") instanceof List<?> ids && !ids.isEmpty()) {
+            List<StaticData.Boss> forms = new ArrayList<>();
+            for (Object o : ids) {
+                StaticData.Boss b = o instanceof Number n ? d.bosses().get(n.intValue()) : null;
+                if (b != null && b.enabled()) {
+                    forms.add(b);
+                }
+            }
+            if (!forms.isEmpty()) {
+                order = new ArrayList<>(List.of(new MatchSetup.Encounter(forms.get(0), forms.size() == 1 ? "FINAL" : "NORMAL", null, forms.size() > 1 ? forms : null)));
+            }
+        }
+
         // ---- the squad
         List<MatchSetup.SquadMember> squad = squad(d, player, main, partner, 0);
-        MatchSetup setup0 = new MatchSetup(0, d, dungeon, squad, order, minions, main.gold(), rng);
+        MatchSetup setup0 = new MatchSetup(0, d, dungeon, squad, order, minions, main.gold(), rng).withDifficulty(difficulty);
 
         // ---- record the run
         byte[] raw = new byte[32];
@@ -109,13 +128,14 @@ public final class MatchStarter {
         try (Connection c = db.connection()) {
             c.setAutoCommit(false);
             try {
-                try (PreparedStatement ps = c.prepareStatement("INSERT INTO match_run (account_id, dungeon_id, controlled_char_id, fusion_partner_id, session_token_hash) VALUES (?,?,?,?,?)",
+                try (PreparedStatement ps = c.prepareStatement("INSERT INTO match_run (account_id, dungeon_id, controlled_char_id, fusion_partner_id, session_token_hash, difficulty) VALUES (?,?,?,?,?,?)",
                         Statement.RETURN_GENERATED_KEYS)) {
                     ps.setLong(1, accountId);
                     ps.setInt(2, dungeon.id());
                     ps.setLong(3, main.id());
                     ps.setObject(4, partner == null ? null : partner.id());
                     ps.setString(5, sha256(token));
+                    ps.setString(6, difficulty.key().isEmpty() ? "EASY" : difficulty.key());
                     ps.executeUpdate();
                     try (ResultSet rs = ps.getGeneratedKeys()) {
                         rs.next();
@@ -124,12 +144,15 @@ public final class MatchStarter {
                 }
                 int n = 1;
                 for (MatchSetup.Encounter e : order) {
-                    try (PreparedStatement ps = c.prepareStatement("INSERT INTO match_run_boss (run_id, order_no, boss_id, role) VALUES (?,?,?,?)")) {
-                        ps.setLong(1, runId);
-                        ps.setInt(2, n++);
-                        ps.setInt(3, e.boss().id());
-                        ps.setString(4, e.role().equals("MINION") ? "NORMAL" : e.role());
-                        ps.executeUpdate();
+                    List<StaticData.Boss> shown = e.forms() == null ? List.of(e.boss()) : e.forms();       // an evolving boss: a row for every form
+                    for (int i = 0; i < shown.size(); i++) {
+                        try (PreparedStatement ps = c.prepareStatement("INSERT INTO match_run_boss (run_id, order_no, boss_id, role) VALUES (?,?,?,?)")) {
+                            ps.setLong(1, runId);
+                            ps.setInt(2, n++);
+                            ps.setInt(3, shown.get(i).id());
+                            ps.setString(4, e.forms() != null ? (i == shown.size() - 1 ? "FINAL" : "NORMAL") : e.role().equals("MINION") ? "NORMAL" : e.role());
+                            ps.executeUpdate();
+                        }
                     }
                 }
                 c.commit();
@@ -138,9 +161,9 @@ public final class MatchStarter {
                 throw e;
             }
         }
-        MatchSetup setup = new MatchSetup(runId, d, dungeon, squad, order, minions, main.gold(), rng);
+        MatchSetup setup = new MatchSetup(runId, d, dungeon, squad, order, minions, main.gold(), rng).withDifficulty(difficulty);
         MatchEngine engine = new MatchEngine(setup);
-        engine.applyCooldowns(cooldownsOf(player), System.currentTimeMillis());
+        // owner request 2026-10-11: every skill is ready when the dungeon begins (the cooldowns kept from the village are not carried in; the ones left at the end are kept again)
         return new Started(runId, token, engine, setup, accountId, d);
     }
 
@@ -249,7 +272,7 @@ public final class MatchStarter {
         } else {
             b.setDungeonId(dungeon.id()).setDungeonName(dungeon.name())
                     .setArena(com.battleball.proto.Arena.newBuilder().setWidth((float) engine.arenaWidth()).setHeight((float) engine.arenaHeight()))
-                    .setTimeLimitS(dungeon.timeLimitS() == null ? 0 : dungeon.timeLimitS());
+                    .setTimeLimitS(dungeon.timeLimitS() == null ? 0 : dungeon.timeLimitS()).setDifficulty(s.setup().difficulty().key());
         }
         b.addAllEntities(engine.snapshotSpawns());
         b.addAllSkills(skillSlots(engine, engine.controlledFighter()));

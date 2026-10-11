@@ -1140,4 +1140,346 @@ class MatchEngineTest {
         assertEquals(700, second.x, 1e-6);
         assertNull(e.switchControl(9999), "no such fighter");
     }
+
+    @Test
+    void noBossHasTheSelfDestructAndTheApeKitFollowsTheXaydaSkills() {
+        java.util.Set<String> moveKeys = java.util.Set.of("punch", "beam", "ultimate", "stun", "bomb", "focus");
+        if (d.balance().get("boss_planet_kits") instanceof Map<?, ?> kits) {
+            for (Map.Entry<?, ?> kit : kits.entrySet()) {
+                if (kit.getValue() instanceof Map<?, ?> k) {
+                    for (Map.Entry<?, ?> e : k.entrySet()) {
+                        String key = String.valueOf(e.getKey());
+                        if (moveKeys.contains(key) && e.getValue() instanceof Number n) {
+                            assertTrue(n.intValue() != 14, "the kit " + kit.getKey() + " has the Tu phat no as its " + key);
+                        }
+                        if (key.equals("cd_skills") && e.getValue() instanceof Map<?, ?> skills) {
+                            skills.values().forEach(v -> assertTrue(!(v instanceof Number n) || n.intValue() != 14, "a move of the kit " + kit.getKey() + " is the Tu phat no"));
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(d.balance().get("boss_banned_skills") instanceof List<?> l && l.stream().anyMatch(o -> o instanceof Number n && n.intValue() == 14), "14 is banned for every boss");
+        Map<?, ?> ape = (Map<?, ?>) ((Map<?, ?>) d.balance().get("boss_planet_kits")).get("APE");
+        assertEquals(List.of("ultimate", "bind", "whistle", "regen", "beam", "punch"), ape.get("actions"));
+        Map<?, ?> skills = (Map<?, ?>) ape.get("cd_skills");
+        assertEquals(23, ((Number) skills.get("bind")).intValue());
+        assertEquals(25, ((Number) skills.get("ultimate")).intValue());
+    }
+
+    @Test
+    void theApeBossTurnsIntoItsNextFormWhenItsHpIsNearlyGoneAndPaysForEveryForm() {
+        List<StaticData.Boss> forms = new ArrayList<>();
+        for (int id = 78; id <= 84; id++) {
+            forms.add(d.bosses().get(id));
+        }
+        MatchSetup setup = new MatchSetup(1, d, d.dungeons().get(3), List.of(member(1, "EARTH", 100, true, EARTH_SKILLS, 8, 60)),
+                List.of(new MatchSetup.Encounter(forms.get(0), "NORMAL", null, forms)), List.of(), 10_000_000, new Random(3));
+        MatchEngine e = new MatchEngine(setup);
+        assertEquals(7, e.bossCount(), "every form counts as a boss");
+        for (int i = 0; i < 90; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Monster boss = (Entities.Monster) e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+        assertEquals(forms.get(0).name(), boss.name);
+        assertEquals("XAYDA", boss.planet);
+        for (int form = 0; form < 6; form++) {
+            boss.stunUntil = e.nowMs() + 600_000;                                   // it does not fight back in this test
+            boss.hp = Math.max(2, Math.round(boss.hpMax * 0.12));                   // just above the point where it evolves
+            int guard = 0;
+            while (boss.evolveUntil == 0 && guard++ < 400) {
+                play(e);
+                e.step();
+                e.buildFrame();
+            }
+            assertTrue(boss.evolveUntil != 0, "the form " + (form + 1) + " starts to evolve");
+            assertTrue(boss.alive && boss.hp >= 1, "it is not killed");
+            long hpCharging = boss.hp;
+            for (int i = 0; i < 20; i++) {                                         // the charge: nothing hurts it
+                play(e);
+                e.step();
+                e.buildFrame();
+            }
+            assertEquals(hpCharging, boss.hp, "it cannot be hurt while it charges");
+            guard = 0;
+            while (boss.evolveUntil != 0 && guard++ < 200) {
+                e.step();
+                e.buildFrame();
+            }
+            assertEquals(form + 1, boss.formIdx);
+            assertEquals(boss.hpMax, boss.hp, "all its HP back");
+            assertEquals(forms.get(form + 1).name(), boss.name);
+            assertEquals(form + 1, e.bossesDefeated(), "the form that fell was paid like a boss");
+            assertEquals(form == 5 ? "FINAL" : "NORMAL", boss.role);
+        }
+        // the seventh form dies for real and the dungeon is won
+        boss.stunUntil = e.nowMs() + 600_000;
+        boss.hp = 1;
+        int guard = 0;
+        while (!e.finished() && guard++ < 400) {
+            play(e);
+            e.step();
+            e.buildFrame();
+        }
+        assertTrue(e.finished(), "the last form falls");
+        assertEquals(7, e.bossesDefeated());
+        assertEquals(7, e.outcome().kills().stream().filter(k -> k.realBoss()).count(), "seven bosses paid");
+        assertEquals(com.battleball.proto.MatchResult.WON, e.outcome().result());
+    }
+
+    @Test
+    void theApeBossUsesTheXaydaMovesWithTheShortenedCooldownsAndNeverTheSelfDestruct() {
+        List<StaticData.Boss> forms = new ArrayList<>();
+        for (int id = 78; id <= 84; id++) {
+            forms.add(d.bosses().get(id));
+        }
+        MatchSetup setup = new MatchSetup(1, d, d.dungeons().get(3), List.of(member(1, "EARTH", 100, true, EARTH_SKILLS, 1, 400), member(2, "NAMEC", 100, false, NAMEC_SKILLS, 1, 400)),
+                List.of(new MatchSetup.Encounter(forms.get(0), "NORMAL", null, forms)), List.of(), 10_000_000, new Random(5));
+        MatchEngine e = new MatchEngine(setup);
+        for (int i = 0; i < 80; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Monster boss = (Entities.Monster) e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+        boss.hpMax = boss.hp = 1_000_000_000_000L;                                  // it never evolves or dies in this test
+        boss.hp = (long) (boss.hpMax * 0.6);                                        // hurt enough to regenerate
+        java.util.Map<Integer, Integer> casts = new java.util.HashMap<>();
+        boolean selfDestructSeen = false;
+        for (int i = 0; i < 20 * 70; i++) {                                         // 70 seconds
+            e.step();
+            var frame = e.buildFrame();
+            for (var ef : frame.getEffectsList()) {
+                if (ef.getSourceId() == boss.id && (ef.getEffect() == com.battleball.proto.Effect.CAST_START || ef.getEffect() == com.battleball.proto.Effect.TELEGRAPH_RECT)) {
+                    casts.merge(ef.getSkillId(), 1, Integer::sum);
+                }
+            }
+            for (var dmg : frame.getDamagesList()) {
+                selfDestructSeen |= dmg.getSourceId() == boss.id && dmg.getSkillId() == 14;
+            }
+            boss.hp = Math.max(boss.hp, (long) (boss.hpMax * 0.5));
+        }
+        assertFalse(selfDestructSeen, "no boss uses the Tu phat no");
+        assertFalse(casts.containsKey(14), "the boss never charges the Tu phat no in a fight (only to evolve, and not in this test)");
+        assertTrue(casts.getOrDefault(25, 0) >= 3, "Cadic (cooldown 110 s / 10 = 11 s) is used often: " + casts);
+        assertTrue(casts.getOrDefault(25, 0) <= 70 / 11 + 2, "...but not faster than its shortened cooldown: " + casts);
+        assertTrue(casts.getOrDefault(21, 0) >= 1 && casts.getOrDefault(21, 0) <= 70 / 18 + 1, "Huyt sao (180 s / 10 = 18 s): " + casts);
+        assertTrue(casts.getOrDefault(23, 0) >= 2 && casts.getOrDefault(23, 0) <= 70 / 4 + 2, "Troi (45 s / 10 = 4.5 s): " + casts);
+        assertTrue(casts.getOrDefault(8, 0) >= 1 && casts.getOrDefault(8, 0) <= 70 / 2 + 2, "Tai tao nang luong (25 s / 10 = 2.5 s): " + casts);
+    }
+
+    /** Uses a control skill of a character on the boss of a dungeon and returns how long the boss is held by it now, in ms: {stun, sleep, chocolate, hold}. */
+    private static long[] controlOnBoss(String race, int skillId, int slot) {
+        MatchEngine e = engineBare(12, 1, List.of(member(1, race, 100, true, Map.of(0, 7, skillId, 7), 1, 400)), 17);
+        for (int i = 0; i < 80; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Monster boss = (Entities.Monster) e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+        Entities.Fighter me = e.controlledFighter();
+        boss.x = me.x + 60;
+        boss.y = me.y;
+        e.submit(() -> e.useSkill(1, slot, boss.id, 1, 0));
+        for (int i = 0; i < 3; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        long now = e.nowMs();
+        return new long[]{Math.max(0, boss.stunUntil - now), Math.max(0, boss.sleepUntil - now), Math.max(0, boss.chocolateUntil - now), Math.max(0, boss.holdUntil - now)};
+    }
+
+    @Test
+    void theControlSkillsControlABossForAShortTime() {
+        long[] stun = controlOnBoss("EARTH", 6, 2);                                          // Thai duong ha san: 9 s on others
+        assertTrue(stun[0] > 1500 && stun[0] <= 3000, "the stun holds a boss up to 3 s: " + stun[0]);
+        long[] sleep = controlOnBoss("EARTH", 22, 6);                                        // Thoi mien
+        assertTrue(sleep[1] > 0 && sleep[1] <= 3000, "the sleep holds a boss: " + sleep[1]);
+        long[] sweet = controlOnBoss("NAMEC", 18, 6);                                        // Bien Socola
+        assertTrue(sweet[2] > 0 && sweet[2] <= 3000, "the chocolate holds a boss: " + sweet[2]);
+        long[] rope = controlOnBoss("XAYDA", 23, 6);                                         // Troi
+        assertTrue(rope[3] > 0 && rope[3] <= 3000, "the rope holds a boss: " + rope[3]);
+    }
+
+    @Test
+    void aStunnedBossLosesTheBlowItWasPreparing() {
+        MatchEngine e = engineBare(12, 1, List.of(member(1, "EARTH", 100, true, Map.of(0, 7, 6, 7), 1, 4000)), 21);
+        e.forcePlanet("EARTH");
+        for (int i = 0; i < 80; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Monster boss = (Entities.Monster) e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+        Entities.Fighter me = e.controlledFighter();
+        int zone = 0;
+        for (int i = 0; i < 20 * 60 && zone == 0; i++) {
+            e.step();
+            for (var ef : e.buildFrame().getEffectsList()) {
+                if (ef.getSourceId() == boss.id && ef.getEffect() == com.battleball.proto.Effect.TELEGRAPH_RECT) {
+                    zone = ef.getSkillId();
+                }
+            }
+        }
+        assertTrue(zone != 0, "the boss prepares its ultimate");
+        boss.x = me.x + 60;
+        boss.y = me.y;
+        e.submit(() -> e.useSkill(1, 2, boss.id, 1, 0));                                     // the stun of Thai duong ha san
+        boolean dropped = false;
+        boolean landed = false;
+        for (int i = 0; i < 20 * 4; i++) {                                                   // the zone would have landed after 2 s
+            e.step();
+            var frame = e.buildFrame();
+            for (var ef : frame.getEffectsList()) {
+                dropped |= ef.getEffect() == com.battleball.proto.Effect.CAST_END && ef.getSourceId() == boss.id && ef.getTargetId() == boss.id && ef.getSkillId() == 0;
+            }
+            for (var dmg : frame.getDamagesList()) {
+                landed |= dmg.getSourceId() == boss.id && dmg.getSkillId() == zone && dmg.getAmount() > 0;
+            }
+        }
+        assertTrue(dropped, "the client is told to drop the red zone");
+        assertFalse(landed, "the blow never lands");
+    }
+
+    @Test
+    void theAiUsesControlSkillsOnABossAndNeverOnSmallMonsters() {
+        MatchEngine e = engine(12, 1, List.of(member(1, "EARTH", 100, true, EARTH_SKILLS, 8, 400), member(2, "XAYDA", 100, false, Map.of(4, 7, 23, 7), 8, 400),
+                member(3, "EARTH", 100, false, Map.of(0, 7, 6, 7, 22, 7), 8, 400)), 31);
+        java.util.Set<com.battleball.proto.Effect> control = java.util.Set.of(com.battleball.proto.Effect.STUN, com.battleball.proto.Effect.HOLD, com.battleball.proto.Effect.SLEEP,
+                com.battleball.proto.Effect.CHOCOLATE, com.battleball.proto.Effect.TELEPORT);
+        boolean bossSeen = false;
+        int onBoss = 0;
+        for (int i = 0; i < 20 * 400; i++) {
+            play(e);
+            e.step();
+            var frame = e.buildFrame();
+            java.util.Map<Integer, Entities.Monster> monsters = new java.util.HashMap<>();
+            for (var x : e.entities()) {
+                if (x instanceof Entities.Monster m) {
+                    monsters.put(m.id, m);
+                }
+            }
+            for (var ef : frame.getEffectsList()) {
+                if (!control.contains(ef.getEffect()) || ef.getSourceId() == e.controlledFighter().id) {
+                    continue;
+                }
+                Entities.Monster target = monsters.get(ef.getTargetId());
+                if (target == null) {
+                    continue;
+                }
+                assertTrue(ef.getSkillId() != 6 && ef.getSkillId() != 26, "the AI never uses a control skill of an area (skill " + ef.getSkillId() + ")");
+                assertEquals(Entities.MonsterKind.BOSS, target.kind, "the AI aimed " + ef.getEffect() + " (skill " + ef.getSkillId() + ") at a small monster");
+                onBoss++;
+                bossSeen |= target.kind == Entities.MonsterKind.BOSS;
+            }
+            if (e.finished()) {
+                break;
+            }
+        }
+        assertTrue(bossSeen && onBoss > 0, "the AI controls the boss when it is there");
+    }
+
+    /** The Namek heal (skill 7) on a dead ally standing {@code gap} px away; the target the client sends is the boss it has in focus (or none). Returns whether the ally is alive after it. */
+    private static boolean healRevives(double gap, boolean bossTarget) {
+        MatchEngine e = engineBare(12, 1, List.of(member(1, "NAMEC", 100, true, NAMEC_SKILLS, 1, 400), member(2, "EARTH", 100, false, EARTH_SKILLS, 1, 400)), 41);
+        for (int i = 0; i < 80; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Fighter me = e.controlledFighter();
+        Entities.Fighter ally = e.squad().stream().filter(x -> x != me).findFirst().orElseThrow();
+        ally.alive = false;
+        ally.hp = 0;
+        ally.x = me.x + gap;
+        ally.y = me.y;
+        Entities.Entity boss = e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+        int slot = slotOf(7);
+        int target = bossTarget ? boss.id : 0;
+        e.submit(() -> e.useSkill(1, slot, target, 1, 0));
+        for (int i = 0; i < 5; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        return ally.alive;
+    }
+
+    @Test
+    void theNamekHealRevivesADeadAllyEvenWhenItLiesFarAway() {
+        assertTrue(healRevives(60, false), "a dead ally beside the caster, no target");
+        assertTrue(healRevives(60, true), "...with the boss in focus (the target the client sends)");
+        assertTrue(healRevives(160, true), "...at 160 px");
+        assertTrue(healRevives(300, true), "a body lies where it fell: it is revived from up to revive_skill_reach_px (320)");
+        assertFalse(healRevives(400, true), "...but not from any distance");
+    }
+
+    /** Releases the Qua cau kenh khi of a level-100 character at the given skill level on the boss of dungeon {@code dungeon}; returns {damage dealt to the boss, the attack of the caster}. */
+    private static double[] spiritBomb(int dungeon, int skillLevel) {
+        MatchEngine e = engineBare(dungeon, 1, List.of(member(1, "EARTH", 100, true, Map.of(0, 7, 10, skillLevel), 1, 1000)), 41);
+        for (int i = 0; i < 80; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Fighter me = e.controlledFighter();
+        me.critRatePct = 0;
+        Entities.Monster boss = (Entities.Monster) e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+        boss.x = me.x + 100;
+        boss.y = me.y;
+        boss.armorReduction = 0;
+        double hp0 = boss.hp;
+        long dealt = 0;
+        e.submit(() -> e.useSkill(1, slotOf(10), boss.id, 1, 0));
+        for (int i = 0; i < 20 * 8; i++) {
+            e.step();
+            for (var dm : e.buildFrame().getDamagesList()) {
+                if (dm.getSkillId() == 10 && dm.getTargetId() == boss.id) {
+                    dealt += dm.getAmount();
+                }
+            }
+        }
+        return new double[]{dealt, me.atk, hp0};
+    }
+
+    @Test
+    void theSpiritBombGrowsWithItsLevelAndDoesNotTakeATenthOfTheLifeOfABoss() {
+        double[] lv7 = spiritBomb(3, 7);
+        double[] lv1 = spiritBomb(3, 1);
+        assertTrue(lv7[0] > 0 && lv1[0] > 0, "the bomb lands");
+        assertTrue(lv7[0] > lv1[0] * 1.2, "a higher level hits harder: " + lv1[0] + " then " + lv7[0]);
+        double cap = (11 + 6) * lv7[1] * 1.06;                                         // level 7: 11 x attack plus at most 6 x attack of the HP part, 5% spread
+        assertTrue(lv7[0] <= cap, "the bomb stays under " + cap + " (it was " + lv7[0] + "; the boss has " + lv7[2] + " HP, a tenth of it is " + lv7[2] / 10 + ")");
+        assertTrue(lv7[0] < lv7[2] / 10, "it is far from a tenth of the HP of the boss");
+    }
+
+    @Test
+    void aDifficultyScalesTheMonstersAndTheRewardIsRead() {
+        var easy = com.battleball.server.game.match.Difficulty.find(d, "");
+        assertEquals("EASY", easy.key(), "no key = the default, the easiest");
+        var hell = com.battleball.server.game.match.Difficulty.find(d, "hell");
+        assertEquals("HELL", hell.key());
+        assertNull(com.battleball.server.game.match.Difficulty.find(d, "NIGHTMARE"));
+        var all = com.battleball.server.game.match.Difficulty.all(d);
+        assertEquals(List.of("EASY", "HARD", "HELL"), all.stream().map(com.battleball.server.game.match.Difficulty::key).toList());
+        for (int i = 1; i < all.size(); i++) {
+            assertTrue(all.get(i).atkMult() > all.get(i - 1).atkMult() && all.get(i).hpMult() >= all.get(i - 1).hpMult(), "harder means stronger monsters");
+            assertTrue(all.get(i).rewardMult() > all.get(i - 1).rewardMult() && all.get(i).dropMult() >= all.get(i - 1).dropMult(), "...and a bigger reward");
+        }
+        // the same dungeon and seed at three difficulties: the boss follows the multipliers
+        double[] hp = new double[3];
+        double[] atk = new double[3];
+        com.battleball.server.game.match.Difficulty[] levels = {com.battleball.server.game.match.Difficulty.NONE, easy, hell};
+        for (int i = 0; i < 3; i++) {
+            MatchSetup setup = new MatchSetup(1, d, d.dungeons().get(12), List.of(member(1, "EARTH", 100, true, EARTH_SKILLS)), encounters(12, 1), List.of(), 10_000_000, new Random(9))
+                    .withDifficulty(levels[i]);
+            MatchEngine e = new MatchEngine(setup);
+            for (int k = 0; k < 80; k++) {
+                e.step();
+                e.buildFrame();
+            }
+            Entities.Monster boss = (Entities.Monster) e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+            hp[i] = boss.hpMax;
+            atk[i] = boss.atkPerHit;
+        }
+        assertEquals(easy.hpMult(), hp[1] / hp[0], 0.001);
+        assertEquals(easy.atkMult(), atk[1] / atk[0], 0.001);
+        assertEquals(hell.hpMult(), hp[2] / hp[0], 0.001);
+        assertEquals(hell.atkMult(), atk[2] / atk[0], 0.001);
+    }
 }

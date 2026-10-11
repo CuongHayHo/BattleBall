@@ -80,6 +80,7 @@ namespace BattleBall.Net
         public BbMenuAuras auras;
         public BbTraining training;              // the training dummies of the village (docs 15.12)
         public BbMenuSkills skills;              // the Kỹ năng tab: the skills of the three characters, raised with gold
+        public BbAttendancePanel attendance;     // the table of the daily check-in of the elder (docs 15.25); stands where the shop stands
         public BbSmithPanel smith;               // what Bà Hạt Mít does for the gear: upgrade, change a GEN line, open a GEN line (docs 15.22); stands where the shop stands
         public BbShopPanel shop;                 // the shop of an NPC (Urôn): stands on the left while this panel moves to the right (docs 15.15)
 
@@ -144,6 +145,8 @@ namespace BattleBall.Net
             if (auras != null) auras.Tapped = OnAuraTapped;
             if (shop != null) { shop.menu = this; shop.Closed = OnShopClosed; shop.Warm(); }
             if (smith != null) { smith.menu = this; smith.Closed = OnShopClosed; }
+            if (attendance != null) { attendance.menu = this; attendance.Closed = OnShopClosed; }
+            if (quest != null) { quest.menu = this; quest.Closed = OnShopClosed; }
             WireDungeon();
             WirePopupSide();
             _panelOpen = PlayerPrefs.GetInt(KeyPanel, 1) != 0;
@@ -202,6 +205,8 @@ namespace BattleBall.Net
             if (functions != null) functions.Refresh(snapshot);
             if (shop != null && shop.IsOpen) shop.OnSnapshot(snapshot);
             if (smith != null && smith.IsOpen) smith.OnSnapshot(snapshot);
+            if (attendance != null && attendance.IsOpen) attendance.OnSnapshot(snapshot);
+            OnQuestSnapshot(snapshot);
             OnSnapshotGear();
         }
 
@@ -678,6 +683,8 @@ namespace BattleBall.Net
         {
             if (npc.Action == NpcAction.Shop && shop != null) { OpenShop(npc); return; }
             if (npc.Action == NpcAction.Smith && smith != null) { OpenSmithMenu(npc); return; }
+            if (npc.Action == NpcAction.Attendance && attendance != null) { OpenAttendanceDialog(npc); return; }
+            if (npc.Action == NpcAction.Quest && quest != null) { OpenQuestDialog(npc); return; }
             var specs = new List<BbPopup.ButtonSpec>();
             if (npc.Action == NpcAction.DungeonGate && dungeonPicker != null) specs.Add(new BbPopup.ButtonSpec("Chọn\nphó bản", true, true));
             popup.centerOnScreen = true;
@@ -687,7 +694,7 @@ namespace BattleBall.Net
         /// <summary>True while the panel, a popup (an NPC talking, an item) or the function list is open: the combat buttons stay hidden then (owner request 2026-10-09).</summary>
         public bool BlocksCombatUi
         {
-            get { return _panelOpen || popup.IsOpen || chooserRoot.activeSelf || (functions != null && functions.IsOpen) || (shop != null && shop.IsOpen) || (smith != null && smith.IsOpen) || DungeonBlocksCombatUi || (dungeonPicker != null && dungeonPicker.IsOpen); }
+            get { return _panelOpen || popup.IsOpen || chooserRoot.activeSelf || (functions != null && functions.IsOpen) || (shop != null && shop.IsOpen) || (smith != null && smith.IsOpen) || (attendance != null && attendance.IsOpen) || (quest != null && quest.IsOpen) || DungeonBlocksCombatUi || (dungeonPicker != null && dungeonPicker.IsOpen); }
         }
 
         /// <summary>Folds the panel away to the left (the village fills the screen, the X of the panel) or brings it back (the triangle); the choice is remembered.</summary>
@@ -712,7 +719,7 @@ namespace BattleBall.Net
         public void ApplyInsets()
         {
             float menuW = Mathf.Clamp(PanelWidth + _panelX, 0f, PanelWidth);
-            float shopW = Mathf.Max(shop != null ? shop.VisibleWidth : 0f, smith != null ? smith.VisibleWidth : 0f);
+            float shopW = Mathf.Max(Mathf.Max(shop != null ? shop.VisibleWidth : 0f, smith != null ? smith.VisibleWidth : 0f), Mathf.Max(attendance != null ? attendance.VisibleWidth : 0f, quest != null ? quest.VisibleWidth : 0f));
             village.SetInset(_dockRight ? shopW : Mathf.Max(menuW, shopW), _dockRight ? menuW : 0f);
         }
 
@@ -766,6 +773,8 @@ namespace BattleBall.Net
             var specs = new List<BbPopup.ButtonSpec>
             {
                 new BbPopup.ButtonSpec("Nâng cấp\ntrang bị", true, true),
+                new BbPopup.ButtonSpec("Ép\nsao", true, false),
+                new BbPopup.ButtonSpec("Pha lê\nhóa", true, false),
                 new BbPopup.ButtonSpec("Đổi\nGEN", true, false),
                 new BbPopup.ButtonSpec("Mở ô\nGEN", true, false),
             };
@@ -774,7 +783,7 @@ namespace BattleBall.Net
             popup.Show(null, npc.Name, "", "Ta có thể giúp gì cho ngươi ?", null, null, specs, i =>
             {
                 popup.Hide();
-                OpenSmith(i == 0 ? BbSmithPanel.Mode.Upgrade : i == 1 ? BbSmithPanel.Mode.Reroll : BbSmithPanel.Mode.Unlock, false);
+                OpenSmith(i == 0 ? BbSmithPanel.Mode.Upgrade : i == 1 ? BbSmithPanel.Mode.Star : i == 2 ? BbSmithPanel.Mode.Crystal : i == 3 ? BbSmithPanel.Mode.Reroll : BbSmithPanel.Mode.Unlock, false);
             });
         }
 
@@ -899,6 +908,7 @@ namespace BattleBall.Net
             if (_demo || !BbSession.IsActive)
             {
                 if (_snapshot.Gold < next.GoldCost) { Toast("Không đủ vàng"); return; }       // no server: only change what is shown
+                if (BbQuestPanel.CardsOf(_snapshot) < next.CardCost) { Toast("Không đủ thẻ nâng cấp"); return; }
                 _snapshot.Gold -= next.GoldCost;
                 if (state == null) ch.Skills.Add(new SkillState { SkillId = entry.SkillId, Level = 1 }); else state.Level = level + 1;
                 ShowPage(_page, false);
@@ -908,7 +918,8 @@ namespace BattleBall.Net
             try
             {
                 var result = await BbSession.Client.UpgradeSkillAsync(characterId, entry.SkillId);
-                Toast(result.Ok ? (level == 0 ? "Đã học " : "Đã nâng ") + entry.Name + " lên cấp " + (level + 1) : ActionText(result));
+                Toast(result.Ok ? (level == 0 ? "Đã học " : "Đã nâng ") + entry.Name + " lên cấp " + (level + 1)
+                      : result.Error == ActionError.NotEnoughMaterial ? "Không đủ thẻ nâng cấp: " + next.CardCost + " thẻ (làm nhiệm vụ của Ông Gôhan để nhận)" : ActionText(result));
             }
             catch (Exception e)
             {
@@ -1484,7 +1495,7 @@ namespace BattleBall.Net
         /// </summary>
         void HandleOutsideTap()
         {
-            if (!_panelOpen || _dockRight || popup.IsOpen || chooserRoot.activeSelf || (shop != null && shop.IsOpen) || (smith != null && smith.IsOpen) || (functions != null && functions.IsOpen)) { _outsideDown = false; return; }
+            if (!_panelOpen || _dockRight || popup.IsOpen || chooserRoot.activeSelf || (shop != null && shop.IsOpen) || (smith != null && smith.IsOpen) || (attendance != null && attendance.IsOpen) || (quest != null && quest.IsOpen) || (functions != null && functions.IsOpen)) { _outsideDown = false; return; }
             if (Input.GetMouseButtonDown(0))
             {
                 var cam = GetComponent<Canvas>().worldCamera;
@@ -1515,6 +1526,7 @@ namespace BattleBall.Net
 
         void Update()
         {
+            UpdateQuestGuide();
             HandleOutsideTap();
             RefreshLiveStats();
             if (_fade < 1f)

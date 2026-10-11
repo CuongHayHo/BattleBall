@@ -226,6 +226,50 @@ namespace BattleBall.Net
             }
         }
 
+        // ---- Khiên năng lượng: the server marks a shielded fighter with bit 8 of its effect mask; the client draws the bubble of Nro for as long as it lasts
+        const int ShieldEffect = 33;
+        readonly Dictionary<ulong, float> _shieldNext = new Dictionary<ulong, float>();     // character: when the next bubble starts
+
+        /// <summary>
+        /// Nro (Char.update with protectEff): a new Effect(33, cx, cH_new + 73) every 5 ticks, put on the character on every update, painted over the body: the bubble of three
+        /// pictures (frames 0, 0, 1, 1, 2, 2). The message "effect 33 on/off" of the Nro server is the shield bit of the entity here, so the AI show it too.
+        /// </summary>
+        void UpdateShields()
+        {
+            if (village == null) return;
+            float now = Time.unscaledTime;
+            for (int i = 0; i < village.PartyCount; i++)
+            {
+                ulong id;
+                Vector2 feet;
+                int facing;
+                if (!village.PartyMember(i, out id, out feet, out facing)) continue;
+                uint entity;
+                EntityState st;
+                bool on = _phase == Phase.Active && _entityOf.TryGetValue(id, out entity) && _states.TryGetValue(entity, out st) && st.Alive && (st.Effects & 8u) != 0;
+                float next;
+                if (!on)
+                {
+                    if (_shieldNext.Remove(id) && _fx != null) _fx.StopFollowing(ShieldEffect, id);
+                    continue;
+                }
+                if (_shieldNext.TryGetValue(id, out next) && now < next) continue;
+                _shieldNext[id] = now + 5f / BbSkillPoses.FramesPerSecond;
+                EnsureFx();
+                ulong who = id;
+                var v = village;
+                _fx.PlayDataFollowing(ShieldEffect, who, feet + new Vector2(0f, -8f * village.UiScale), previous =>
+                {
+                    ulong pid;
+                    Vector2 at;
+                    int dir;
+                    for (int k = 0; k < v.PartyCount; k++)
+                        if (v.PartyMember(k, out pid, out at, out dir) && pid == who) return at + new Vector2(0f, -8f * v.UiScale);
+                    return null;
+                });
+            }
+        }
+
         void UpdateFlash()
         {
             float now = Time.unscaledTime;
@@ -1550,6 +1594,7 @@ namespace BattleBall.Net
             if (village != null) UpdateLooks();
             if (village != null && _phase == Phase.Active) UpdatePets(dt);
             UpdateStuns();
+            UpdateShields();
             AutoSession();
             UpdateFocus();
             UpdatePendingNpc();

@@ -40,7 +40,7 @@ public record StaticData(
     }
 
     public record SkillLevel(int level, Double damagePctAtk, Double damagePctMaxKi, Double kiCostPct, int cooldownMs, long goldCost,
-                             Integer lengthPx, Integer widthPx, Integer radiusPx, Integer projectileSpeed, Map<String, Object> params) {
+                             Integer lengthPx, Integer widthPx, Integer radiusPx, Integer projectileSpeed, Map<String, Object> params, int cardCost) {
     }
 
     public record Skill(int id, String race, String name, String kind, String kiMode, String hitShape, int slot, int maxLevel,

@@ -136,6 +136,22 @@ namespace BattleBall.Net
             return a.ActionResult;
         }
 
+        /// <summary>
+        /// "Ép sao" (docs 15.27): a stat stone ADDs a stat line, RAISEs a line (line_no 1 to 3, 4 the crystal line; chance-based, ActionResult.Success says whether it worked) or RETYPEs a stat line.
+        /// </summary>
+        public async Task<ActionResult> StatStoneAsync(ulong characterId, ulong itemId, string action, uint lineNo)
+        {
+            var a = await Ask(new Envelope { StatStoneRequest = new StatStoneRequest { CharacterId = characterId, ItemId = itemId, Action = action, LineNo = lineNo } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>"Pha lê hóa": a crystal stone makes (or makes again) the red line of a piece.</summary>
+        public async Task<ActionResult> CrystalizeAsync(ulong characterId, ulong itemId)
+        {
+            var a = await Ask(new Envelope { CrystalizeRequest = new CrystalizeRequest { CharacterId = characterId, ItemId = itemId } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
         /// <summary>GEN slot stones open one more GEN line on a piece.</summary>
         public async Task<ActionResult> UnlockGenSlotAsync(ulong characterId, ulong itemId)
         {
@@ -159,6 +175,29 @@ namespace BattleBall.Net
             if (answer.PayloadCase == Envelope.PayloadOneofCase.ShopContent) return answer.ShopContent;
             if (answer.PayloadCase == Envelope.PayloadOneofCase.ActionResult) throw new InvalidOperationException(answer.ActionResult.Message);
             throw new InvalidOperationException("unexpected answer: " + BbConnection.Describe(answer));
+        }
+
+        /// <summary>The table of the daily check-in of the month (the elder): every day with its reward, which ones were claimed, which day is today.</summary>
+        public async Task<AttendanceInfo> AttendanceAsync()
+        {
+            var answer = await Connection.RequestAsync(new Envelope { AttendanceRequest = new AttendanceRequest() });
+            if (answer.PayloadCase == Envelope.PayloadOneofCase.AttendanceInfo) return answer.AttendanceInfo;
+            if (answer.PayloadCase == Envelope.PayloadOneofCase.ActionResult) throw new InvalidOperationException(answer.ActionResult.Message);
+            throw new InvalidOperationException("unexpected answer: " + BbConnection.Describe(answer));
+        }
+
+        /// <summary>Checks in for today: gold, gems and the free items of the day (ALREADY_OWNED when it was done already).</summary>
+        public async Task<ActionResult> ClaimAttendanceAsync()
+        {
+            var a = await Ask(new Envelope { ClaimAttendanceRequest = new ClaimAttendanceRequest() }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>Takes the reward of a finished quest of Ông Gôhan (an empty id: of every finished one); the answer is followed by a fresh snapshot.</summary>
+        public async Task<ActionResult> ClaimQuestAsync(string questId)
+        {
+            var a = await Ask(new Envelope { ClaimQuestRequest = new ClaimQuestRequest { QuestId = questId ?? "" } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
         }
 
         /// <summary>Buys a piece of gear ("GEAR") or some stones ("MATERIAL", quantity 1 to 1000) in the shop of this NPC; the server prices it for the account's highest character.</summary>

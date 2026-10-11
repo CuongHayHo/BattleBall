@@ -423,6 +423,8 @@ namespace BattleBall.Net
             public Vector2 origin;
             public float start, until;
             public int loops;                 // 0 = until {@code until}
+            public ulong owner;               // with {@code follow}: whose effect it is
+            public Func<Vector2, Vector2?> follow;     // moves the origin with its owner every frame (null result: the owner is gone, the effect ends)
             public readonly List<Image> images = new List<Image>();
         }
 
@@ -437,6 +439,30 @@ namespace BattleBall.Net
             var d = LoadData(effectId);
             if (d == null || d.seq.Length == 0) return;
             _datas.Add(new DataPlay { id = effectId, data = d, origin = origin, start = Time.unscaledTime, until = Time.unscaledTime + seconds, loops = loops });
+        }
+
+        /// <summary>
+        /// An effect of the EffectData kind that follows a character (Nro: the shield Effect(33, cx, cH_new + 73) whose x and y are set from the character on every update):
+        /// {@code where} gives the origin from the previous one, or null when the character is gone. A second call for the same effect and owner replaces the first (Nro
+        /// makes a new Effect every 5 ticks and paints only the last).
+        /// </summary>
+        public void PlayDataFollowing(int effectId, ulong owner, Vector2 origin, Func<Vector2, Vector2?> where)
+        {
+            var d = LoadData(effectId);
+            if (d == null || d.seq.Length == 0) return;
+            StopFollowing(effectId, owner);
+            _datas.Add(new DataPlay { id = effectId, data = d, origin = origin, start = Time.unscaledTime, loops = 1, owner = owner, follow = where });
+        }
+
+        public void StopFollowing(int effectId, ulong owner)
+        {
+            for (int i = _datas.Count - 1; i >= 0; i--)
+            {
+                var p = _datas[i];
+                if (p.follow == null || p.id != effectId || p.owner != owner) continue;
+                foreach (var img in p.images) if (img != null) BbFxKill.Go(img.gameObject);
+                _datas.RemoveAt(i);
+            }
         }
 
         /// <summary>Takes away the running effects of this kind that started near this point (the rope of Trói when the holder lets go).</summary>
@@ -459,6 +485,17 @@ namespace BattleBall.Net
             {
                 var p = _datas[i];
                 var d = p.data;
+                if (p.follow != null)
+                {
+                    var moved = p.follow(p.origin);
+                    if (!moved.HasValue)
+                    {
+                        foreach (var img in p.images) if (img != null) BbFxKill.Go(img.gameObject);
+                        _datas.RemoveAt(i);
+                        continue;
+                    }
+                    p.origin = moved.Value;
+                }
                 int step = Mathf.FloorToInt((Time.unscaledTime - p.start) * BbSkillPoses.FramesPerSecond);
                 bool over = p.loops > 0 ? step >= d.seq.Length * p.loops : Time.unscaledTime >= p.until;
                 if (over)

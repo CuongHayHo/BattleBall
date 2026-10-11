@@ -163,7 +163,12 @@ namespace BattleBall.Net
         {
             if (!_dungeon || village == null) return;
             string key = "e" + e.EntityId;
-            if (_dummyKey.ContainsKey(e.EntityId)) return;
+            if (_dummyKey.ContainsKey(e.EntityId))
+            {
+                // the spawn of the same boss again: it evolved (docs 15.30) and has the parts and the name of its next form
+                if (e.Kind == EntityKind.Boss) { village.ReskinEnemy(key, e.Name, (int)e.PartHead, (int)e.PartBody, (int)e.PartLeg); _enemyLabel[e.EntityId] = e.Name; }
+                return;
+            }
             _dummyKey[e.EntityId] = key;
             _dummyId[key] = e.EntityId;
             _enemyLabel[e.EntityId] = e.Name;
@@ -245,6 +250,36 @@ namespace BattleBall.Net
             if (skillId == 1 || skillId == 3 || skillId == 5) SkillSound(skillId);
         }
 
+        /// <summary>
+        /// A boss casts a skill of the Xayda (docs 15.30): skill 14 is the charge of the evolution (the self-destruct pose and a pulsing glow, no blast), 23 Trói, 21 Huýt sáo
+        /// (the whistle effect over it), 8 Tái tạo năng lượng.
+        /// </summary>
+        void OnEnemyCast(EffectEvent ef)
+        {
+            string key;
+            Vector2 at;
+            float h;
+            if (!_dummyKey.TryGetValue(ef.SourceId, out key) || !village.DummyInfo(key, out at, out h)) return;
+            float seconds = ef.DurationMs / 1000f;
+            if (ef.SkillId == 14)
+            {
+                EnsureFx();
+                int fxFrom, paint;
+                bool fly;
+                var poses = BbSkillPoses.Charge(14u, 1u, true, true, Mathf.Max(0.5f, seconds), out fxFrom, out paint, out fly);
+                village.EnemyAction(key, poses, Mathf.Max(0.5f, seconds), float.NaN);
+                village.SetEnemyCharge(key, seconds);
+                ShowBanner("Khỉ đột gồng!", new Color(1f, 0.85f, 0.4f), 1.4f);
+                return;
+            }
+            float faceX = float.NaN;
+            ulong target;
+            Vector2 where;
+            if (ef.TargetId != ef.SourceId && _characterOf.TryGetValue(ef.TargetId, out target) && PartyPosition(target, out where)) faceX = where.x;
+            EnemyAttack(ef.SourceId, ef.SkillId, faceX);
+            if (ef.SkillId == 21) { EnsureFx(); _fx.PlayData(39, at, 3); }
+        }
+
         /// <summary>A monster shoots (the server's projectile of the monster appears): the pose of the chuong, turned the way the shot goes.</summary>
         void EnemyShot(uint entityId, uint skillId, float dirX)
         {
@@ -282,6 +317,43 @@ namespace BattleBall.Net
                 case Effect.Died:
                     OnDied(ef);
                     return true;
+                case Effect.CastEnd:
+                    if (ef.SkillId != 0 || ef.SourceId != ef.TargetId || !_dummyKey.ContainsKey(ef.SourceId)) return false;
+                    // a boss was stunned (put to sleep, sealed...): the red zone of the blow it was preparing goes away
+                    for (int i = _telegraphs.Count - 1; i >= 0; i--)
+                        if (_telegraphs[i].source == ef.SourceId) { if (_telegraphs[i].rect != null) Kill(_telegraphs[i].rect.gameObject); _telegraphs.RemoveAt(i); }
+                    return true;
+                case Effect.CastStart:
+                    if (!_dummyKey.ContainsKey(ef.SourceId)) return false;
+                    OnEnemyCast(ef);                                  // a boss uses a skill of the Xayda: the charge to evolve, Trói, Huýt sáo, Tái tạo năng lượng
+                    return true;
+                case Effect.BossEvolve:
+                {
+                    string ekey;
+                    Vector2 eat;
+                    float eh;
+                    if (_dummyKey.TryGetValue(ef.TargetId, out ekey))
+                    {
+                        village.SetEnemyCharge(ekey, 0f);
+                        if (village.DummyInfo(ekey, out eat, out eh)) { EnsureFx(); _fx.PlayHit(60, eat); }
+                    }
+                    string ename;
+                    _enemyLabel.TryGetValue(ef.TargetId, out ename);
+                    ShowBanner((string.IsNullOrEmpty(ename) ? "Tiến hóa" : ename) + "!\n(" + ef.SkillId + "/" + (int)ef.Length + ")", new Color(1f, 0.55f, 0.2f), 2.2f);
+                    BbSfx.Play(BbSfx.Gong, 0.7f);
+                    return true;
+                }
+                case Effect.Hold:
+                {
+                    // a boss ties one of the characters with Trói: the rope of the skill on it
+                    ulong tied;
+                    if (_dummyKey.ContainsKey(ef.SourceId) && _characterOf.TryGetValue(ef.TargetId, out tied))
+                    {
+                        Vector2 where;
+                        if (PartyPosition(tied, out where)) { EnsureFx(); _fx.PlayData(32, where + new Vector2(0f, -24f * village.UiScale), 0, ef.DurationMs / 1000f); }
+                    }
+                    return false;
+                }
                 case Effect.TelegraphRect:
                 case Effect.TelegraphCircle:
                     AddTelegraph(ef);

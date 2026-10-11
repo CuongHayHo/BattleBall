@@ -105,7 +105,7 @@ namespace BattleBall.Net
             transport.Begin("Đang bay tới " + d.Name + "...", OnDungeonFailed);
             try
             {
-                var started = await BbSession.Client.StartMatchAsync(new StartMatchRequest { DungeonId = d.DungeonId, ControlledCharacterId = main, FusionPartnerId = partner });
+                var started = await BbSession.Client.StartMatchAsync(new StartMatchRequest { DungeonId = d.DungeonId, ControlledCharacterId = main, FusionPartnerId = partner, Difficulty = dungeonPicker.SelectedDifficulty });
                 if (this == null) return;
                 _dungeonStarted = started;
                 BbSession.DungeonToken = started.MatchToken;
@@ -277,6 +277,9 @@ namespace BattleBall.Net
         {
             return _dungeon + (transport != null && transport.IsPlaying ? " (ship)" : "") + (village != null && village.InArena ? " (arena)" : "") + (dungeonPicker != null && dungeonPicker.IsOpen ? " (list)" : "");
         }
+
+        /// <summary>For the play scenario: the difficulty of the dungeon being run.</summary>
+        public string DebugDifficulty { get { return _dungeonStarted == null ? "" : _dungeonStarted.Difficulty; } }
 
         public void DebugOpenDungeonList() { OpenDungeonList(new NpcSpec { Id = "cui", Name = "Cui" }); }
         public void DebugEnterDungeon(uint id, string name) { EnterDungeon(new DungeonInfo { DungeonId = id, Name = name }); }

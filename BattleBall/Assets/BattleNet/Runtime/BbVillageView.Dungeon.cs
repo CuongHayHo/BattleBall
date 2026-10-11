@@ -262,6 +262,35 @@ namespace BattleBall.Net
             a.view.PlayAction(new[] { (int)NroPose.Hit_Injured }, 5f);
         }
 
+        /// <summary>An evolving boss turned into its next form (docs 15.30): the same actor with the parts and the name of the new one.</summary>
+        public void ReskinEnemy(string key, string name, int head, int body, int leg)
+        {
+            Actor a;
+            if (key == null || !_dummies.TryGetValue(key, out a) || a.dying) return;
+            a.view.ShowParts(head, body, leg);
+            a.name = name;
+            a.label.text = name;
+            a.chargeUntil = 0f;
+            if (a.chargeGlow != null) a.chargeGlow.gameObject.SetActive(false);
+        }
+
+        /// <summary>A boss charges for this many seconds (the self-destruct pose of the Xayda without the blast): a white glow pulses over it.</summary>
+        public void SetEnemyCharge(string key, float seconds)
+        {
+            Actor a;
+            if (key == null || !_dummies.TryGetValue(key, out a) || a.dying) return;
+            a.chargeUntil = seconds > 0f ? Time.unscaledTime + seconds : 0f;
+            if (a.chargeGlow == null && seconds > 0f)
+            {
+                float w = Mathf.Max(90f, a.view.FigureWidth) + 50f, h = Mathf.Max(90f, a.view.OverheadHeight) + 20f;
+                var glow = NewImage(a.root, "ChargeGlow", dotSprite, new Color(1f, 1f, 1f, 0f), 0f, 0f, w, h, new Vector2(0.5f, 0f));
+                glow.raycastTarget = false;
+                glow.rectTransform.anchorMin = glow.rectTransform.anchorMax = new Vector2(0.5f, 0f);
+                glow.rectTransform.anchoredPosition = Vector2.zero;
+                a.chargeGlow = glow;
+            }
+        }
+
         /// <summary>A monster is gone without a fall (the server despawned it).</summary>
         public void RemoveEnemy(string key)
         {
@@ -391,6 +420,19 @@ namespace BattleBall.Net
             if (a.locked) a.view.SetState(BbCharacterView.PoseState.Stand);
             else a.view.SetState(BbCharacterView.PoseState.Fly);
             a.view.animSpeed = party ? 1.4f : 1.2f;
+            if (a.chargeGlow != null)
+            {
+                bool charging = Time.unscaledTime < a.chargeUntil;
+                a.chargeGlow.gameObject.SetActive(charging);
+                if (charging)
+                {
+                    float pulse = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * 18f);
+                    float grow = 1f - (a.chargeUntil - Time.unscaledTime) / 3f;                        // it gets brighter as the blast would come
+                    a.chargeGlow.color = new Color(1f, 0.95f, 0.8f, Mathf.Clamp01(0.15f + 0.45f * pulse * (0.4f + 0.6f * Mathf.Clamp01(grow))));
+                    a.chargeGlow.rectTransform.localScale = Vector3.one * (1f + 0.12f * pulse);
+                    a.view.SetState(BbCharacterView.PoseState.Stand);
+                }
+            }
             if (a.hpFill != null)
             {
                 float w = a.hpBack.rectTransform.sizeDelta.x - 2f;
@@ -410,10 +452,15 @@ namespace BattleBall.Net
             a.dyingVelocity.x *= Mathf.Exp(-1.6f * dt);
             a.x = Mathf.Clamp(a.x + a.dyingVelocity.x * dt, ArenaMargin, _map.Width - ArenaMargin);
             a.y += a.dyingVelocity.y * dt;
-            float floor = party ? ArenaFeetMin + 40f : -60f;
+            float floor = party ? (InArena ? a.deathY : ArenaFeetMin + 40f) : -60f;
             if (party)
             {
-                if (a.y <= floor && a.dyingVelocity.y < 0f) { a.y = floor; a.dying = false; a.ghost = true; SetGhostLook(a, true); }
+                if (a.y <= floor && a.dyingVelocity.y < 0f)
+                {
+                    a.y = floor;
+                    if (InArena) a.x = a.deathX;                                  // the body is where the server has it: the healer who comes to revive it is measured from there
+                    a.dying = false; a.ghost = true; SetGhostLook(a, true);
+                }
                 return;
             }
             bool blink = a.dyingAge > 0.45f && Mathf.FloorToInt(a.dyingAge * 15f) % 3 == 0;          // Nro: not painted on one tick out of three
@@ -451,7 +498,9 @@ namespace BattleBall.Net
                 a.dying = true;
                 a.dyingAge = 0f;
                 float side = Mathf.Abs(away.x) > 0.05f ? Mathf.Sign(away.x) : -a.facing;
-                a.dyingVelocity = new Vector2(side * DeathDrift, DeathThrow);
+                a.deathX = a.x;
+                a.deathY = a.y;
+                a.dyingVelocity = new Vector2(side * DeathDrift * (InArena ? 0.25f : 1f), DeathThrow);
                 a.locked = true;
                 a.view.PlayAction(new[] { (int)NroPose.Hit_Injured }, 5f);
             }

@@ -17,7 +17,7 @@ namespace BattleBall.Net
     /// </summary>
     public sealed class BbSmithPanel : MonoBehaviour
     {
-        public enum Mode { Upgrade, Reroll, Unlock }
+        public enum Mode { Upgrade, Reroll, Unlock, Star, Crystal }
 
         public GameObject root;
         public RectTransform panelRect;
@@ -35,6 +35,8 @@ namespace BattleBall.Net
         public Text infoText;
         public Button actionButton;
         public Text actionLabel, resultText;
+        public Button altButton;                                           // "Đổi loại" beside the main button (Ép sao on a filled stat line)
+        public Text altLabel;
         public Sprite portraitSprite;
         public BbMenuUi menu;
 
@@ -42,7 +44,7 @@ namespace BattleBall.Net
         public Action Closed;
 
         const float PanelWidth = 320f;
-        const float LineH = 44f;
+        const float LineH = 40f;
         const uint PortraitIcon = 1410;                                    // Nro avatar of Bà Hạt Mít (npc_template 21)
         static readonly Color Good = new Color(0.12f, 0.56f, 0.12f), Bad = new Color(0.72f, 0.12f, 0.12f), Blue = new Color(0.10f, 0.35f, 0.85f), Ink = new Color(0.18f, 0.10f, 0.04f);
         static readonly Color RowOn = new Color(0.98f, 1f, 0.29f), RowOff = new Color(0.906f, 0.875f, 0.824f);
@@ -70,6 +72,7 @@ namespace BattleBall.Net
             itemRow.onClick.AddListener(() => { _itemId = 0; _line = 0; _sticky = false; Refresh(); });
             stoneRow.onClick.AddListener(() => { _stoneTemplate = 0; _sticky = false; Refresh(); });
             actionButton.onClick.AddListener(Run);
+            if (altButton != null) altButton.onClick.AddListener(RunAlt);
             for (int i = 0; i < lineButtons.Length; i++)
             {
                 int line = i;
@@ -99,9 +102,11 @@ namespace BattleBall.Net
                 portrait.sprite = resolver != null ? resolver.ResolveSprite((int)PortraitIcon, BbAssetCache.Scale) : portraitSprite;
                 portrait.enabled = portrait.sprite != null;
             }
-            titleText.text = mode == Mode.Upgrade ? "Nâng cấp" : mode == Mode.Reroll ? "Đổi GEN" : "Mở ô GEN";
+            titleText.text = ModeTitle(mode);
             headerText.text = "Bà Hạt Mít\n" + (mode == Mode.Upgrade ? "Ta sẽ phù phép\ncho trang bị của ngươi\ntrở lên mạnh mẽ"
                                               : mode == Mode.Reroll ? "Ta sẽ đổi một dòng GEN\ncủa trang bị ngươi\nsang bộ khác"
+                                              : mode == Mode.Star ? "Ta sẽ ép đá chỉ số\nvào trang bị của ngươi\nđể thêm sức mạnh"
+                                              : mode == Mode.Crystal ? "Ta sẽ pha lê hóa\ntrang bị của ngươi\nthành dòng đỏ"
                                               : "Ta sẽ mở thêm\nmột ô GEN cho\ntrang bị của ngươi");
             Refresh();
         }
@@ -158,7 +163,9 @@ namespace BattleBall.Net
             Refresh();
         }
 
-        string StoneKind { get { return _mode == Mode.Upgrade ? "UPGRADE_STONE" : _mode == Mode.Reroll ? "GEN_STONE" : "GEN_SLOT_STONE"; } }
+        static string ModeTitle(Mode mode) { return mode == Mode.Upgrade ? "Nâng cấp" : mode == Mode.Reroll ? "Đổi GEN" : mode == Mode.Star ? "Ép sao" : mode == Mode.Crystal ? "Pha lê hóa" : "Mở ô GEN"; }
+
+        string StoneKind { get { return _mode == Mode.Upgrade ? "UPGRADE_STONE" : _mode == Mode.Reroll ? "GEN_STONE" : _mode == Mode.Star ? "STAT_STONE" : _mode == Mode.Crystal ? "CRYSTAL_STONE" : "GEN_SLOT_STONE"; } }
 
         MaterialAmount StoneOwned()
         {
@@ -204,24 +211,30 @@ namespace BattleBall.Net
             stoneDesc.text = stone != null ? "Có " + stone.Quantity + " viên" : "Chạm viên đá trong hành trang (bên phải)";
             stoneRow.GetComponent<Image>().color = stone != null ? RowOn : RowOff;
 
-            int cost = Cost(it);
+            // the rows to choose from: the GEN lines (Đổi GEN) or the four extra lines of the piece (Ép sao)
+            int rowCount = it == null ? 0 : _mode == Mode.Reroll ? it.Gens.Count : _mode == Mode.Star ? 4 : 0;
+            rowCount = Mathf.Min(rowCount, lineButtons.Length);
+            if (_line >= rowCount) _line = 0;
+            var slotLine = _mode == Mode.Star && it != null ? LineOf(it, _line + 1) : null;
+            int cost = Cost(it, slotLine);
             bool haveStone = stone != null && stone.Quantity >= (ulong)Mathf.Max(1, cost);
             string why = null;
             var info = new StringBuilder();
-            bool lines = _mode == Mode.Reroll && it != null && it.Gens.Count > 0;
             for (int i = 0; i < lineButtons.Length; i++)
             {
-                bool shown = lines && i < it.Gens.Count;
+                bool shown = i < rowCount;
                 lineButtons[i].gameObject.SetActive(shown);
                 if (!shown) continue;
-                var g = it.Gens[i];
-                lineLabels[i].text = "GEN " + (i + 1) + ": " + (g.GenKey.Length == 0 ? "(trống)" : g.Name);
+                if (_mode == Mode.Star) lineLabels[i].text = StarLabel(it, i);
+                else { var g = it.Gens[i]; lineLabels[i].text = "GEN " + (i + 1) + ": " + (g.GenKey.Length == 0 ? "(trống)" : g.Name); }
+                lineLabels[i].color = _mode == Mode.Star && i == 3 ? new Color(0.72f, 0.12f, 0.12f) : Ink;
                 lineButtons[i].GetComponent<Image>().color = i == _line ? RowOn : RowOff;
             }
-            if (_line >= (it != null ? it.Gens.Count : 0)) _line = 0;
-            infoRect.anchoredPosition = new Vector2(infoRect.anchoredPosition.x, -(InfoTop + (lines ? it.Gens.Count * LineH + 6f : 0f)));
+            infoRect.anchoredPosition = new Vector2(infoRect.anchoredPosition.x, -(InfoTop + (rowCount > 0 ? rowCount * LineH + 6f : 0f)));
 
-            if (it == null) why = "Chọn món đồ muốn " + (_mode == Mode.Upgrade ? "nâng cấp" : _mode == Mode.Reroll ? "đổi GEN" : "mở thêm ô GEN") + ".";
+            if (it == null) why = "Chọn món đồ muốn " + (_mode == Mode.Upgrade ? "nâng cấp" : _mode == Mode.Reroll ? "đổi GEN" : _mode == Mode.Star ? "ép sao" : _mode == Mode.Crystal ? "pha lê hóa" : "mở thêm ô GEN") + ".";
+            else if (_mode == Mode.Star) why = StarInfo(it, slotLine, cost, info);
+            else if (_mode == Mode.Crystal) why = CrystalInfo(it, cost, info);
             else if (_mode == Mode.Upgrade)
             {
                 bool maxed = it.UpgradePercent + 1e-9 >= UpgradeMax;
@@ -246,7 +259,20 @@ namespace BattleBall.Net
             if (why == null && !haveStone) why = stone == null ? "Chạm viên đá trong hành trang để bỏ vào." : "Không đủ đá (cần " + cost + ").";
             infoText.text = info.ToString();
             actionButton.interactable = why == null && !_busy;
-            actionLabel.text = _mode == Mode.Upgrade ? "Nâng cấp" : _mode == Mode.Reroll ? "Đổi GEN" : "Mở ô";
+            actionLabel.text = _mode == Mode.Upgrade ? "Nâng cấp" : _mode == Mode.Reroll ? "Đổi GEN"
+                             : _mode == Mode.Star ? (slotLine == null && _line < 3 ? "Thêm dòng" : "Ép sao")
+                             : _mode == Mode.Crystal ? (it != null && LineOf(it, 4) != null ? "Pha lê hóa lại" : "Pha lê hóa") : "Mở ô";
+            if (altButton != null)
+            {
+                bool canRetype = _mode == Mode.Star && it != null && slotLine != null && _line < 3 && stone != null && stone.Quantity >= (ulong)RetypeCost();
+                altButton.gameObject.SetActive(_mode == Mode.Star && it != null && slotLine != null && _line < 3);
+                altButton.interactable = canRetype && !_busy;
+                altLabel.text = "Đổi loại";
+                bool two = altButton.gameObject.activeSelf;                            // two buttons side by side while the second one shows
+                var ar = (RectTransform)actionButton.transform;
+                ar.anchoredPosition = new Vector2(two ? -80f : 0f, ar.anchoredPosition.y);
+                ar.sizeDelta = new Vector2(two ? 140f : 150f, ar.sizeDelta.y);
+            }
             if (_watchKey == null && !_sticky) { resultText.color = Ink; resultText.text = why ?? ""; }
             if (snapshotMoney()) { goldText.text = Money(_snapshot.Gold); gemText.text = Money(_snapshot.Gems); }
             TellResult(it);
@@ -256,15 +282,136 @@ namespace BattleBall.Net
 
         bool snapshotMoney() { return _snapshot != null; }
 
-        int Cost(ItemInfo it)
+        int RetypeCost() { return _snapshot != null && _snapshot.StatStoneRules != null ? (int)_snapshot.StatStoneRules.RetypeStones : 1; }
+
+        static StatLine LineOf(ItemInfo it, int lineNo)
         {
+            foreach (var l in it.Lines) if (l.LineNo == lineNo) return l;
+            return null;
+        }
+
+        static string StarLabel(ItemInfo it, int i)
+        {
+            var l = LineOf(it, i + 1);
+            if (i < 3) return l == null ? "Dòng " + (i + 1) + ": (trống)" : l.Text + " / " + Pct(l.Cap) + "%";
+            return l == null ? "Dòng đỏ: (chưa pha lê hóa)" : "Đỏ: " + l.Text + " / " + Pct(l.Cap) + "%";
+        }
+
+        /// <summary>The text of the Ép sao panel for the chosen row; the return value is why the button cannot be pressed (null = it can).</summary>
+        string StarInfo(ItemInfo it, StatLine l, int cost, StringBuilder info)
+        {
+            if (_line == 3 && l == null)
+            {
+                info.Append("Món chưa có dòng đỏ. Dùng chức năng Pha lê hóa (đá pha lê) để tạo, rồi quay lại đây nâng nó bằng đá chỉ số.");
+                return "Chưa có dòng đỏ.";
+            }
+            if (l == null)
+            {
+                info.Append("Thêm một dòng chỉ số ngẫu nhiên (Sức đánh, HP, Giáp, Ki, Chí mạng...), không trùng dòng khác của món, khởi đầu ").Append("+1,5 đến 2%.\nTốn ").Append(cost).Append(" đá chỉ số.");
+                return null;
+            }
+            bool red = _line == 3;
+            if (l.SuccessPct <= 0)
+            {
+                info.Append(l.Text).Append(" đã đạt tối đa ").Append(Pct(l.Cap)).Append("%.");
+                return "Dòng này đã đạt tối đa.";
+            }
+            info.Append(red ? "Dòng đỏ" : "Dòng " + (_line + 1)).Append(": ").Append(l.Text).Append(" (tối đa ").Append(Pct(l.Cap)).Append("%)\nÉp sao: +").Append(Pct(l.StepMin)).Append(" đến ").Append(Pct(l.StepMax))
+                .Append("%, thành công ").Append(Pct(l.SuccessPct)).Append("% (đá mất dù thành hay bại). Tốn ").Append(cost).Append(" đá chỉ số.");
+            AppendPreview(it, l, info);
+            if (!red) info.Append("\nĐổi loại: sang một chỉ số khác chưa có trên món, giữ nguyên số. Tốn ").Append(RetypeCost()).Append(" đá.");
+            return null;
+        }
+
+        // ---- the preview: what a success would make of the line and, for a worn piece, of the stat of the character (owner request 2026-10-11)
+
+        static string ShortStat(string key)
+        {
+            switch (key)
+            {
+                case "ATK_PCT": return "Sức đánh";
+                case "HP_PCT": return "HP";
+                case "KI_PCT": return "Ki";
+                case "ARMOR_PCT": return "Giáp";
+                case "CRIT_RATE_PCT": return "Tỷ lệ chí mạng";
+                case "CRIT_DMG_PCT": return "Sát thương chí mạng";
+                default: return key;
+            }
+        }
+
+        BattleBall.Proto.CharacterInfo WearerOf(ItemInfo it)
+        {
+            if (_snapshot == null) return null;
+            foreach (var c in _snapshot.Characters) foreach (var e in c.EquippedItems) if (e.ItemId == it.ItemId) return c;
+            return null;
+        }
+
+        static double TotalOf(BattleBall.Proto.CharacterInfo c, string key)
+        {
+            foreach (var b in c.Bonuses) if (b.StatKey == key) return b.Value;
+            return 0;
+        }
+
+        /// <summary>The stat of the character the line feeds, now and after a raise of {@code delta} percent (the % bonuses add up, so the factor is (1 + (total + delta)) / (1 + total)); null when it has none.</summary>
+        static double? StatAfter(BattleBall.Proto.CharacterInfo c, string key, double delta, out double now)
+        {
+            now = 0;
+            if (c.Stats == null) return null;
+            double total = TotalOf(c, key), factor = (1 + (total + delta) / 100.0) / (1 + total / 100.0);
+            switch (key)
+            {
+                case "ATK_PCT": now = c.Stats.Atk; return now * factor;
+                case "HP_PCT": now = c.Stats.HpMax; return now * factor;
+                case "KI_PCT": now = c.Stats.KiMax; return now * factor;
+                case "ARMOR_PCT": now = c.Stats.Armor; return now * factor;
+                case "CRIT_RATE_PCT": now = c.Stats.CritRatePct; return Math.Min(100.0, now + delta);
+                case "CRIT_DMG_PCT": now = c.Stats.CritDmgPct; return now + delta;
+                default: return null;
+            }
+        }
+
+        void AppendPreview(ItemInfo it, StatLine l, StringBuilder info)
+        {
+            double lo = Math.Min(l.Cap, Math.Round((l.Value + l.StepMin) * 10.0) / 10.0), hi = Math.Min(l.Cap, Math.Round((l.Value + l.StepMax) * 10.0) / 10.0);
+            string name = ShortStat(l.StatKey);
+            info.Append("\nNếu thành công: ").Append(name).Append(" +").Append(Pct(l.Value)).Append("% → +").Append(Pct(lo)).Append(hi > lo ? " đến " + Pct(hi) : "").Append("%");
+            var wearer = WearerOf(it);
+            if (wearer == null) return;
+            double now;
+            var a = StatAfter(wearer, l.StatKey, lo - l.Value, out now);
+            var b = StatAfter(wearer, l.StatKey, hi - l.Value, out now);
+            if (a == null || b == null) return;
+            bool plain = l.StatKey.StartsWith("CRIT");
+            string from = plain ? Pct(now) + "%" : Num(now), to = plain ? Pct(a.Value) + (b.Value > a.Value + 1e-9 ? " đến " + Pct(b.Value) : "") + "%" : Num(a.Value) + (Math.Round(b.Value) > Math.Round(a.Value) ? " đến " + Num(b.Value) : "");
+            info.Append("\n").Append(name).Append(" của ").Append(Planet(wearer.Race)).Append(": ").Append(from).Append(" → ").Append(to);
+        }
+
+        string CrystalInfo(ItemInfo it, int cost, StringBuilder info)
+        {
+            var red = LineOf(it, 4);
+            double start = _snapshot != null && _snapshot.StatStoneRules != null ? _snapshot.StatStoneRules.CrystalStart : 10;
+            info.Append("Dòng đỏ: ").Append(red == null ? "(chưa có)" : red.Text + " / " + Pct(red.Cap) + "%")
+                .Append("\nTạo một dòng đỏ ngẫu nhiên (Sức đánh, HP, Giáp, Ki hoặc Sát thương chí mạng) khởi đầu ").Append(Pct(start)).Append("%, tối đa 50%; nâng dần bằng đá chỉ số ở chức năng Ép sao.");
+            if (red != null) info.Append("\nPha lê hóa lại: đổi sang loại khác và về lại ").Append(Pct(start)).Append("%.");
+            info.Append("\nTốn ").Append(cost).Append(" đá pha lê.");
+            return null;
+        }
+
+        int Cost(ItemInfo it, StatLine slotLine = null)
+        {
+            if (_mode == Mode.Crystal) return _snapshot != null && _snapshot.StatStoneRules != null ? (int)_snapshot.StatStoneRules.CrystalStones : 1;
+            if (_mode == Mode.Star)
+            {
+                var r = _snapshot != null ? _snapshot.StatStoneRules : null;
+                return r == null ? 1 : slotLine == null ? (int)r.AddStones : (int)r.RaiseStones;
+            }
             if (it == null) return 1;
             if (_mode == Mode.Reroll) return _snapshot != null && _snapshot.GenRules != null ? (int)_snapshot.GenRules.RerollStones : 1;
             if (_mode == Mode.Unlock) return (int)it.GenUnlockCost;
             return 1;
         }
 
-        string StoneHint() { return _mode == Mode.Upgrade ? "Đá nâng cấp" : _mode == Mode.Reroll ? "Đá GEN" : "Đá mở ô GEN"; }
+        string StoneHint() { return _mode == Mode.Upgrade ? "Đá nâng cấp" : _mode == Mode.Reroll ? "Đá GEN" : _mode == Mode.Star ? "Đá chỉ số" : _mode == Mode.Crystal ? "Đá pha lê" : "Đá mở ô GEN"; }
 
         string ItemLine(ItemInfo it)
         {
@@ -273,7 +420,8 @@ namespace BattleBall.Net
             if (it.UpgradePercent > 0) sb.Append("  [+").Append(Pct(it.UpgradePercent)).Append("%]");
             int n = 0;
             foreach (var g in it.Gens) if (g.GenKey.Length > 0) n++;
-            if (it.Gens.Count > 0) sb.Append("\nGEN: ").Append(n).Append("/").Append(it.GenSlots);
+            if (it.Gens.Count > 0) sb.Append("\nGEN: ").Append(n).Append("/").Append(it.GenSlots).Append(it.Lines.Count > 0 ? "  Dòng: " + it.Lines.Count + "/" + (it.StatLinesMax + 1) : "");
+            else if (it.Lines.Count > 0) sb.Append("\nDòng: ").Append(it.Lines.Count).Append("/").Append(it.StatLinesMax + 1);
             return sb.ToString();
         }
 
@@ -309,6 +457,8 @@ namespace BattleBall.Net
             var sb = new StringBuilder();
             sb.Append(Pct(it.UpgradePercent)).Append('|').Append(it.GenSlots).Append('|');
             foreach (var g in it.Gens) sb.Append(g.GenKey).Append(',');
+            sb.Append('|');
+            foreach (var l in it.Lines) sb.Append(l.LineNo).Append(':').Append(l.StatKey).Append(':').Append(Pct(l.Value)).Append(',');
             return sb.ToString();
         }
 
@@ -318,18 +468,32 @@ namespace BattleBall.Net
         {
             if (_mode == Mode.Upgrade) return "Thành công! " + it.Name + " đã lên +" + Pct(it.UpgradePercent) + "%";
             if (_mode == Mode.Unlock) return "Đã mở ô GEN thứ " + it.GenSlots + " cho " + it.Name;
+            if (_mode == Mode.Star || _mode == Mode.Crystal)
+            {
+                var l = LineOf(it, _mode == Mode.Crystal ? 4 : _starLine + 1);
+                return (_mode == Mode.Crystal ? "Dòng đỏ: " : "Dòng " + (_starLine + 1) + ": ") + (_watchLineBefore.Length > 0 ? _watchLineBefore : "(trống)") + " → " + (l != null ? l.Text : "(trống)");
+            }
             string now = _line < it.Gens.Count && it.Gens[_line].GenKey.Length > 0 ? it.Gens[_line].Name : "(trống)";
             return "GEN " + (_line + 1) + ": " + (_watchLineBefore.Length > 0 ? _watchLineBefore : "(trống)") + " → " + now;
         }
 
-        async void Run()
+        int _starLine;                                                     // the row the last Ép sao request named (0 to 3)
+
+        void Run() { Go(null); }
+        void RunAlt() { Go("RETYPE"); }
+
+        /// <summary>The button: the action of the mode; {@code starAction} is "RETYPE" for the second button of Ép sao.</summary>
+        async void Go(string starAction)
         {
             var it = menu.ItemById(_itemId);
             if (it == null || _busy || !BbSession.IsActive) return;
             _busy = true;
             actionButton.interactable = false;
             _watchKey = Key(it);
-            _watchLineBefore = _line < it.Gens.Count && it.Gens[_line].GenKey.Length > 0 ? it.Gens[_line].Name : "";
+            _starLine = _line;
+            StatLine before = _mode == Mode.Star ? LineOf(it, _line + 1) : _mode == Mode.Crystal ? LineOf(it, 4) : null;
+            _watchLineBefore = _mode == Mode.Star || _mode == Mode.Crystal ? (before != null ? before.Text : "")
+                             : _line < it.Gens.Count && it.Gens[_line].GenKey.Length > 0 ? it.Gens[_line].Name : "";
             _watchUntil = Time.unscaledTime + 6f;
             ActionResult result = null;
             try
@@ -337,6 +501,8 @@ namespace BattleBall.Net
                 ulong who = menu.AnyCharacterIdPublic;
                 if (_mode == Mode.Upgrade) result = await BbSession.Client.UpgradeItemAsync(who, it.ItemId);
                 else if (_mode == Mode.Reroll) result = await BbSession.Client.RerollGenAsync(who, it.ItemId, (uint)_line);
+                else if (_mode == Mode.Star) result = await BbSession.Client.StatStoneAsync(who, it.ItemId, starAction ?? (before == null ? "ADD" : "RAISE"), (uint)(_line + 1));
+                else if (_mode == Mode.Crystal) result = await BbSession.Client.CrystalizeAsync(who, it.ItemId);
                 else result = await BbSession.Client.UnlockGenSlotAsync(who, it.ItemId);
             }
             catch (Exception e)
@@ -350,7 +516,14 @@ namespace BattleBall.Net
             {
                 _watchKey = null;
                 resultText.color = Bad;
-                resultText.text = menu.GearErrorText(result);
+                resultText.text = _mode == Mode.Star && result.Error == ActionError.Maxed ? "Dòng này đã đạt tối đa, hoặc món đã đủ dòng." : menu.GearErrorText(result);
+                _sticky = true;
+            }
+            else if (result != null && _mode == Mode.Star && !result.Success)
+            {
+                _watchKey = null;                                          // a raise that missed: the stone is gone and nothing else changed
+                resultText.color = Bad;
+                resultText.text = "Chưa thành công, đá đã mất. Thử lại!";
                 _sticky = true;
             }
             Refresh();
@@ -363,6 +536,10 @@ namespace BattleBall.Net
         public bool DebugCanPress { get { return actionButton.interactable; } }
         public void DebugLine(int line) { _line = line; _sticky = false; Refresh(); }
         public void DebugPress() { Run(); }
+        public void DebugAlt() { RunAlt(); }
+        public bool DebugAltVisible { get { return altButton != null && altButton.gameObject.activeSelf; } }
+        public string DebugInfo { get { return infoText.text; } }
+        public string DebugRows { get { var sb = new StringBuilder(); foreach (var t in lineLabels) if (t.transform.parent.gameObject.activeSelf) sb.Append(t.text).Append(" | "); return sb.ToString(); } }
 
         public void DemoSet(ItemInfo it, MaterialAmount stone, int line)
         {

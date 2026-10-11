@@ -32,7 +32,8 @@ BG_PARALLAX = 0.25
 BG_BASE_Y = 90              # the bottom of the background sits at this height of the world (the ground covers it; a flat colour fills below)
 
 SCALES = (1, 2, 3, 4)
-SEGMENTS = 3
+SEGMENTS = 2                # the outermost segment on the right was cut off (owner request 2026-10-11)
+CUI_AFTER_X = 1530.0 + 300.0   # Cui stands near the other NPCs but not close to the last of them (Ba Hat Mit at x 1530): his platform is the nearest one beyond this x
 TILE4 = 96                  # a tile at zoom x4
 CROP_TOP4 = 960             # the picture is empty sky above this row (x4); the first solid row of the map is 1061
 SOLID_RUN4 = 160            # a column counts as ground where it is solid for this many x4 pixels (grass tufts are thinner)
@@ -178,9 +179,18 @@ def main():
             p = os.path.join(a.bg, "x1", "%d.png" % i)
             sizes[i] = Image.open(p).size
         if s == SEGMENTS - 1:
-            # the two ships behind Cui (owner request 2026-10-11): on the widest platform of the last segment, where the dungeon NPC stands in front of them
-            big = max(flat, key=lambda p: p[1] - p[0])
-            mid = (big[0] + big[1]) // 2 + 60
+            # the two ships behind Cui (owner request 2026-10-11): on the platform of the last segment that is nearest to the other NPCs without being close to them (beyond
+            # CUI_AFTER_X), wide enough for the ships; the dungeon NPC stands in front of them
+            cands = []
+            for p in flat:
+                if p[1] - p[0] < 220:
+                    continue
+                centre = (p[0] + p[1]) // 2
+                wx = s * seg_w1 + ((seg_w1 - centre) if mirrored else centre)
+                if wx >= CUI_AFTER_X:
+                    cands.append((wx, p))
+            big = min(cands, key=lambda t: t[0])[1] if cands else max(flat, key=lambda p: p[1] - p[0])
+            mid = (big[1] - 150) if mirrored else (big[0] + 150)             # at the end of the platform that faces the other NPCs, not in the middle of it
             add(97, mid - 50, big[2], sizes[97][0])
             add(237, mid + 55, big[2], sizes[237][0])
             cui_at[0] = (s, mid + 5)
@@ -233,7 +243,7 @@ def main():
 
     npcs = []
     for npc_id, name, costume, (seg, hx, hgt), talk, action in (
-            ("elder", "Ông Trưởng làng", 430, elder, "Chào cháu! Dùng cần điều khiển để đi lại, kéo lên để nhảy, giữ lên để bay. Mở menu bên trái để xem nhân vật, hành trang và hòm thư.", "Talk"),):
+            ("elder", "Ông Trưởng làng", 430, elder, "", "Attendance"),):
         wx = world_x(seg, hx, 150)
         npcs.append({"id": npc_id, "name": name, "costume": costume, "x": round(wx, 1), "talk": talk, "action": action})
     # Cui, the NPC of the dungeons (owner request 2026-10-11: it takes the place of the placeholder gate of the cut end of the map): in front of the two ships, costume 9023 is
@@ -253,6 +263,9 @@ def main():
 
     # Bà Hạt Mít upgrades gear (owner request 2026-10-10, docs 15.22): on the small platform right of Urôn; costume 9022 is her Nro look (parts 117, 118, 119)
     npcs.append({"id": "shop", "name": "Bà Hạt Mít", "costume": 9022, "x": 1530.0, "talk": "", "action": "Smith"})
+
+    # Ông Gôhan gives the quests (owner request 2026-10-11, docs 15.32): the first NPC the player meets, just in front of the place he appears on; costume 9024 is his Nro look (parts 18, 19, 20)
+    npcs.append({"id": "gohan", "name": "Ông Gôhan", "costume": 9024, "x": 425.0, "talk": "", "action": "Quest"})
 
     spawn = 400.0
     # scenery images for every scale
