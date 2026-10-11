@@ -94,7 +94,7 @@ namespace BattleBall.Net
             _focusKey = null;
             float uiScale = village.characterScale;
             _arenaScale = uiScale;
-            village.EnterArena(started.Arena.Width, started.Arena.Height, tier);
+            village.EnterArena(started.Arena.Width, started.Arena.Height, tier, (int)started.DungeonId - 1);
             _enemyLabel.Clear();
             _bossIds.Clear();
             Begin(started, mainCharacter);

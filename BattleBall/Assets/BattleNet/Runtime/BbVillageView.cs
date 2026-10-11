@@ -145,6 +145,7 @@ namespace BattleBall.Net
             for (int i = viewport.childCount - 1; i >= 0; i--) Kill(viewport.GetChild(i).gameObject);
             _layers.Clear();
             _layerParallax.Clear();
+            _drifters.Clear();
             _actors.Clear();
             _npcObjects.Clear();
             _dummies.Clear();
@@ -184,7 +185,7 @@ namespace BattleBall.Net
                 foreach (var s in _map.Scenery) if (s.Parallax >= 1f) Draw(_world, s);
             }
             foreach (var npc in _map.Npcs) AddNpc(npc);
-            if (_map.Flying) BuildArenaFloor();
+            if (_map.Flying && !HasSpaceBackdrop) BuildArenaFloor();
             Layout(true);
         }
 
@@ -951,6 +952,7 @@ namespace BattleBall.Net
             else { _camX = 0f; _camY = 0f; }
             for (int i = 0; i < _layers.Count; i++)
                 _layers[i].anchoredPosition = new Vector2(-_camX * _layerParallax[i], -_camY * _layerParallax[i]) + ShakeOffset;
+            if (!snap && _drifters.Count > 0) DriftArenaObjects(dt);
         }
 
         void Place(Actor a)

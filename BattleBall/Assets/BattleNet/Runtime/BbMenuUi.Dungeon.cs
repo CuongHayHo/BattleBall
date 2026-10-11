@@ -105,7 +105,7 @@ namespace BattleBall.Net
             transport.Begin("Đang bay tới " + d.Name + "...", OnDungeonFailed);
             try
             {
-                var started = await BbSession.Client.StartMatchAsync(new StartMatchRequest { DungeonId = d.DungeonId, ControlledCharacterId = main, FusionPartnerId = partner, Difficulty = dungeonPicker.SelectedDifficulty });
+                var started = await BbSession.Client.StartMatchAsync(new StartMatchRequest { DungeonId = d.DungeonId, ControlledCharacterId = main, FusionPartnerId = partner, Difficulty = dungeonPicker.SelectedDifficulty, WaitForReady = true });
                 if (this == null) return;
                 _dungeonStarted = started;
                 BbSession.DungeonToken = started.MatchToken;
@@ -184,6 +184,7 @@ namespace BattleBall.Net
         void OnDungeonFailed(string message)
         {
             _dungeon = DungeonPhase.None;
+            RefreshPanelToggle();
             if (training != null) training.SetSuspended(false);
             Toast("Không vào được phó bản: " + message);
         }
@@ -219,6 +220,8 @@ namespace BattleBall.Net
             _panelBefore = _panelOpen;
             SetPanelOpen(false, true, false);                              // the menu is out of the way; the orange triangle is hidden in a dungeon
             if (training != null) training.BeginDungeon(_dungeonStarted, _dungeonMain, _dungeonPartner, _dungeonTier);
+            // the server held the match while the ship flew (the first wave came and the AI characters fought it before the screen showed it); the arena is built and listening now: begin
+            try { BbSession.Client.Send(new Envelope { MatchReady = new MatchReady() }); } catch (Exception) { }
         }
 
         /// <summary>The button of the dungeon screen: the player gives up (the server settles what was done and sends the result).</summary>
@@ -267,7 +270,16 @@ namespace BattleBall.Net
             {
                 if (training != null) { training.EndDungeon(); training.SetSuspended(false); }
                 SetPanelOpen(_panelBefore, true, false);
-            }, () => { _dungeon = DungeonPhase.None; _dungeonStarted = null; });
+            }, () => { _dungeon = DungeonPhase.None; _dungeonStarted = null; RefreshPanelToggle(); });
+        }
+
+        /// <summary>
+        /// Shows the orange triangle again when the panel is closed and the ship is no longer flying. The panel is folded back while the phase is still Returning, which hides the
+        /// triangle; nothing showed it again when the phase became None (owner report 2026-10-12: the button that opens the menu was gone after leaving a dungeon).
+        /// </summary>
+        void RefreshPanelToggle()
+        {
+            if (panelToggle != null) panelToggle.gameObject.SetActive(!_panelOpen && !DungeonBlocksCombatUi);
         }
 
         // ---------------------------------------------------------------------------------------------------------------- for the play scenario

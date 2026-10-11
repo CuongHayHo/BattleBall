@@ -14,6 +14,10 @@ namespace BattleBall.Net
         public int gamePort = 7443;
         public string serverName = "BattleBall";
 
+        [Header("VPS server (the login screen asks Local or VPS at every start; gameHost/gamePort above are the Local one)")]
+        public string vpsHost = "game.cuonghayhonro.click";
+        public int vpsPort = 7443;
+
         [Header("Sprites")]
         [Tooltip("Sprite scale to download and draw: 2, 3 or 4 (x4 is the sharpest, 38,7 MB of costume sprites instead of 16 MB for x2); 0 = decided once per device from its resolution and memory")]
         public int assetScale = 3;

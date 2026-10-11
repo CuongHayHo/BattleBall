@@ -165,6 +165,11 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
                     matches.switchControl(accountId, msg.getSwitchControlRequest().getEntityId());
                 }
             }
+            case MATCH_READY -> {
+                if (state == State.AUTHENTICATED) {
+                    matches.ready(accountId);
+                }
+            }
             case REVIVE_REQUEST -> {
                 if (state == State.AUTHENTICATED) {
                     matches.revive(accountId);

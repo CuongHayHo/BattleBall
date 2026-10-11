@@ -445,8 +445,8 @@ namespace BattleBall.Net
                 var r = await BbSession.Client.ChangePasswordAsync(oldPw, newPw);
                 if (r.Ok)
                 {
-                    PlayerPrefs.SetString(BbSession.KeyUser, BbSession.Username ?? "");            // the old tokens were revoked: save the new one
-                    PlayerPrefs.SetString(BbSession.KeyToken, r.RefreshToken);
+                    PlayerPrefs.SetString(BbSession.UserKey, BbSession.Username ?? "");            // the old tokens were revoked: save the new one
+                    PlayerPrefs.SetString(BbSession.TokenKey, r.RefreshToken);
                     PlayerPrefs.Save();
                     passwordRoot.SetActive(false);
                     menu.Toast("Đã đổi mật khẩu");

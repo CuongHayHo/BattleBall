@@ -62,6 +62,7 @@ public final class MatchManager implements AutoCloseable {
         volatile long pausedAtMs;           // wall clock when the pause began, 0 = not paused
         int pausesUsed;
         volatile boolean settling;
+        volatile long holdUntilMs;          // wall clock until which the match waits for the client (MatchReady), 0 = it runs (docs 15.34)
 
         Running(MatchStarter.Started started, Channel channel) {
             this.started = started;
@@ -140,6 +141,11 @@ public final class MatchManager implements AutoCloseable {
                 return;
             }
             byToken.put(MatchStarter.sha256(s.token()), r);
+            if (req.getWaitForReady()) {
+                // the client flies on a ship before it shows the arena: nothing happens in the match until it says so (before this, the first wave came and the AI characters fought it
+                // while the client was still on the ship, and the arena showed them hitting nothing: owner report 2026-10-12)
+                r.holdUntilMs = System.currentTimeMillis() + (long) (Json.num(s.data().balanceObj("match_rules"), "ready_wait_max_s", 15) * 1000);
+            }
             channel.writeAndFlush(Envelope.newBuilder().setRequestId(requestId).setMatchStarted(MatchStarter.toProto(s, r.engine, true)).build());
             r.task = pool.scheduleAtFixedRate(() -> tick(r), periodMicros, periodMicros, TimeUnit.MICROSECONDS);
         } catch (MatchStarter.StartException e) {
@@ -244,6 +250,7 @@ public final class MatchManager implements AutoCloseable {
         Channel old = r.channel;
         r.channel = channel;
         r.pausedAtMs = 0;
+        r.holdUntilMs = 0;                        // the client that comes back shows the arena at once
         r.engine.submit(() -> r.engine.setPaused(false));
         channel.writeAndFlush(Envelope.newBuilder().setRequestId(requestId).setMatchResumed(MatchResumed.newBuilder().setOk(true)
                 .setMatch(MatchStarter.toProto(r.started, r.engine, false))).build());
@@ -293,6 +300,14 @@ public final class MatchManager implements AutoCloseable {
         }
     }
 
+    /** The client shows the arena: a match that was waiting for it begins to run. */
+    public void ready(long accountId) {
+        Running r = byAccount.get(accountId);
+        if (r != null) {
+            r.holdUntilMs = 0;
+        }
+    }
+
     public void revive(long accountId) {
         Running r = byAccount.get(accountId);
         if (r != null) {
@@ -336,6 +351,13 @@ public final class MatchManager implements AutoCloseable {
             return;                 // the match is over and settled (or being settled): a tick that was already queued must not send one more frame with the same tick number
         }
         try {
+            long hold = r.holdUntilMs;
+            if (hold != 0) {
+                if (System.currentTimeMillis() < hold) {
+                    return;                 // the client has not shown the arena yet: the match does not begin
+                }
+                r.holdUntilMs = 0;          // it never answered: begin anyway
+            }
             if (r.pausedAtMs != 0) {
                 long maxMs = (long) (Json.num(r.started.data().balanceObj("match_rules"), "pause_max_s", 30) * 1000);
                 if (System.currentTimeMillis() - r.pausedAtMs > maxMs) {

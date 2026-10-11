@@ -82,6 +82,7 @@ message Envelope {
     AttendanceInfo attendance_info = 81;
     ClaimAttendanceRequest claim_attendance_request = 82;   // checks in for today: ActionResult (ALREADY_OWNED when it was done), then a fresh AttendanceInfo and PlayerDataSnapshot
     // ---- the quests of Ong Gohan (docs 15.32): the list comes inside every PlayerDataSnapshot (PlayerDataSnapshot.quests) ----
+    MatchReady match_ready = 84;                         // the client shows the dungeon now: a match started with StartMatchRequest.wait_for_ready begins to run (docs 15.34)
     ClaimQuestRequest claim_quest_request = 83;          // the reward of a finished quest (an empty id = every finished one); ActionResult, then a fresh PlayerDataSnapshot
     // ---- GEN (docs 15.21) ----
     RerollGenRequest reroll_gen_request = 68;           // a GEN stone changes one line of a piece to another random set of its planet; ActionResult, then a fresh PlayerDataSnapshot
@@ -621,6 +622,11 @@ message StartMatchRequest {
   uint64 controlled_character_id = 2;   // the character the player moves; the other two are AI
   uint64 fusion_partner_id = 3;         // 0 = no fusion; otherwise the secondary of a Potara fusion (both level 50 or more, earring owned)
   string difficulty = 4;                // a key of PlayerDataSnapshot.difficulties (EASY, HARD, HELL); empty = the default one (docs 15.33)
+  bool wait_for_ready = 5;              // true: the match does not run until the client sends MatchReady (it flies on a ship first), at most match_rules.ready_wait_max_s seconds; false: it runs at once (docs 15.34)
+}
+
+// The client has finished the ship flight and shows the arena: the server starts the clock of a match that waits for it (StartMatchRequest.wait_for_ready).
+message MatchReady {
 }
 
 message Arena {

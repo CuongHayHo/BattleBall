@@ -371,6 +371,21 @@ class MatchIntegrationTest {
             c.expectCase(Envelope.PayloadCase.MATCH_ENDED, 8000);
             waitNoMatch(p);
 
+            // a match that waits for the client (the ship flies first, docs 15.34): no frame until MatchReady, then it runs
+            c.send(Envelope.newBuilder().setRequestId(7).setStartMatchRequest(StartMatchRequest.newBuilder().setDungeonId(12).setControlledCharacterId(p.characters()[0])
+                    .setWaitForReady(true)).build());
+            c.expectCase(Envelope.PayloadCase.MATCH_STARTED, 8000);
+            long quietUntil = System.currentTimeMillis() + 800;
+            while (System.currentTimeMillis() < quietUntil) {
+                Envelope held = c.next(100);
+                assertTrue(held == null || !held.hasMatchFrame(), "the match does not run before the client is ready");
+            }
+            c.send(Envelope.newBuilder().setMatchReady(com.battleball.proto.MatchReady.getDefaultInstance()).build());
+            c.expectCase(Envelope.PayloadCase.MATCH_FRAME, 5000);
+            c.send(Envelope.newBuilder().setLeaveMatchRequest(LeaveMatchRequest.getDefaultInstance()).build());
+            c.expectCase(Envelope.PayloadCase.MATCH_ENDED, 8000);
+            waitNoMatch(p);
+
             // a harder run pays more (the same player, the same dungeon, both won)
             MatchEnded[] ended = new MatchEnded[2];
             String[] levels = {"EASY", "HARD"};

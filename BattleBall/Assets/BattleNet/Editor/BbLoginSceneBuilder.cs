@@ -222,6 +222,12 @@ namespace BattleBall.EditorTools
             village.whiteSprite = Sprite("white");
             village.dotSprite = Sprite("dot");
             village.flareSprite = Sprite("nro_flare");
+            var backdrops = new System.Collections.Generic.List<Sprite>();
+            for (int i = 0; System.IO.File.Exists(SpriteDir + "arena_bg" + i + ".jpg"); i++) backdrops.Add(Sprite("arena_bg" + i, "jpg"));
+            var objects = new System.Collections.Generic.List<Sprite>();
+            for (int i = 0; System.IO.File.Exists(SpriteDir + "arena_obj" + i + ".png"); i++) objects.Add(Sprite("arena_obj" + i));
+            village.arenaBackdrops = backdrops.ToArray();
+            village.arenaObjects = objects.ToArray();
             ui.village = village;
 
             var joyBase = Image("Joystick", root, "joy_base", false);
@@ -1942,6 +1948,9 @@ namespace BattleBall.EditorTools
             Border("nro_skill_on", Vector4.zero, 128);
             Border("nro_taungam", Vector4.zero, 1024);
             Border("nro_flare", Vector4.zero, 256);
+            // the space behind the dungeons (docs 15.34): pictures made by BattleBall/SourceData/tools/make_arena_backdrops.py
+            for (int i = 0; System.IO.File.Exists(SpriteDir + "arena_bg" + i + ".jpg"); i++) Border("arena_bg" + i, Vector4.zero, 2048, "jpg");
+            for (int i = 0; System.IO.File.Exists(SpriteDir + "arena_obj" + i + ".png"); i++) Border("arena_obj" + i, Vector4.zero, 512);
             AssetDatabase.Refresh();
         }
 

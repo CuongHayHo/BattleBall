@@ -15,6 +15,13 @@ namespace BattleBall.Net
         public const string MenuScene = "Menu";
         public const string KeyUser = "bb.user", KeyToken = "bb.token";      // PlayerPrefs keys of the saved account (login screen and password change)
 
+        public const string ServerLocal = "local", ServerVps = "vps";
+
+        /// <summary>The server chosen on the login screen for this run ("local" or "vps"); null until the player has chosen. The saved account is kept per server.</summary>
+        public static string ServerId { get; set; }
+        public static string UserKey { get { return ServerId == ServerVps ? KeyUser + ".vps" : KeyUser; } }          // "local" keeps the old keys, so accounts saved before the choice existed still work
+        public static string TokenKey { get { return ServerId == ServerVps ? KeyToken + ".vps" : KeyToken; } }
+
         public static BbClient Client { get; private set; }
         public static string Username { get; private set; }
         public static PlayerDataSnapshot Snapshot { get { return Client != null ? Client.Snapshot : null; } }

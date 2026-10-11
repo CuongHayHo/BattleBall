@@ -13,6 +13,22 @@ namespace BattleBall.Net
     public sealed partial class BbVillageView
     {
         public Sprite flareSprite;                // myTexture2dflare.png of Nro: the glow over a dead character
+        public Sprite[] arenaBackdrops;           // the space pictures behind a dungeon, one for each dungeon in turn (docs 15.34); empty = the old sky with clouds
+        public Sprite[] arenaObjects;             // asteroids, planets and black holes that drift in front of the backdrop (see ObjectKinds)
+        int _arenaStyle;                          // which backdrop: the number of the dungeon
+        readonly List<Drifter> _drifters = new List<Drifter>();
+
+        /// <summary>What an object picture is: 0 asteroid (tumbles), 1 planet (turns very slowly), 2 black hole (only drifts). In the order tools/make_arena_backdrops.py numbers them.</summary>
+        static readonly int[] ObjectKinds = { 2, 0, 2, 0, 2, 0, 1, 1, 2, 2 };
+
+        sealed class Drifter
+        {
+            public RectTransform rect;
+            public Vector2 position, velocity;
+            public float angle, spin, spanX, spanY, margin;
+        }
+
+        bool HasSpaceBackdrop { get { return _map != null && _map.Flying && arenaBackdrops != null && arenaBackdrops.Length > 0 && arenaBackdrops[Mathf.Abs(_arenaStyle) % arenaBackdrops.Length] != null; } }
 
         List<ActorSpec> _cast = new List<ActorSpec>();
         BbMapChunk _villageMap;
@@ -46,9 +62,10 @@ namespace BattleBall.Net
         }
 
         /// <summary>The map is replaced by the arena: the party is made again in it (the server places it), every NPC of the village is gone until <see cref="LeaveArena"/>.</summary>
-        public void EnterArena(float arenaW, float arenaH, string tier)
+        public void EnterArena(float arenaW, float arenaH, string tier, int style = 0)
         {
             if (InArena) return;
+            _arenaStyle = style;
             _villageMap = _map;
             _villageMapId = _mapId;
             _villageGroupX = _groupX;
@@ -82,6 +99,7 @@ namespace BattleBall.Net
         /// <summary>Clouds on three layers that move slower than the arena (far, middle, near) and a mist; all made of the soft circle sprite.</summary>
         void BuildArenaBackdrop()
         {
+            if (HasSpaceBackdrop) { BuildSpaceBackdrop(); return; }
             var tint = _map.SkyTop.r > 0.7f ? new Color(1f, 0.92f, 0.82f) : _map.SkyTop.b > 0.25f && _map.SkyTop.r < 0.2f ? new Color(0.80f, 0.70f, 0.95f) : Color.white;
             var rng = new System.Random(11);
             float[] parallax = { 0.12f, 0.28f, 0.55f };
@@ -103,6 +121,79 @@ namespace BattleBall.Net
                     NewImage(layer, "Cloud", dotSprite, c, cx + w * 0.30f, cy + h * 0.25f, w * 0.60f, h * 0.9f, new Vector2(0.5f, 0.5f));
                     NewImage(layer, "Cloud", dotSprite, c, cx - w * 0.28f, cy + h * 0.1f, w * 0.55f, h * 0.8f, new Vector2(0.5f, 0.5f));
                 }
+            }
+        }
+
+        /// <summary>
+        /// Space behind a dungeon (owner request 2026-10-12, docs 15.34): a picture that fills the screen and moves slowly against the camera, and two layers of asteroids, planets
+        /// and black holes that drift and turn in front of it, the nearer layer smaller and faster. Every dungeon has its own picture and its own objects.
+        /// </summary>
+        void BuildSpaceBackdrop()
+        {
+            var bg = arenaBackdrops[Mathf.Abs(_arenaStyle) % arenaBackdrops.Length];
+            const float farP = 0.22f;
+            var far = NewLayer("SpaceBg", viewport);
+            _layers.Add(far);
+            _layerParallax.Add(farP);
+            float needW = Mathf.Max(_width, (_map.Width - _width) * farP + _width), needH = Mathf.Max(_height, (WorldHeight - _height) * farP + _height);   // what the camera can reach of this layer
+            float aspect = bg.rect.width / bg.rect.height;
+            float w = Mathf.Max(needW, needH * aspect) + 4f, h = w / aspect;
+            NewImage(far, "Space", bg, Color.white, (needW - w) * 0.5f, (needH - h) * 0.5f, w, h, Vector2.zero);
+
+            if (arenaObjects == null || arenaObjects.Length == 0) return;
+            var rng = new System.Random(77 + _arenaStyle * 13);
+            AddDriftLayer("SpaceFar", 0.40f, 5, 0.30f, 0.55f, 0.55f, 0.85f, 5f, rng);
+            AddDriftLayer("SpaceNear", 0.70f, 3, 0.12f, 0.24f, 0.78f, 1f, 11f, rng);
+        }
+
+        /// <summary>One layer of drifting objects (parallax p): sizes are shares of the screen height, speed is the drift in canvas px per second.</summary>
+        void AddDriftLayer(string name, float p, int count, float sizeMin, float sizeMax, float shade, float alpha, float speed, System.Random rng)
+        {
+            var layer = NewLayer(name, viewport);
+            _layers.Add(layer);
+            _layerParallax.Add(p);
+            float spanX = Mathf.Max(_width, (_map.Width - _width) * p + _width), spanY = Mathf.Max(_height, (WorldHeight - _height) * p + _height);
+            for (int i = 0; i < count; i++)
+            {
+                int pick = rng.Next(arenaObjects.Length);
+                var sprite = arenaObjects[pick];
+                if (sprite == null) continue;
+                int kind = pick < ObjectKinds.Length ? ObjectKinds[pick] : 0;
+                float size = (sizeMin + (float)rng.NextDouble() * (sizeMax - sizeMin)) * _height * (kind == 0 ? 0.7f : 1f);          // the rocks are smaller than the planets
+                float sw = sprite.rect.width, sh = sprite.rect.height;
+                float scale = size / Mathf.Max(sw, sh);
+                var img = NewImage(layer, "Drift", sprite, new Color(shade, shade, shade, alpha), 0f, 0f, sw * scale, sh * scale, new Vector2(0.5f, 0.5f));
+                img.raycastTarget = false;
+                float angle = (float)rng.NextDouble() * 360f;
+                float heading = (float)rng.NextDouble() * Mathf.PI * 2f;
+                float v = speed * (0.5f + (float)rng.NextDouble());
+                _drifters.Add(new Drifter
+                {
+                    rect = img.rectTransform,
+                    position = new Vector2((float)rng.NextDouble() * spanX, (float)rng.NextDouble() * spanY),
+                    velocity = new Vector2(Mathf.Cos(heading), Mathf.Sin(heading)) * v,
+                    angle = angle,
+                    spin = kind == 0 ? (rng.Next(2) == 0 ? -1f : 1f) * (4f + (float)rng.NextDouble() * 8f) : kind == 1 ? 0.8f : 0f,
+                    spanX = spanX,
+                    spanY = spanY,
+                    margin = Mathf.Max(sw, sh) * scale * 0.5f
+                });
+            }
+        }
+
+        /// <summary>The drifting objects move on and turn; one that leaves the layer comes back in from the other side.</summary>
+        void DriftArenaObjects(float dt)
+        {
+            foreach (var d in _drifters)
+            {
+                if (d.rect == null) continue;
+                d.position += d.velocity * dt;
+                d.angle += d.spin * dt;
+                float spanX = d.spanX + 2f * d.margin, spanY = d.spanY + 2f * d.margin;
+                float x = Mathf.Repeat(d.position.x + d.margin, spanX) - d.margin;
+                float y = Mathf.Repeat(d.position.y + d.margin, spanY) - d.margin;
+                d.rect.anchoredPosition = new Vector2(x, y);
+                d.rect.localEulerAngles = new Vector3(0f, 0f, d.angle);
             }
         }
 

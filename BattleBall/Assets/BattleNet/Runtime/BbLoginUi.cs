@@ -42,7 +42,7 @@ namespace BattleBall.Net
         public Button okButton, secondButton;
         public Text secondLabel;
 
-        const string KeyUser = BbSession.KeyUser, KeyToken = BbSession.KeyToken;
+        const string KeyServer = "bb.server";            // the server chosen last time ("local" or "vps"), marked on the next start
         static readonly Regex UsernameRule = new Regex("^[a-z0-9_]{4,20}$");
         static readonly Color Error = new Color(0.72f, 0.12f, 0.08f), Good = new Color(0.12f, 0.45f, 0.15f);
         static readonly Color DotOn = new Color(0.2f, 0.9f, 0.2f), DotOff = new Color(0.9f, 0.2f, 0.2f);
@@ -67,12 +67,13 @@ namespace BattleBall.Net
             switchButton.onClick.AddListener(() => ShowForm(false));
             okButton.onClick.AddListener(Submit);
             secondButton.onClick.AddListener(() => ShowForm(!_registerMode));
-            LoadSaved();
+            BuildServerChooser();
         }
 
         void Start()
         {
-            StartConnect();
+            if (BbSession.ServerId == null) ShowServerChooser();          // first screen of a run: Local or VPS; coming back after a lost connection keeps the server
+            else { LoadSaved(); StartConnect(); }
             if (BbSession.EndReason != null)                // the session just ended (connection lost, logged in elsewhere): say why
             {
                 loadingStatus.text = BbSession.EndReason;
@@ -136,8 +137,8 @@ namespace BattleBall.Net
 
         void LoadSaved()
         {
-            _savedUser = PlayerPrefs.GetString(KeyUser, "");
-            _savedToken = PlayerPrefs.GetString(KeyToken, "");
+            _savedUser = PlayerPrefs.GetString(BbSession.UserKey, "");
+            _savedToken = PlayerPrefs.GetString(BbSession.TokenKey, "");
         }
 
         bool HasSaved { get { return _savedUser.Length > 0 && _savedToken.Length > 0; } }
@@ -146,15 +147,15 @@ namespace BattleBall.Net
         {
             _savedUser = user;
             _savedToken = token;
-            PlayerPrefs.SetString(KeyUser, user);
-            PlayerPrefs.SetString(KeyToken, token);
+            PlayerPrefs.SetString(BbSession.UserKey, user);
+            PlayerPrefs.SetString(BbSession.TokenKey, token);
             PlayerPrefs.Save();
         }
 
         void ClearSavedData()
         {
-            PlayerPrefs.DeleteKey(KeyUser);
-            PlayerPrefs.DeleteKey(KeyToken);
+            PlayerPrefs.DeleteKey(BbSession.UserKey);
+            PlayerPrefs.DeleteKey(BbSession.TokenKey);
             PlayerPrefs.Save();
             LoadSaved();
             if (menuRoot.activeSelf) ShowForm(false);
@@ -180,7 +181,9 @@ namespace BattleBall.Net
             try
             {
                 var cfg = BbConfig.Current;
-                await client.ConnectAsync(cfg.gameHost, cfg.gamePort, cfg.AcceptAnyCertificate, Application.version, Application.platform.ToString(), p => _target = p * 0.2f);          // the first fifth of the bar is the connection, the rest the asset download
+                bool vps = BbSession.ServerId == BbSession.ServerVps;
+                // the VPS has a real certificate (Let's Encrypt): always validated; only the Local development server may be self-signed
+                await client.ConnectAsync(vps ? cfg.vpsHost : cfg.gameHost, vps ? cfg.vpsPort : cfg.gamePort, !vps && cfg.AcceptAnyCertificate, Application.version, Application.platform.ToString(), p => _target = p * 0.2f);          // the first fifth of the bar is the connection, the rest the asset download
             }
             catch (Exception e)
             {
@@ -277,6 +280,94 @@ namespace BattleBall.Net
             }
         }
 
+        // ---------------------------------------------------------------------------------------------------------------- server choice (Local or VPS)
+
+        GameObject _chooserRoot;
+        Button _changeServerButton;
+
+        /// <summary>Built by code on the canvas of this scene, so the Login scene itself does not change.</summary>
+        void BuildServerChooser()
+        {
+            var parent = (RectTransform)versionLabel.canvas.transform;
+            _chooserRoot = new GameObject("ServerChooser", typeof(RectTransform), typeof(Image));
+            var rt = (RectTransform)_chooserRoot.transform;
+            rt.SetParent(parent, false);
+            rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one; rt.offsetMin = rt.offsetMax = Vector2.zero;
+            _chooserRoot.GetComponent<Image>().color = new Color(0.04f, 0.07f, 0.13f, 0.97f);
+            MakeText(rt, "Chọn máy chủ", 34, new Vector2(0f, 150f), new Vector2(600f, 60f));
+            string last = PlayerPrefs.GetString(KeyServer, "");
+            MakeButton(rt, "Chơi Local" + (last == BbSession.ServerLocal ? "  (lần trước)" : ""), new Vector2(0f, 50f), new Vector2(460f, 76f), () => ChooseServer(BbSession.ServerLocal), new Color(0.2f, 0.45f, 0.75f));
+            MakeButton(rt, "Chơi VPS" + (last == BbSession.ServerVps ? "  (lần trước)" : ""), new Vector2(0f, -50f), new Vector2(460f, 76f), () => ChooseServer(BbSession.ServerVps), new Color(0.18f, 0.55f, 0.28f));
+            MakeText(rt, "Local: " + BbConfig.Current.gameHost + ":" + BbConfig.Current.gamePort + "     VPS: " + BbConfig.Current.vpsHost + ":" + BbConfig.Current.vpsPort, 18, new Vector2(0f, -135f), new Vector2(900f, 40f));
+            _chooserRoot.SetActive(false);
+
+            _changeServerButton = MakeButton(parent, "Đổi máy chủ", Vector2.zero, new Vector2(190f, 48f), ShowServerChooser, new Color(0f, 0f, 0f, 0.55f));
+            var crt = (RectTransform)_changeServerButton.transform;
+            crt.anchorMin = crt.anchorMax = Vector2.zero;                // bottom-left corner
+            crt.anchoredPosition = new Vector2(110f, 36f);
+            _changeServerButton.gameObject.SetActive(false);
+        }
+
+        Text MakeText(RectTransform parent, string text, int size, Vector2 pos, Vector2 box)
+        {
+            var go = new GameObject("Text", typeof(RectTransform), typeof(Text));
+            var rt = (RectTransform)go.transform;
+            rt.SetParent(parent, false);
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = box;
+            rt.anchoredPosition = pos;
+            var t = go.GetComponent<Text>();
+            t.font = versionLabel.font;
+            t.fontSize = size;
+            t.alignment = TextAnchor.MiddleCenter;
+            t.color = Color.white;
+            t.raycastTarget = false;
+            t.text = text;
+            return t;
+        }
+
+        Button MakeButton(RectTransform parent, string label, Vector2 pos, Vector2 size, UnityEngine.Events.UnityAction onClick, Color color)
+        {
+            var go = new GameObject("Button", typeof(RectTransform), typeof(Image), typeof(Button));
+            var rt = (RectTransform)go.transform;
+            rt.SetParent(parent, false);
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = size;
+            rt.anchoredPosition = pos;
+            go.GetComponent<Image>().color = color;
+            var b = go.GetComponent<Button>();
+            b.onClick.AddListener(onClick);
+            MakeText(rt, label, size.y > 60f ? 28 : 20, Vector2.zero, size);
+            return b;
+        }
+
+        /// <summary>Drops the running connection (if any) and shows the choice.</summary>
+        void ShowServerChooser()
+        {
+            if (_busy) return;
+            _attempt++;
+            _cts?.Cancel();
+            _client?.Dispose();
+            _client = null;
+            ShowOnly(null);
+        }
+
+        void ChooseServer(string id)
+        {
+            if (BbSession.ServerId != id)
+            {
+                BbSession.DungeonToken = null;                  // a match token and the player of another server mean nothing here
+                BbSession.LastUsername = null;
+                BbSession.ResumedMatch = null;
+                userField.text = passField.text = confirmField.text = "";
+            }
+            BbSession.ServerId = id;
+            PlayerPrefs.SetString(KeyServer, id);
+            PlayerPrefs.Save();
+            LoadSaved();
+            StartConnect();
+        }
+
         // ---------------------------------------------------------------------------------------------------------------- screens
 
         void ShowOnly(GameObject root)
@@ -285,13 +376,15 @@ namespace BattleBall.Net
             menuRoot.SetActive(root == menuRoot);
             formRoot.SetActive(root == formRoot);
             clearDataButton.gameObject.SetActive(root == loadingRoot || root == menuRoot);
+            if (_chooserRoot != null) _chooserRoot.SetActive(root == null);
+            if (_changeServerButton != null) _changeServerButton.gameObject.SetActive(root != null);
         }
 
         void ShowMenu()
         {
             ShowOnly(menuRoot);
             resumeLabel.text = "Chơi TK: " + _savedUser;
-            serverLabel.text = "Máy chủ: " + (_serverName ?? BbConfig.Current.serverName);
+            serverLabel.text = "Máy chủ: " + (_serverName ?? BbConfig.Current.serverName) + (BbSession.ServerId == BbSession.ServerVps ? " (VPS)" : " (Local)");
             serverDot.color = _client != null && _client.Connection.IsConnected ? DotOn : DotOff;
         }
 

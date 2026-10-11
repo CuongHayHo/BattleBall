@@ -918,6 +918,7 @@ namespace BattleBall.Net
         /// </summary>
         async Task DungeonLevelsRun(BbMenuUi menu, BbTraining training, BbVillageView village)
         {
+            menu.SetPanelOpen(false, true, false);                                                  // the menu is folded away: its button must be there after the dungeon
             menu.DebugOpenDungeonList();
             await Wait(0.5f);
             menu.dungeonPicker.DemoSelect(12);
@@ -938,7 +939,8 @@ namespace BattleBall.Net
             await WaitFor(() => menu.popup.IsOpen, 10f);
             menu.popup.buttons[0].onClick.Invoke();
             await WaitFor(() => !menu.InDungeon, 15f);
-            Log("back: " + menu.DebugDungeon());
+            await Wait(0.5f);
+            Log("back: " + menu.DebugDungeon() + "; panel open " + menu.PanelOpen + "; menu button visible " + menu.panelToggle.gameObject.activeSelf);
         }
 
         /// <summary>The panel of Bà Hạt Mít with the real server: the piece and the stone are put in, the button runs the request (docs 15.22).</summary>
