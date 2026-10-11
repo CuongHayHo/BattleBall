@@ -213,7 +213,36 @@ namespace BattleBall.Net
             _client = client;
             _serverName = string.IsNullOrEmpty(info.ServerName) ? BbConfig.Current.serverName : info.ServerName;
             _shown = _target = 1f;
+            // a dungeon was being played when the connection was lost: the match token takes the player back into it, without a login
+            if (BbSession.DungeonToken != null && !string.IsNullOrEmpty(BbSession.LastUsername))
+            {
+                loadingStatus.text = "Đang vào lại phó bản...";
+                if (await TryResumeDungeon(client))
+                {
+                    try { await EnterMenu(BbSession.LastUsername); return; }
+                    catch (Exception) { BbSession.ResumedMatch = null; }
+                }
+                if (attempt != _attempt) return;
+            }
             if (HasSaved) ShowMenu(); else ShowForm(false);
+        }
+
+        /// <summary>The server still holds the match: it answers with the whole picture of it (MatchResumed) and the player data follows.</summary>
+        async Task<bool> TryResumeDungeon(BbClient client)
+        {
+            try
+            {
+                var answer = await client.Connection.RequestAsync(new Envelope { ResumeMatchRequest = new ResumeMatchRequest { MatchToken = BbSession.DungeonToken } });
+                if (answer.PayloadCase == Envelope.PayloadOneofCase.MatchResumed && answer.MatchResumed.Ok)
+                {
+                    BbSession.ResumedMatch = answer.MatchResumed.Match;
+                    return true;
+                }
+            }
+            catch (Exception) { }
+            BbSession.DungeonToken = null;                  // the match is gone (it ended, or the time to come back ran out)
+            BbSession.ResumedMatch = null;
+            return false;
         }
 
         async Task UpdateAssets(BbConnection connection, string version, CancellationToken ct)

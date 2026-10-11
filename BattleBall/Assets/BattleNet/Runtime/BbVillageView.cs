@@ -12,7 +12,7 @@ namespace BattleBall.Net
     /// or the drawn placeholder when its files are not there. The terrain is walkable: small steps are climbed, walls stop a walker (the player flies over them,
     /// the AI flies up the wall by itself) and a character that walks off a ledge falls. Everything is made of UI Images, so it needs no camera of its own.
     /// </summary>
-    public sealed class BbVillageView : MonoBehaviour
+    public sealed partial class BbVillageView : MonoBehaviour
     {
         public RectTransform viewport;
         public Font font;
@@ -55,6 +55,17 @@ namespace BattleBall.Net
             public BbMobView mob;                // a training dummy drawn as an Nro mob (Mộc nhân)
             public bool jar;                     // a dummy that is the jar of Ma phong ba (the costume of the parts 1218 to 1220)
             public bool locked;                  // the server holds it (gong, charge, beam, stun, sleep, rope, jar): it takes no input and does not walk
+            // a dungeon arena (BbVillageView.Dungeon.cs): where the server says it is (the picture follows it), the HP bar of a monster, and the throw of a body that died
+            public float tx, ty;
+            public bool remote;
+            public bool boss;
+            public Image hpFill, hpBack;
+            public float hpRatio = 1f;
+            public bool dying;
+            public float dyingAge;
+            public Vector2 dyingVelocity;
+            public bool ghost;
+            public string key;
         }
 
         // Speed: the walk of all three, doubled twice (owner requests 2026-10-08: 300, 600, now 1200); the AI follow at Speed * 1.15
@@ -144,6 +155,7 @@ namespace BattleBall.Net
             var sky = _sky.gameObject.AddComponent<Image>();
             sky.sprite = Gradient(_map.SkyTop, _map.SkyBottom);
             sky.raycastTarget = false;
+            if (_map.Flying) BuildArenaBackdrop();
 
             if (_map.Background != null) BuildBackground();
 
@@ -169,6 +181,7 @@ namespace BattleBall.Net
                 foreach (var s in _map.Scenery) if (s.Parallax >= 1f) Draw(_world, s);
             }
             foreach (var npc in _map.Npcs) AddNpc(npc);
+            if (_map.Flying) BuildArenaFloor();
             Layout(true);
         }
 
@@ -309,6 +322,7 @@ namespace BattleBall.Net
 
         static float DummyHeightOf(Actor a)
         {
+            if (a.key != null) return a.view.OverheadHeight + (a.boss ? 30f : 16f);          // a monster of a dungeon: above its HP bar
             if (a.mob != null && a.mob.Height > 0f) return a.mob.Height;
             return a.view.OverheadHeight > 0f ? a.view.OverheadHeight * 0.8f : 86f;
         }
@@ -336,6 +350,7 @@ namespace BattleBall.Net
 
         public void ApproachTo(float x, float stopDistance)
         {
+            _approachIsPoint = false;
             _approachX = x;
             _approachStop = Mathf.Max(20f, stopDistance);
             Approaching = true;
@@ -448,7 +463,7 @@ namespace BattleBall.Net
         {
             var list = new List<KeyValuePair<float, string>>();
             float left = Mathf.Max(0f, _camX) + _inset - 10f, right = Mathf.Max(0f, _camX) + _width - _insetRight + 10f;
-            foreach (var kv in _dummies) if (kv.Value.x >= left && kv.Value.x <= right) list.Add(new KeyValuePair<float, string>(kv.Value.x, kv.Key));
+            foreach (var kv in _dummies) if (kv.Value.x >= left && kv.Value.x <= right && InViewY(kv.Value) && !kv.Value.dying) list.Add(new KeyValuePair<float, string>(kv.Value.x, kv.Key));
             list.Sort((a, b) => a.Key.CompareTo(b.Key));
             var keys = new List<string>();
             foreach (var p in list) keys.Add(p.Value);
@@ -469,7 +484,7 @@ namespace BattleBall.Net
         {
             var list = new List<KeyValuePair<float, string>>();
             float left = Mathf.Max(0f, _camX) + _inset - 10f, right = Mathf.Max(0f, _camX) + _width - _insetRight + 10f;
-            foreach (var kv in _dummies) if (kv.Value.x >= left && kv.Value.x <= right) list.Add(new KeyValuePair<float, string>(kv.Value.x, kv.Key));
+            foreach (var kv in _dummies) if (kv.Value.x >= left && kv.Value.x <= right && InViewY(kv.Value) && !kv.Value.dying) list.Add(new KeyValuePair<float, string>(kv.Value.x, kv.Key));
             foreach (var kv in _npcs) if (kv.Value.x >= left && kv.Value.x <= right) list.Add(new KeyValuePair<float, string>(kv.Value.x, kv.Key));
             list.Sort((a, b) => a.Key.CompareTo(b.Key));
             var keys = new List<string>();
@@ -609,6 +624,7 @@ namespace BattleBall.Net
         public void SetCast(IList<ActorSpec> cast)
         {
             if (_map == null) ShowMap(BbMaps.StarterVillage);
+            _cast = new List<ActorSpec>(cast);
             // keep the position of the group when the main character changes, and the views of characters that stay
             float groupX = _groupX >= 0f ? _groupX : _map.SpawnX;
             var old = new Dictionary<ulong, Actor>();
@@ -621,7 +637,7 @@ namespace BattleBall.Net
                 if (old.TryGetValue(spec.Id, out a))
                 {
                     old.Remove(spec.Id);
-                    a.view.Show(spec.CostumeId);
+                    a.view.Show(a.look != 0 ? a.look : spec.CostumeId);          // the great ape of Biến hình stays an ape when the player takes over another character
                     a.costume = spec.CostumeId;
                     PlaceLabel(a);
                     a.view.auraOnlyWhenStanding = !spec.Main;
@@ -734,6 +750,7 @@ namespace BattleBall.Net
         {
             if (_map == null || _actors.Count == 0) return;
             ReadSize();
+            if (_map.Flying) { TickArena(input, dt); return; }
             _clock += dt;
             var main = _actors[0];
             StickHeld = input.sqrMagnitude > 0.04f;
@@ -907,7 +924,7 @@ namespace BattleBall.Net
                 float centre = _inset + (_width - _inset - _insetRight) * 0.5f;
                 float target = Mathf.Clamp(_actors[0].x - centre, 0f, Mathf.Max(0f, _map.Width - _width));
                 _camX = snap || _camX < 0f ? target : Mathf.Lerp(_camX, target, 1f - Mathf.Exp(-8f * dt));
-                float targetY = Mathf.Clamp(_actors[0].y - _height * 0.38f, 0f, Mathf.Max(0f, WorldHeight - _height));
+                float targetY = Mathf.Clamp(_actors[0].y - _height * (_map.Flying ? 0.45f : 0.38f), 0f, Mathf.Max(0f, WorldHeight - _height));
                 _camY = snap ? targetY : Mathf.Lerp(_camY, targetY, 1f - Mathf.Exp(-6f * dt));
             }
             else { _camX = 0f; _camY = 0f; }

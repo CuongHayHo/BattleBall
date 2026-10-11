@@ -56,12 +56,31 @@ public final class MatchEngine {
     private final List<Projectile> projectiles = new ArrayList<>();
     private final List<Delayed> delayed = new ArrayList<>();
     private final List<TelegraphArea> telegraphs = new ArrayList<>();
-    private final Fighter controlled;
+    private Fighter controlled;
     private final List<Fighter> squad = new ArrayList<>();
     private final MatchSetup.Training training;
     private final double arenaW;
     private final double arenaH;
     private long lastInputAt;            // training: the session ends after training.idleEndMs without input
+    private final boolean dungeon;       // a real match: a flying arena, waves of small monsters before every boss (docs/architecture/BattleBallServer.md 15.25)
+    // the part of the arena the player's screen shows (reported by the client, top-left corner and size): the AI fight only what is inside it
+    private double viewX;
+    private double viewY;
+    private double viewW;
+    private double viewH;
+    private boolean viewReported;
+    // the stage in progress: the waves come first, the boss after the last of them
+    private boolean stageStarted;
+    private int waveIdx;
+    private int waveSize;
+    private int pendingSpawns;
+    private long firstWaveAt;
+    private long lastWaveAt;
+    private long bossReadyAt;
+    private int summonedThisBoss;
+    private long nextSummonAt;
+    private static final String[] PLANETS = {"EARTH", "NAMEC", "XAYDA"};
+    private String forcedPlanet;         // tests: every boss takes this planet
 
     // frame buffers (drained by buildFrame)
     private final List<DamageEvent> damageBuf = new ArrayList<>();
@@ -120,7 +139,7 @@ public final class MatchEngine {
     private static final double MOVE_EPS = 2.0;
 
     /** A visible danger zone (boss ultimate): allies try to step out of it. */
-    private record TelegraphArea(boolean rect, double x, double y, double dirX, double dirY, double length, double width, long until) {
+    private record TelegraphArea(long ownerId, boolean rect, double x, double y, double dirX, double dirY, double length, double width, long until) {
     }
 
     public MatchEngine(MatchSetup setup) {
@@ -129,8 +148,9 @@ public final class MatchEngine {
         this.rules = d.balanceObj("match_rules");
         this.rng = setup.random();
         this.training = setup.training();
-        this.arenaW = training != null ? training.arenaW() : rule("arena_w", 1600);
-        this.arenaH = training != null ? training.arenaH() : rule("arena_h", 900);
+        this.dungeon = training == null;
+        this.arenaW = training != null ? training.arenaW() : rule("dg_arena_w", rule("arena_w", 1600));
+        this.arenaH = training != null ? training.arenaH() : rule("dg_arena_h", rule("arena_h", 900));
         double w = arenaW;
         double h = arenaH;
         Fighter ctrl = null;
@@ -187,6 +207,30 @@ public final class MatchEngine {
 
     public Fighter controlledFighter() {
         return controlled;
+    }
+
+    /**
+     * The player takes over another fighter of the squad (owner request 2026-10-11): the one controlled until now becomes AI where it stands, nothing of either is reset (HP, Ki,
+     * buffs, the ape form, a skill in progress, cooldowns). A dead fighter can be taken too (the revive then applies to it). Returns the new controlled fighter, or null.
+     */
+    public Fighter switchControl(int entityId) {
+        lastInputAt = now;
+        if (finished) {
+            return null;
+        }
+        for (Fighter f : squad) {
+            if (f.id == entityId) {
+                if (f != controlled) {
+                    if (controlled != null) {
+                        controlled.controlled = false;
+                    }
+                    f.controlled = true;
+                    controlled = f;
+                }
+                return f;
+            }
+        }
+        return null;
     }
 
     public int bossesDefeated() {
@@ -251,6 +295,69 @@ public final class MatchEngine {
 
     public boolean training() {
         return training != null;
+    }
+
+    public double arenaWidth() {
+        return arenaW;
+    }
+
+    public double arenaHeight() {
+        return arenaH;
+    }
+
+    /** Tests: every boss that comes takes this planet instead of a random one. */
+    public void forcePlanet(String planet) {
+        this.forcedPlanet = planet;
+    }
+
+    /**
+     * The client says which part of the arena its screen shows (top-left corner and size, the pixels of the arena). The size is kept inside what a screen can be, the corner
+     * inside the arena; the AI characters fight only what lies in this rectangle.
+     */
+    public void reportView(double x, double y, double w, double h) {
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+        viewW = clamp(w, rule("dg_view_min_w", 240), rule("dg_view_max_w", 1400));
+        viewH = clamp(h, rule("dg_view_min_h", 160), rule("dg_view_max_h", 900));
+        viewX = clamp(x, 0, Math.max(0, arenaW - viewW));
+        viewY = clamp(y, 0, Math.max(0, arenaH - viewH));
+        viewReported = true;
+    }
+
+    /** The part of the arena the screen shows, as x0, y0, x1, y1: what the client reported, or a default one centred on the controlled character. */
+    double[] view() {
+        double w = viewReported ? viewW : rule("dg_view_w", 640);
+        double h = viewReported ? viewH : rule("dg_view_h", 360);
+        double x0 = viewReported ? viewX : (controlled == null ? 0 : controlled.x - w / 2);
+        double y0 = viewReported ? viewY : (controlled == null ? 0 : controlled.y - h / 2);
+        x0 = clamp(x0, 0, Math.max(0, arenaW - w));
+        y0 = clamp(y0, 0, Math.max(0, arenaH - h));
+        return new double[] {x0, y0, x0 + w, y0 + h};
+    }
+
+    private static boolean inside(double[] v, Entity e) {
+        return e.x + e.radius >= v[0] && e.x - e.radius <= v[2] && e.y + e.radius >= v[1] && e.y - e.radius <= v[3];
+    }
+
+    /** How far a ray from (x, y) along (dx, dy) goes before it leaves the screen; 0 when the start is not on the screen. */
+    private double distanceToViewEdge(double x, double y, double dx, double dy) {
+        double[] v = view();
+        if (x < v[0] || x > v[2] || y < v[1] || y > v[3]) {
+            return 0;
+        }
+        double t = Double.MAX_VALUE;
+        if (dx > 1e-9) {
+            t = Math.min(t, (v[2] - x) / dx);
+        } else if (dx < -1e-9) {
+            t = Math.min(t, (v[0] - x) / dx);
+        }
+        if (dy > 1e-9) {
+            t = Math.min(t, (v[3] - y) / dy);
+        } else if (dy < -1e-9) {
+            t = Math.min(t, (v[1] - y) / dy);
+        }
+        return t == Double.MAX_VALUE ? 0 : Math.min(t, 4000);
     }
 
     /** Training: an AI character of the squad stands where the client's village puts it (kept inside the arena). */
@@ -629,6 +736,9 @@ public final class MatchEngine {
                 pay(f, slot, cd, kiCost, allKi);
                 double speed = L.projectileSpeed() == null ? 480 : L.projectileSpeed();
                 double range = L.lengthPx() == null ? 300 : L.lengthPx();
+                if (dungeon && rule("dg_skill2_to_view_edge", 1) > 0) {
+                    range = Math.max(range, distanceToViewEdge(f.x, f.y, f.dirX, f.dirY) + 40);        // in a dungeon the chuong flies on through everything to the edge of the screen (owner request 2026-10-11)
+                }
                 double radius = L.widthPx() == null ? 40 : L.widthPx() / 2.0;
                 projectiles.add(new Projectile(nextProjectileId++, f, f.x, f.y, f.dirX, f.dirY, speed, range, radius, f.atk * pct(L) / 100.0, id, false, false));
                 return true;
@@ -833,12 +943,23 @@ public final class MatchEngine {
             case 24, 25 -> {                                                               // the beam: every tickMs for activeMs it hits everything in the rectangle (Nro NewSkill)
                 long active = (long) Json.num(p, "activeMs", 2000);
                 long tickMs = Math.max(TICK_MS, (long) Json.num(p, "tickMs", 250));
+                boolean spin = spinWanted(f, c);
+                if (spin) {
+                    active = Math.round(rule("dg_ult_spin_s", 4) * 1000);              // one turn in 4 seconds (owner request 2026-10-11)
+                }
+                double reach = L.lengthPx() == null ? 200 : L.lengthPx();
                 Channel ch = new Channel(c.skill, L, now, now + active, tickMs, f.x, f.y, c.dirX, c.dirY);
                 ch.nextTickAt = now + tickMs;
+                if (spin) {
+                    ch.spinRadPerMs = 2 * Math.PI / active;
+                    ch.lastAngle = Math.atan2(c.dirY, c.dirX);
+                    ch.spinLength = Math.min(reach, rule("dg_ult_spin_length", 800));
+                }
                 f.channel = ch;
                 EffectEvent.Builder ev = EffectEvent.newBuilder().setEffect(Effect.ULTIMATE_BEAM).setSourceId(f.id).setTargetId(f.id).setDurationMs((int) active)
                         .setX((float) f.x).setY((float) f.y).setDirX((float) c.dirX).setDirY((float) c.dirY)
-                        .setLength((float) (L.lengthPx() == null ? 200 : L.lengthPx())).setWidth((float) (L.widthPx() == null ? 60 : L.widthPx())).setSkillId(id);
+                        .setLength((float) (spin ? ch.spinLength : reach)).setWidth((float) (L.widthPx() == null ? 60 : L.widthPx())).setSkillId(id)
+                        .setSpinDegPerS(spin ? (float) (360.0 * 1000.0 / active) : 0f);
                 effectBuf.add(ev.build());
             }
             case 11 -> {                                                                   // Makankosappo: the laser hits the target it was aimed at, nothing else (Nro: plTarget or mobTarget)
@@ -890,7 +1011,30 @@ public final class MatchEngine {
 
     // ---------------------------------------------------------------------------------------------------------------- the ultimates, the monkey, what a move ends
 
-    /** One tick of the beam of Super Kamejoko or Cađíc liên hoàn chưởng: everything in the rectangle, the one in focus and what lies behind it as well. */
+    /**
+     * In a dungeon the beam of an ultimate turns once around the caster when the target in focus is a small monster (or, with nothing in focus, small monsters are about);
+     * against a boss it stays a straight beam (owner request 2026-10-11).
+     */
+    private boolean spinWanted(Fighter f, Cast c) {
+        if (!dungeon) {
+            return false;
+        }
+        Entity aim = c.targetId == 0 ? null : find(c.targetId);
+        if (aim instanceof Monster mm && mm.alive) {
+            return mm.kind == MonsterKind.MINION;
+        }
+        for (Entity e : enemiesOf(f)) {
+            if (e instanceof Monster mm && mm.kind == MonsterKind.MINION) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * One tick of the beam of Super Kamejoko or Cađíc liên hoàn chưởng: everything in the rectangle, the one in focus and what lies behind it as well. A spinning beam hits what
+     * is in its rectangle now and what it has swept over since the last tick, each at most once per tick.
+     */
     private void ultimateTick(Fighter f, Channel ch) {
         int id = ch.skill.id();
         if (id != 24 && id != 25) {
@@ -899,8 +1043,35 @@ public final class MatchEngine {
         double length = ch.level.lengthPx() == null ? 200 : ch.level.lengthPx();
         double width = ch.level.widthPx() == null ? 60 : ch.level.widthPx();
         double base = f.atk * pct(ch.level) / 100.0;
+        if (ch.spinRadPerMs == 0) {
+            for (Entity e : enemiesOf(f)) {
+                if (inRect(ch.originX, ch.originY, ch.dirX, ch.dirY, length, width, e)) {
+                    hit(f, e, base, id, false, false, false);
+                }
+            }
+            return;
+        }
+        ch.tickIndex++;
+        double a0 = ch.lastAngle;
+        double a1 = Math.atan2(ch.dirY, ch.dirX) + ch.spinRadPerMs * ch.tickMs * ch.tickIndex;
+        ch.lastAngle = a1;
+        double sweep = a1 - a0;
+        double dx = Math.cos(a1);
+        double dy = Math.sin(a1);
+        double reach = ch.spinLength;
+        double twoPi = 2 * Math.PI;
         for (Entity e : enemiesOf(f)) {
-            if (inRect(ch.originX, ch.originY, ch.dirX, ch.dirY, length, width, e)) {
+            double dist = Math.hypot(e.x - ch.originX, e.y - ch.originY);
+            if (dist > reach + e.radius) {
+                continue;
+            }
+            boolean struck = inRect(ch.originX, ch.originY, dx, dy, reach, width, e) || dist <= e.radius + 30;
+            if (!struck) {
+                double delta = Math.atan2(e.y - ch.originY, e.x - ch.originX) - a0;
+                delta -= Math.floor(delta / twoPi) * twoPi;                   // 0 to 2 pi: how far past the old direction the target stands
+                struck = delta <= sweep;
+            }
+            if (struck) {
                 hit(f, e, base, id, false, false, false);
             }
         }
@@ -1158,7 +1329,13 @@ public final class MatchEngine {
         }
         victim.alive = false;
         victim.hp = 0;
+        double kx = killer == null || killer == victim ? 0 : victim.x - killer.x;
+        double ky = killer == null || killer == victim ? 0 : victim.y - killer.y;
+        double kl = Math.hypot(kx, ky);
+        effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.DIED).setSourceId(killer == null ? 0 : killer.id).setTargetId(victim.id).setX((float) victim.x).setY((float) victim.y)
+                .setDirX(kl < 1e-6 ? 0f : (float) (kx / kl)).setDirY(kl < 1e-6 ? 0f : (float) (ky / kl)).build());       // the client throws the body away from the blow
         releaseHolds(victim);
+        telegraphs.removeIf(t -> t.ownerId() == victim.id);                               // the blow of a dead boss never lands: its warning goes with it (the client drops it on DIED)
         if (victim instanceof Fighter f) {
             f.cast = null;
             f.channel = null;
@@ -1199,6 +1376,9 @@ public final class MatchEngine {
     }
 
     private void onMonsterDeath(Monster m, Entity killer) {
+        if (m.summoned) {
+            return;                                          // called by a boss: no gold, no drops, no kill streak
+        }
         boolean real = m.kind == MonsterKind.BOSS;
         kills.add(new MatchOutcome.Kill(m.classKey, m.boss.id(), real));
         Map<String, Object> split = d.balanceObj("gold_split");
@@ -1226,11 +1406,14 @@ public final class MatchEngine {
                 finalDefeated = true;
             }
             currentBoss = null;
-            // wipe the remaining minions of this fight and heal the squad a little before the next one
+            stageStarted = false;                            // the next stage begins with its waves
+            bossReadyAt = 0;
+            // wipe the remaining minions of this fight (the ones the boss called) and heal the squad a little before the next one
             for (Entity e : new ArrayList<>(entities)) {
                 if (e instanceof Monster x && x.alive && x.kind == MonsterKind.MINION) {
                     x.alive = false;
                     x.hp = 0;
+                    effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.DIED).setTargetId(x.id).setX((float) x.x).setY((float) x.y).build());
                 }
             }
             if (finalDefeated) {
@@ -1246,13 +1429,22 @@ public final class MatchEngine {
             }
         } else {
             double weight = m.classKey.equals("ELITE") ? Json.num(split, "elite_weight", 5) : 1.0;
-            int cap = (int) d.balanceNum("minion_cap_per_match", 20);
-            double expectedWeight = Math.max(1, cap) * averagePoolWeight(split);
+            double expectedWeight = Math.max(1, expectedWaveMinions()) * averagePoolWeight(split);
             goldEarned += Math.round(winGold * Json.num(split, "mob_share", 0.4) * weight / expectedWeight);
         }
         if (killer instanceof Fighter f) {
             f.kills++;
         }
+    }
+
+    /** The small monsters a match is expected to have (the waves of every stage, never above the cap of the match): the 40% of the gold of the match for them is shared out by this. */
+    private double expectedWaveMinions() {
+        int cap = (int) d.balanceNum("minion_cap_per_match", 20);
+        double total = 0;
+        for (int n : waveSizes()) {
+            total += n;
+        }
+        return Math.min(cap, total * Math.max(1, bossCount()));
     }
 
     private double averagePoolWeight(Map<String, Object> split) {
@@ -1322,7 +1514,9 @@ public final class MatchEngine {
             return;
         }
         avoidTelegraphs(f, dt);
-        Entity target = nearestEnemy(f, 1e9);               // each AI character fights what is nearest to it (training: the client walks it to the nearest dummy in view)
+        // each AI character fights what is nearest to it (training: the client walks it to the nearest dummy in view); in a dungeon only what is on the screen of the player,
+        // and it does not follow him (owner request 2026-10-11)
+        Entity target = dungeon ? nearestEnemyInView(f) : nearestEnemy(f, 1e9);
         if (target == null) {
             return;
         }
@@ -1361,7 +1555,7 @@ public final class MatchEngine {
             return false;
         }
         double dist = f.distance(target);
-        boolean bossAlive = training != null || (currentBoss != null && currentBoss.alive);     // a training dummy counts as the boss of the fight
+        boolean bossAlive = training != null || dungeon || (currentBoss != null && currentBoss.alive);     // a training dummy counts as the boss of the fight; in a dungeon the target is on the screen
         return switch (sk.id()) {
             case 0, 2, 4, 9, 17 -> dist - target.radius <= (L.lengthPx() == null ? 36 : L.lengthPx()) - 2 && (sk.id() != 9 || f.hp > f.hpMax * 0.4);
             case 1, 3, 5 -> dist <= (L.lengthPx() == null ? 300 : L.lengthPx()) + target.radius - 20;
@@ -1426,19 +1620,137 @@ public final class MatchEngine {
         if (finished) {
             return;
         }
-        if (currentBoss == null && encounterIdx < setup.encounters().size() && now >= nextBossAt) {
-            spawnBoss(setup.encounters().get(encounterIdx++));
-        }
-        if (currentBoss != null && currentBoss.alive && !setup.minionPool().isEmpty()) {
-            int cap = (int) d.balanceNum("minion_cap_per_match", 20);
-            long alive = entities.stream().filter(e -> e instanceof Monster m && m.alive && m.kind == MonsterKind.MINION).count();
-            if (now >= nextWaveAt && minionsSpawned < cap && alive < rule("minion_alive_cap", 6)) {
-                nextWaveAt = now + (long) (rule("minion_wave_every_s", 8) * 1000);
-                for (int i = 0; i < (int) rule("minion_wave_size", 2) && minionsSpawned < cap; i++) {
-                    spawnMinion(setup.minionPool().get(minionPoolCursor++ % setup.minionPool().size()));
-                    minionsSpawned++;
+        boolean hasMinions = !setup.minionPool().isEmpty();
+        List<Integer> waves = hasMinions ? waveSizes() : List.of();
+        if (currentBoss == null && encounterIdx < setup.encounters().size()) {
+            if (!stageStarted) {
+                stageStarted = true;                         // a new stage: the waves of small monsters come first, the boss after the last of them (owner request 2026-10-11)
+                waveIdx = 0;
+                pendingSpawns = 0;
+                firstWaveAt = now + (long) (rule("dg_first_wave_s", 2) * 1000);
+                lastWaveAt = firstWaveAt;
+                bossReadyAt = 0;
+            }
+            if (!waves.isEmpty()) {
+                updateWaves(waves);
+            }
+            boolean wavesDone = waves.isEmpty() || (waveIdx >= waves.size() && pendingSpawns == 0 && aliveMinions() == 0);
+            if (!wavesDone) {
+                bossReadyAt = 0;
+            } else {
+                if (bossReadyAt == 0) {
+                    bossReadyAt = now + (long) (rule("boss_spawn_delay_s", 3) * 1000);
+                }
+                if (now >= bossReadyAt && now >= nextBossAt) {
+                    bossReadyAt = 0;
+                    spawnBoss(setup.encounters().get(encounterIdx++));
                 }
             }
+        }
+        if (currentBoss != null && currentBoss.alive && hasMinions) {
+            updateSummons();
+        }
+    }
+
+    /** The sizes of the waves of a stage (balance_config match_rules dg_waves). */
+    private List<Integer> waveSizes() {
+        List<Integer> out = new ArrayList<>();
+        if (rules.get("dg_waves") instanceof List<?> l) {
+            for (Object o : l) {
+                if (o instanceof Number n && n.intValue() > 0) {
+                    out.add(n.intValue());
+                }
+            }
+        }
+        return out.isEmpty() ? List.of(12, 15, 18, 20, 25) : out;
+    }
+
+    private int aliveMinions() {
+        int n = 0;
+        for (Entity e : entities) {
+            if (e instanceof Monster m && m.alive && m.kind == MonsterKind.MINION) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * The waves of small monsters of a stage (owner request 2026-10-11: "tấn công ồ ạt chia thành nhiều đợt"): a wave is let in when the one before it has fewer than
+     * dg_wave_next_alive_le monsters left or dg_wave_next_after_s seconds have passed, and it rushes in from outside the screen over dg_wave_spawn_s seconds; never more than
+     * dg_alive_cap alive at once, and never more than minion_cap_per_match in the match.
+     */
+    private void updateWaves(List<Integer> waves) {
+        int alive = aliveMinions();
+        int cap = (int) rule("dg_alive_cap", 30);
+        int totalCap = (int) d.balanceNum("minion_cap_per_match", 20);
+        if (waveIdx < waves.size() && pendingSpawns == 0) {
+            boolean due = waveIdx == 0 ? now >= firstWaveAt
+                    : alive <= rule("dg_wave_next_alive_le", 5) || now >= lastWaveAt + (long) (rule("dg_wave_next_after_s", 10) * 1000);
+            if (due) {
+                int size = Math.min(waves.get(waveIdx), totalCap - minionsSpawned);
+                if (size <= 0) {
+                    waveIdx = waves.size();                  // the cap of the match is reached: no more waves
+                } else {
+                    waveIdx++;
+                    waveSize = size;
+                    pendingSpawns = size;
+                    lastWaveAt = now;
+                    effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.WAVE).setSkillId(waveIdx).setLength(waves.size()).setWidth(size).build());
+                }
+            }
+        }
+        if (pendingSpawns > 0) {
+            int perTick = Math.max(1, (int) Math.ceil(waveSize / (rule("dg_wave_spawn_s", 1.5) * 1000.0 / TICK_MS)));
+            int n = Math.min(Math.min(pendingSpawns, perTick), cap - alive);
+            for (int i = 0; i < n; i++) {
+                double[] at = waveSpawnPoint();
+                spawnMinion(setup.minionPool().get(rng.nextInt(setup.minionPool().size())), at[0], at[1], false);
+                pendingSpawns--;
+            }
+        }
+    }
+
+    /** Where a monster of a wave comes in: just outside the screen, on the left or the right edge (a side that has room), anywhere across its height. */
+    private double[] waveSpawnPoint() {
+        double[] v = view();
+        boolean leftRoom = v[0] > 60;
+        boolean rightRoom = v[2] < arenaW - 60;
+        double margin = 30 + rng.nextDouble() * 50;
+        double x;
+        if (leftRoom && rightRoom) {
+            x = rng.nextBoolean() ? v[0] - margin : v[2] + margin;
+        } else if (rightRoom) {
+            x = v[2] + margin;
+        } else if (leftRoom) {
+            x = v[0] - margin;
+        } else {
+            x = rng.nextBoolean() ? 0 : arenaW;
+        }
+        double y = v[1] + rng.nextDouble() * (v[3] - v[1]);
+        return new double[] {clamp(x, 0, arenaW), clamp(y, 20, arenaH - 20)};
+    }
+
+    /** The bosses of the match call small monsters while they fight: dg_summon_first when they appear, then dg_summon_batch every dg_summon_every_s seconds, within the caps. */
+    private void updateSummons() {
+        if (now < nextSummonAt) {
+            return;
+        }
+        int alive = 0;
+        for (Entity e : entities) {
+            if (e instanceof Monster m && m.alive && m.summoned) {
+                alive++;
+            }
+        }
+        int batch = summonedThisBoss == 0 ? (int) rule("dg_summon_first", 5) : (int) rule("dg_summon_batch", 3);
+        int totalCap = (int) d.balanceNum("minion_cap_per_match", 20);
+        nextSummonAt = now + (long) (rule("dg_summon_every_s", 8) * 1000);
+        int n = Math.min(Math.min(batch, (int) rule("dg_summon_alive_cap", 8) - alive), Math.min((int) rule("dg_summon_cap_per_boss", 20) - summonedThisBoss, totalCap - minionsSpawned));
+        for (int i = 0; i < n; i++) {
+            double ang = rng.nextDouble() * Math.PI * 2;
+            Monster m = spawnMinion(setup.minionPool().get(rng.nextInt(setup.minionPool().size())), currentBoss.x + Math.cos(ang) * 120, currentBoss.y + Math.sin(ang) * 120, true);
+            summonedThisBoss++;
+            effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.SUMMON).setSourceId(currentBoss.id).setTargetId(m.id).setX((float) m.x).setY((float) m.y).build());
         }
     }
 
@@ -1446,8 +1758,10 @@ public final class MatchEngine {
         StaticData.MonsterStat ms = d.monsterStat(enc.classKey(), setup.dungeon().tier());
         Monster m = new Monster(nextId++, enc.boss().name(), MonsterKind.BOSS, enc.boss(), enc.classKey(), enc.role(), rule("boss_radius", 34));
         applyMonsterStats(m, ms, enc.boss());
-        m.x = arenaW - 380;
-        m.y = arenaH / 2;
+        m.planet = forcedPlanet != null ? forcedPlanet : PLANETS[rng.nextInt(PLANETS.length)];       // every boss draws a planet for the match and fights with its skills
+        double[] v = view();
+        m.x = clamp(v[2] - 60, 100, arenaW - 100);                  // it appears on the screen, at its right edge
+        m.y = clamp((v[1] + v[3]) / 2, 80, arenaH - 80);
         m.homeX = m.x;
         m.homeY = m.y;
         m.dirX = -1;
@@ -1458,24 +1772,30 @@ public final class MatchEngine {
         }
         entities.add(m);
         spawnBuf.add(spawnProto(m));
+        effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.BOSS_COMING).setSourceId(m.id).setTargetId(m.id).setX((float) m.x).setY((float) m.y)
+                .setSkillId(encounterIdx).setLength(setup.encounters().size()).build());
         currentBoss = m;
         bossSpawnedAt = now;
-        nextWaveAt = now + (long) (rule("minion_wave_every_s", 8) * 1000);
+        summonedThisBoss = 0;
+        nextSummonAt = now + 500;
     }
 
-    private void spawnMinion(MatchSetup.Encounter enc) {
+    private Monster spawnMinion(MatchSetup.Encounter enc, double x, double y, boolean summoned) {
         StaticData.MonsterStat ms = d.monsterStat(enc.classKey(), setup.dungeon().tier());
         Monster m = new Monster(nextId++, enc.boss().name(), MonsterKind.MINION, enc.boss(), enc.classKey(), "MINION", rule("minion_radius", 18));
         applyMonsterStats(m, ms, enc.boss());
-        double ang = rng.nextDouble() * Math.PI * 2;
-        double cx = currentBoss != null ? currentBoss.x : arenaW - 380;
-        double cy = currentBoss != null ? currentBoss.y : arenaH / 2;
-        m.x = clamp(cx + Math.cos(ang) * 120, 0, arenaW);
-        m.y = clamp(cy + Math.sin(ang) * 120, 0, arenaH);
+        m.planet = enc.boss().race() == null ? "EARTH" : enc.boss().race();
+        m.summoned = summoned;
+        m.x = clamp(x, 0, arenaW);
+        m.y = clamp(y, 0, arenaH);
         m.homeX = m.x;
         m.homeY = m.y;
+        m.shootReadyAt = now + (long) (rule("dg_minion_shoot_min_s", 2.5) * rng.nextDouble() * 1000);      // they do not all shoot at once
+        m.nextPunchAt = now + 400;
         entities.add(m);
         spawnBuf.add(spawnProto(m));
+        minionsSpawned++;
+        return m;
     }
 
     private void applyMonsterStats(Monster m, StaticData.MonsterStat ms, StaticData.Boss boss) {
@@ -1518,20 +1838,77 @@ public final class MatchEngine {
         bossAct(m, dt);
     }
 
+    /**
+     * A small monster of a dungeon (owner request 2026-10-11): it rushes at the nearest character, shoots the chuong of level 1 of its planet when the target is in range and
+     * the shot is ready (at most dg_shooter_cap shots in the air at once, aimed at where the target is: they can be dodged), and punches when it is close.
+     */
     private void minionAct(Monster m, double dt) {
         Entity t = nearestPlayerSide(m);
         if (t == null) {
             return;
         }
-        double range = rule("minion_melee_range", 40);
-        if (m.distance(t) > range + t.radius) {
-            if (m.canMove(now)) {
-                moveToward(m, t.x, t.y, rule("minion_speed", 170) * dt);
+        normalizeInto(m, t.x - m.x, t.y - m.y);
+        if (now < m.actionUntil) {
+            return;                                          // aiming or just shot: it stands still
+        }
+        double dist = m.distance(t);
+        if (dist <= rule("dg_minion_melee_range", 40) + t.radius) {
+            if (now >= m.nextPunchAt) {
+                m.nextPunchAt = now + (long) (rule("dg_minion_punch_s", 1.2) * 1000);
+                hit(m, t, m.atkPerHit * rule("dg_minion_dmg_mult", 0.1) * rule("dg_minion_punch_mult", 1.0), planetPunch(m.planet), false, false, false);
             }
-        } else if (now >= m.nextPunchAt) {
-            m.nextPunchAt = now + (long) (rule("minion_hit_interval_s", 1.2) * 1000);
-            normalizeInto(m, t.x - m.x, t.y - m.y);
-            hit(m, t, m.atkPerHit, 0, false, false, false);
+            return;
+        }
+        if (now >= m.shootReadyAt && dist <= rule("dg_minion_shoot_range", 260) + t.radius && minionShots() < rule("dg_shooter_cap", 6)) {
+            minionShoot(m, t);
+            return;
+        }
+        if (m.canMove(now)) {
+            moveToward(m, t.x, t.y, rule("dg_minion_speed", rule("minion_speed", 170)) * dt);
+            separate(m);
+        }
+    }
+
+    private static int planetPunch(String planet) {
+        return planet.equals("NAMEC") ? 2 : planet.equals("XAYDA") ? 4 : 0;
+    }
+
+    private static int planetBeam(String planet) {
+        return planet.equals("NAMEC") ? 3 : planet.equals("XAYDA") ? 5 : 1;
+    }
+
+    private long minionShots() {
+        return projectiles.stream().filter(p -> p.owner instanceof Monster m && m.kind == MonsterKind.MINION).count();
+    }
+
+    private void minionShoot(Monster m, Entity t) {
+        int skill = planetBeam(m.planet);
+        StaticData.Skill sk = d.skills().get(skill);
+        StaticData.SkillLevel L = sk == null ? null : sk.level(1);
+        double speed = L == null || L.projectileSpeed() == null ? 480 : L.projectileSpeed();
+        double range = L == null || L.lengthPx() == null ? 300 : L.lengthPx();
+        double base = m.atkPerHit * rule("dg_minion_dmg_mult", 0.1) * rule("dg_minion_shoot_mult", 1.5);
+        projectiles.add(new Projectile(nextProjectileId++, m, m.x, m.y, m.dirX, m.dirY, speed, range, rule("dg_minion_shot_radius", 24), base, skill, false, false));
+        double lo = rule("dg_minion_shoot_min_s", 2.5);
+        double hi = Math.max(lo, rule("dg_minion_shoot_max_s", 3.5));
+        m.shootReadyAt = now + (long) ((lo + rng.nextDouble() * (hi - lo)) * 1000);
+        m.actionUntil = now + (long) (rule("dg_minion_cast_s", 0.5) * 1000);
+    }
+
+    /** Small monsters do not pile up on one spot: two that overlap are pushed apart. */
+    private void separate(Monster m) {
+        for (Entity o : entities) {
+            if (o != m && o instanceof Monster && o.alive) {
+                double dx = m.x - o.x;
+                double dy = m.y - o.y;
+                double dist = Math.hypot(dx, dy);
+                double min = m.radius + o.radius;
+                if (dist < min && dist > 1e-6) {
+                    double push = (min - dist) * 0.5;
+                    m.x = clamp(m.x + dx / dist * push, 0, arenaW);
+                    m.y = clamp(m.y + dy / dist * push, 0, arenaH);
+                }
+            }
         }
     }
 
@@ -1582,10 +1959,34 @@ public final class MatchEngine {
         normalizeInto(m, target.x - m.x, target.y - m.y);
     }
 
-    /** One boss action: the first ready entry of the priority list that makes sense now (docs 7.5). Returns false when nothing was possible. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> kitOf(Monster m) {
+        if (d.balance().get("boss_planet_kits") instanceof Map<?, ?> all && all.get(m.planet) instanceof Map<?, ?> kit) {
+            return (Map<String, Object>) kit;
+        }
+        return Map.of();
+    }
+
+    /** The skill id a boss uses for this move: the one of its planet (the client draws the move of that skill), or the fallback. */
+    private int kitSkill(Monster m, String key, int fallback) {
+        return (int) Json.num(kitOf(m), key, fallback);
+    }
+
+    /** Does the planet of this boss have the move? Without a kit every move is there. */
+    private boolean kitHas(Monster m, String action) {
+        return !(kitOf(m).get("actions") instanceof List<?> l) || l.isEmpty() || l.contains(action);
+    }
+
+    /**
+     * One boss action: the first ready entry of the priority list that the planet of the boss has and that makes sense now (docs 7.5; the planets: docs 15.25). Returns false
+     * when nothing was possible.
+     */
     private boolean performBossAction(Monster m, Entity target, double meleeRange) {
         for (Map<String, Object> a : bossActions()) {
             String name = (String) a.get("name");
+            if (!kitHas(m, name)) {
+                continue;
+            }
             double cd = Json.num(a, "cooldown_s", 0);
             if (name.equals("stun") && m.enraged) {
                 cd = Math.min(cd, rule("enrage_stun_cooldown_s", 12));
@@ -1601,7 +2002,7 @@ public final class MatchEngine {
                         continue;
                     }
                     m.actionReadyAt.put(name, now + (long) (cd * 1000));
-                    bossUltimate(m, target, base);
+                    bossUltimate(m, target, base, kitSkill(m, "ultimate", 24));
                     return true;
                 }
                 case "shield" -> {
@@ -1619,14 +2020,23 @@ public final class MatchEngine {
                     if (squad.stream().noneMatch(f -> f.alive && m.distance(f) <= radius)) {
                         continue;
                     }
+                    int skill = kitSkill(m, "stun", 6);
                     m.actionReadyAt.put(name, now + (long) (cd * 1000));
                     for (Fighter f : squad) {
                         if (f.alive && m.distance(f) <= radius + f.radius) {
-                            hit(m, f, base, 6, false, false, false);
+                            hit(m, f, base, skill, false, false, false);
                             stun(f, (long) (rule("boss_stun_s", 2) * 1000));
-                            addEffect(Effect.STUN, m, f, (int) (rule("boss_stun_s", 2) * 1000), 6);
+                            addEffect(Effect.STUN, m, f, (int) (rule("boss_stun_s", 2) * 1000), skill);
                         }
                     }
+                    return true;
+                }
+                case "bomb" -> {
+                    if (m.distance(target) > 900) {
+                        continue;
+                    }
+                    m.actionReadyAt.put(name, now + (long) (cd * 1000));
+                    bossBomb(m, target, base, kitSkill(m, "bomb", 10));
                     return true;
                 }
                 case "focus" -> {
@@ -1640,7 +2050,7 @@ public final class MatchEngine {
                         continue;
                     }
                     m.actionReadyAt.put(name, now + (long) (cd * 1000));
-                    hit(m, top, base, 0, false, false, true);          // locks on the unit with the most HP; cannot be dodged
+                    hit(m, top, base, kitSkill(m, "focus", 0), false, false, true);          // locks on the unit with the most HP; cannot be dodged
                     return true;
                 }
                 case "beam" -> {
@@ -1651,7 +2061,7 @@ public final class MatchEngine {
                     m.actionReadyAt.put(name, now + (long) (cd * 1000));
                     normalizeInto(m, target.x - m.x, target.y - m.y);
                     projectiles.add(new Projectile(nextProjectileId++, m, m.x, m.y, m.dirX, m.dirY, rule("boss_beam_speed", 480), range,
-                            rule("boss_beam_width", 60) / 2, base, 1, false, false));
+                            rule("boss_beam_width", 60) / 2, base, kitSkill(m, "beam", 1), false, false));
                     return true;
                 }
                 default -> {                                                                // punch
@@ -1659,7 +2069,7 @@ public final class MatchEngine {
                         continue;
                     }
                     normalizeInto(m, target.x - m.x, target.y - m.y);
-                    hit(m, target, base, 0, false, false, false);
+                    hit(m, target, base, kitSkill(m, "punch", 0), false, false, false);
                     return true;
                 }
             }
@@ -1667,7 +2077,7 @@ public final class MatchEngine {
         return false;
     }
 
-    private void bossUltimate(Monster m, Entity target, double base) {
+    private void bossUltimate(Monster m, Entity target, double base, int skill) {
         normalizeInto(m, target.x - m.x, target.y - m.y);
         long ms = (long) (rule("boss_ultimate_telegraph_s", 2) * 1000);
         double length = rule("boss_ultimate_length", 500);
@@ -1676,13 +2086,31 @@ public final class MatchEngine {
         double oy = m.y;
         double dx = m.dirX;
         double dy = m.dirY;
-        telegraphs.add(new TelegraphArea(true, ox, oy, dx, dy, length, width, now + ms + 200));
+        telegraphs.add(new TelegraphArea(m.id, true, ox, oy, dx, dy, length, width, now + ms + 200));
         effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.TELEGRAPH_RECT).setSourceId(m.id).setDurationMs((int) ms).setX((float) ox).setY((float) oy)
-                .setDirX((float) dx).setDirY((float) dy).setLength((float) length).setWidth((float) width).build());
+                .setDirX((float) dx).setDirY((float) dy).setLength((float) length).setWidth((float) width).setSkillId(skill).build());
         delayed.add(new Delayed(now + ms, () -> {
             for (Fighter f : squad) {
                 if (f.alive && inRect(ox, oy, dx, dy, length, width, f)) {
-                    hit(m, f, base, 24, false, false, false);
+                    hit(m, f, base, skill, false, false, false);
+                }
+            }
+        }, m));
+    }
+
+    /** The Quả cầu kênh khí of an Earth boss: a circle appears under the target and blows up after a moment (the characters step out of it). */
+    private void bossBomb(Monster m, Entity target, double base, int skill) {
+        long ms = (long) (rule("dg_bomb_telegraph_s", 2.5) * 1000);
+        double radius = rule("dg_bomb_radius", 380);
+        double ox = target.x;
+        double oy = target.y;
+        telegraphs.add(new TelegraphArea(m.id, false, ox, oy, 0, 0, radius, 0, now + ms + 200));
+        effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.TELEGRAPH_CIRCLE).setSourceId(m.id).setDurationMs((int) ms).setX((float) ox).setY((float) oy)
+                .setLength((float) radius).setSkillId(skill).build());
+        delayed.add(new Delayed(now + ms, () -> {
+            for (Fighter f : squad) {
+                if (f.alive && Math.hypot(f.x - ox, f.y - oy) <= radius + f.radius) {
+                    hit(m, f, base, skill, false, false, false);
                 }
             }
         }, m));
@@ -1747,6 +2175,24 @@ public final class MatchEngine {
             if (dist <= bd) {
                 best = e;
                 bd = dist;
+            }
+        }
+        return best;
+    }
+
+    /** What an AI character fights: the nearest enemy on the screen of the player, or one that is on it (dg_ai_defend_px): it defends itself but does not chase what is out of sight. */
+    private Entity nearestEnemyInView(Entity from) {
+        double[] v = view();
+        double defend = rule("dg_ai_defend_px", 220);
+        Entity best = null;
+        double bd = Double.MAX_VALUE;
+        for (Entity e : enemiesOf(from)) {
+            if (inside(v, e) || from.distance(e) <= defend) {
+                double dist = from.distance(e);
+                if (dist < bd) {
+                    best = e;
+                    bd = dist;
+                }
             }
         }
         return best;
@@ -1852,12 +2298,12 @@ public final class MatchEngine {
                 .setHpMax(e.hpMax).setHp(e.hp).setKiMax((long) e.kiMax).setKi((long) e.ki).setRadius((float) e.radius);
         if (e instanceof Fighter f) {
             b.setKind(f.controlled ? EntityKind.PLAYER_CHARACTER : EntityKind.ALLY_AI).setRace(f.race).setCharacterId(f.characterId).setLevel(f.level)
-                    .setCostumeId(f.costumeId).setControlled(f.controlled);
+                    .setCostumeId(f.costumeId).setControlled(f.controlled).setPartnerCharacterId(f.partnerCharacterId);
         } else if (e instanceof Dummy dm) {
             b.setKind(EntityKind.TRAINING_DUMMY).setDummyKey(dm.key).setMobTemplateId(dm.mobTemplateId).setCostumeId(dm.costumeId);
         } else if (e instanceof Monster m) {
             b.setKind(m.kind == MonsterKind.BOSS ? EntityKind.BOSS : EntityKind.MINION).setBossId(m.boss.id()).setPartHead(m.boss.head()).setPartBody(m.boss.body())
-                    .setPartLeg(m.boss.leg()).setRace(m.boss.race() == null ? "" : m.boss.race());
+                    .setPartLeg(m.boss.leg()).setRace(m.boss.race() == null ? "" : m.boss.race()).setPlanet(m.planet).setSummoned(m.summoned);
         } else {
             b.setKind(EntityKind.PET);
             if (e instanceof PetEntity pe) {

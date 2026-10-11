@@ -213,6 +213,18 @@ namespace BattleBall.Net
             throw new InvalidOperationException("unexpected answer: " + BbConnection.Describe(answer));
         }
 
+        /// <summary>
+        /// Starts a dungeon (docs/architecture/BattleBallServer.md 15.25): returns the MatchStarted, or throws with the reason the server gave. A training session of the village
+        /// that still runs is closed by the server. The frames then arrive as pushed events, the end as a MatchEnded.
+        /// </summary>
+        public async Task<MatchStarted> StartMatchAsync(StartMatchRequest request)
+        {
+            var answer = await Connection.RequestAsync(new Envelope { StartMatchRequest = request });
+            if (answer.PayloadCase == Envelope.PayloadOneofCase.MatchStarted) return answer.MatchStarted;
+            if (answer.PayloadCase == Envelope.PayloadOneofCase.ActionResult) throw new InvalidOperationException(answer.ActionResult.Message);
+            throw new InvalidOperationException("unexpected answer: " + BbConnection.Describe(answer));
+        }
+
         /// <summary>Sends a message that has no answer (the position reports, the skills and leaving a match).</summary>
         public void Send(Envelope message)
         {

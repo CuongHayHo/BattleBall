@@ -51,3 +51,6 @@ desktop.ini
 # ---- Local working notes (kept locally, not pushed) ----
 /CLAUDE.md
 /docs/HANDOFF.md
+
+# ---- local dev server output ----
+/BattleBallServer/server/server_dev.*

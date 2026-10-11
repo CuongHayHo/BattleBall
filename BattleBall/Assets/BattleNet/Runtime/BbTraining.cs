@@ -17,7 +17,7 @@ namespace BattleBall.Net
     /// bottom right with their cooldown and the Ki bar, the damage numbers rising from the target. The session ends when the player walks away from the dummies,
     /// changes the main character or leaves the menu. Stage 2 (pictures of every skill) is not done yet: projectiles are drawn as a glow.
     /// </summary>
-    public sealed class BbTraining : MonoBehaviour
+    public sealed partial class BbTraining : MonoBehaviour
     {
         [Header("Set by BattleBall/Build Login Scene")]
         public BbVillageView village;
@@ -51,6 +51,7 @@ namespace BattleBall.Net
         string _focusKey;
         MatchStarted _started;
         uint _myId;
+        bool _tookOver;                           // the player took over another character: what the spawns say about "controlled" is out of date
         ulong _myCharacter;
         readonly Dictionary<uint, string> _dummyKey = new Dictionary<uint, string>();
         readonly Dictionary<string, uint> _dummyId = new Dictionary<string, uint>();
@@ -464,7 +465,7 @@ namespace BattleBall.Net
             {
                 if (dummiesOnly && village.IsNpc(key)) continue;
                 if (!village.TargetInfo(key, out at, out h)) continue;
-                float d = Mathf.Abs(at.x - me.x);
+                float d = Dist(at, me);
                 if (d < bestDistance) { bestDistance = d; best = key; }
             }
             if (best == null) return false;
@@ -488,8 +489,23 @@ namespace BattleBall.Net
             _sayUntil = Time.unscaledTime + 1.8f;
         }
 
+        /// <summary>True while the player is in a dungeon (docs 15.25): no training session starts, and the village does not fight.</summary>
+        public bool Suspended { get; private set; }
+
+        /// <summary>
+        /// A dungeon starts or ends. Starting: the session of the village is dropped here without a Leave (the server closes it itself when the dungeon starts: a Leave sent now could
+        /// reach the dungeon instead).
+        /// </summary>
+        public void SetSuspended(bool on)
+        {
+            Suspended = on;
+            if (on && _phase != Phase.Idle) { _pendingSlot = -1; Stop(); }
+            if (!on) _leftAt = Time.unscaledTime;                       // the village starts fighting again after a moment
+        }
+
         async void StartSession()
         {
+            if (Suspended) return;
             if (!BbSession.IsActive || village == null) { Say("Cần đăng nhập để luyện tập"); return; }
             Subscribe();
             ulong main, partner = 0;
@@ -531,6 +547,7 @@ namespace BattleBall.Net
             _started = started;
             _fusedSession = _sessionPartner != 0;
             _myCharacter = mainCharacter;
+            _tookOver = false;
             _dummyKey.Clear();
             _dummyId.Clear();
             _characterOf.Clear();
@@ -580,12 +597,50 @@ namespace BattleBall.Net
             {
                 AddPet(e);
             }
+            else if (e.Kind == EntityKind.Boss || e.Kind == EntityKind.Minion)
+            {
+                AddEnemySpawn(e);
+            }
             else if (e.CharacterId != 0)
             {
                 _characterOf[e.EntityId] = e.CharacterId;
                 _entityOf[e.CharacterId] = e.EntityId;
-                if (e.Controlled) _myId = e.EntityId;
+                if (e.Controlled && !_tookOver) _myId = e.EntityId;               // a spawn that lingers in the first frames still says who was controlled at the start
+                if (_dungeon && village != null) village.SnapParty(e.CharacterId, new Vector2(e.X, e.Y) * _arenaScale);
             }
+        }
+
+        /// <summary>
+        /// The player takes over another character of the squad (docs 15.26): the server makes it the controlled one and the old one an AI where it stands, with everything it has.
+        /// What this side keeps by character (cooldowns, the ape form, the poses) stays as it is.
+        /// </summary>
+        void RequestControl(ulong character)
+        {
+            uint entity;
+            if (!_entityOf.TryGetValue(character, out entity)) return;
+            _myCharacter = character;
+            _myId = entity;
+            _tookOver = true;
+            _pendingSlot = -1;
+            try { BbSession.Client.Send(new Envelope { SwitchControlRequest = new SwitchControlRequest { EntityId = entity } }); } catch (Exception) { }
+        }
+
+        /// <summary>The server took the control over: the skill buttons are those of the new character (levels, cooldowns left, Ki cost).</summary>
+        void OnControlSwitched(ControlSwitched m)
+        {
+            ulong character;
+            if (!m.Ok || !_characterOf.TryGetValue(m.EntityId, out character) || character != _myCharacter) return;           // refused, or an older answer
+            var mine = new Dictionary<uint, uint>();
+            foreach (var sl in m.Skills) mine[sl.SkillId] = sl.Level;
+            _levels[character] = mine;
+            var snapNow = SnapshotNow();
+            BattleBall.Proto.CharacterInfo info = null;
+            if (snapNow != null) PlayerCharacterRef(snapNow, character, out info);
+            _skills.Clear();
+            _skills.AddRange(SlotsOf(snapNow, info, m.Skills));
+            foreach (var sl in m.Skills) SetCooldown(character, sl.SkillId, Time.unscaledTime + sl.CooldownLeftMs / 1000f);
+            BuildSkillButtons();
+            Refresh();
         }
 
         /// <summary>Ends the session (walked away, another main character, the menu closed).</summary>
@@ -611,7 +666,7 @@ namespace BattleBall.Net
         /// </summary>
         void AutoSession()
         {
-            if (_demo || village == null || _phase != Phase.Idle || !BbSession.IsActive || Time.unscaledTime - _leftAt < 2f) return;
+            if (_demo || village == null || Suspended || _phase != Phase.Idle || !BbSession.IsActive || Time.unscaledTime - _leftAt < 2f) return;
             if (village.VisibleDummyKeys().Count == 0) return;
             _quiet = true;
             StartSession();
@@ -726,14 +781,14 @@ namespace BattleBall.Net
                 hasFoe = village.DummyInfo(_focusKey, out foe, out h);
             }
             village.PartyMember(0, out id, out me, out facing);
-            float dist = hasFoe ? Mathf.Abs(foe.x - me.x) : 0f;
+            float dist = hasFoe ? Dist(foe, me) : 0f;
             if (_phase != Phase.Active)
             {
                 if (_phase == Phase.Idle)
                 {
                     if (needsTarget && dist > LeaveDistance * 0.9f)
                     {
-                        if (!village.StickHeld) village.ApproachTo(foe.x, Mathf.Max(reach, 300f) * 0.8f);     // too far for a session: walk there first
+                        if (!village.StickHeld) Approach(foe, Mathf.Max(reach, 300f) * 0.8f);     // too far for a session: walk there first
                         return false;
                     }
                     StartSession();
@@ -744,7 +799,7 @@ namespace BattleBall.Net
             }
             if (needsTarget && hasFoe && dist > reach)
             {
-                if (!village.StickHeld) village.ApproachTo(foe.x, Mathf.Max(60f, reach * 0.8f));
+                if (!village.StickHeld) Approach(foe, Mathf.Max(60f, reach * 0.8f));
                 if (manual) { _pendingSlot = (int)slot.Slot; _pendingAt = Time.unscaledTime; }
                 return false;
             }
@@ -769,8 +824,15 @@ namespace BattleBall.Net
             village.PartyMember(0, out id, out me, out facing);
             float dir = hasFoe ? Mathf.Sign(foe.x - me.x) : facing;
             if (dir == 0f) dir = facing;
+            float dirY = 0f;
+            if (_dungeon && hasFoe)
+            {
+                // the arena has no ground: the skill goes the straight way to the target
+                Vector2 way = (foe - me).normalized;
+                if (way.sqrMagnitude > 0.01f) { dir = way.x; dirY = way.y; }
+            }
             _lastFireAt = Time.unscaledTime;
-            BbSession.Client.Send(new Envelope { UseSkillRequest = new UseSkillRequest { Seq = ++_seq, Slot = slot.Slot, TargetId = target, DirX = dir, DirY = 0f } });
+            BbSession.Client.Send(new Envelope { UseSkillRequest = new UseSkillRequest { Seq = ++_seq, Slot = slot.Slot, TargetId = target, DirX = dir, DirY = dirY } });
             Debug.Log("[SkillFx] fire slot " + slot.Slot + " skill " + slot.SkillId + " level " + slot.Level + " target " + target + " at " + Time.unscaledTime.ToString("0.00", CultureInfo.InvariantCulture));
             // what the player sees at once (the server decides the hit): the pose and the cooldown
             SetCooldown(_myCharacter, slot.SkillId, Time.unscaledTime + slot.CooldownMs / 1000f);
@@ -871,7 +933,7 @@ namespace BattleBall.Net
             {
                 Vector2 at;
                 if (!village.DummyInfo(key, out at, out h)) continue;
-                float d = Mathf.Abs(at.x - me.x);
+                float d = Dist(at, me);
                 if (d < best) { best = d; feet = at; found = true; }
             }
             return found;
@@ -900,7 +962,7 @@ namespace BattleBall.Net
             if (character != _myCharacter || !UltimateTarget(character, out aim)) return;
             village.PartyMember(0, out id, out feet, out facing);
             float side = aim.x >= feet.x ? -1f : 1f;
-            village.TeleportMain(aim.x + side * 90f);
+            if (_dungeon) village.TeleportMainTo(new Vector2(aim.x + side * 90f, aim.y)); else village.TeleportMain(aim.x + side * 90f);
             village.PartyMember(0, out id, out feet, out facing);
             _fx.PlayHit(60, feet);
         }
@@ -912,6 +974,7 @@ namespace BattleBall.Net
         bool DartStop(ProjectileState p, ulong owner, out Vector2 stop)
         {
             stop = Vector2.zero;
+            if (_dungeon && ServerProjectileSkills.Contains(p.SkillId)) return false;           // in a dungeon the chuong flies on through everything: it does not stop at the target
             Vector2 dir = new Vector2(p.DirX, p.DirY);
             if (dir.sqrMagnitude < 1e-4f) return false;
             dir.Normalize();
@@ -1117,13 +1180,20 @@ namespace BattleBall.Net
         {
             if (_phase != Phase.Active) return;
             if (e.PayloadCase == Envelope.PayloadOneofCase.MatchFrame) OnFrame(e.MatchFrame);
-            else if (e.PayloadCase == Envelope.PayloadOneofCase.MatchEnded) { Stop(); if (menu != null) menu.Toast("Đã rời luyện tập"); }
+            else if (e.PayloadCase == Envelope.PayloadOneofCase.ControlSwitched) OnControlSwitched(e.ControlSwitched);
+            else if (e.PayloadCase == Envelope.PayloadOneofCase.MatchEnded)
+            {
+                if (_dungeon) { OnDungeonEnded(); return; }                   // the menu shows the result
+                Stop();
+                if (menu != null) menu.Toast("Đã rời luyện tập");
+            }
         }
 
         void OnFrame(MatchFrame f)
         {
             foreach (var sp in f.Spawns) AddSpawn(sp);
             foreach (var st in f.States) _states[st.EntityId] = st;
+            if (_dungeon) ApplyDungeonStates(f);
             foreach (var d in f.Damages) OnDamage(d);
             foreach (var ef in f.Effects) OnEffect(ef);
             DrawProjectiles(f);
@@ -1168,6 +1238,7 @@ namespace BattleBall.Net
         public bool FusedSession { get { return _phase == Phase.Active && _fusedSession; } }
         bool _fusedSession;
         /// <summary>The character the running session is controlled by (0 outside a session).</summary>
+        public string SessionToken { get { return _started != null ? _started.MatchToken : ""; } }
         public ulong SessionMainCharacter { get { return _phase == Phase.Active ? _myCharacter : 0; } }
         ulong _sessionPartner;
 
@@ -1183,6 +1254,7 @@ namespace BattleBall.Net
 
         void OnDamage(DamageEvent d)
         {
+            if (_dungeon) OnDamageDungeon(d);
             string key;
             Vector2 at = Vector2.zero;
             float h = 0f;
@@ -1221,6 +1293,7 @@ namespace BattleBall.Net
 
         void OnEffect(EffectEvent ef)
         {
+            if (_dungeon && OnDungeonEffect(ef)) return;
             string key;
             Vector2 at;
             float h;
@@ -1284,7 +1357,7 @@ namespace BattleBall.Net
             {
                 // the gong is over: the beam of Super Kamejoko / Cađíc goes through everything up to {length} Nro px away for the time the server hits
                 EnsureUltimate();
-                _ultimate.Release(who, ef.SkillId, ef.Length, ef.DurationMs / 1000f);
+                _ultimate.Release(who, ef.SkillId, ef.Length, ef.DurationMs / 1000f, ef.SpinDegPerS, ef.DirX, ef.DirY);
                 return;
             }
             if (ef.Effect == Effect.MafubaGather)
@@ -1405,7 +1478,9 @@ namespace BattleBall.Net
                     bool isNew = _seenProjectiles.Add(p.ProjectileId);
                     if (isNew && p.OwnerId != _myId && _characterOf.TryGetValue(p.OwnerId, out who))
                         ShowSkill(who, p.SkillId, FocusX(), false);          // the pose first: the dart appears at the frame that throws it
-                    int dartId = _characterOf.TryGetValue(p.OwnerId, out owner) ? BbSkillFxData.DartOf(p.SkillId, LevelOf(owner, p.SkillId)) : -1;
+                    bool monsterShot = _dungeon && _dummyKey.ContainsKey(p.OwnerId);
+                    if (isNew && monsterShot) EnemyShot(p.OwnerId, p.SkillId, p.DirX);
+                    int dartId = _characterOf.TryGetValue(p.OwnerId, out owner) ? BbSkillFxData.DartOf(p.SkillId, LevelOf(owner, p.SkillId)) : monsterShot ? BbSkillFxData.DartOf(p.SkillId, 1) : -1;
                     if (dartId >= 0 && p.SkillId == 5 && IsMonkey(owner)) dartId = BbSkillFxData.ArrowOf(MonkeyAntomicPaint, false).dart;          // the beam of the great ape
                     var dart = dartId >= 0 ? BbDart.Create(world, dartId, s) : null;
                     if (dart != null)
@@ -1482,16 +1557,25 @@ namespace BattleBall.Net
             DriveCombat();
             if (_sayUntil > 0f && Time.unscaledTime > _sayUntil) { _sayUntil = 0f; if (_status != null) _status.text = ""; }
             AnimateFloating(dt);
+            UpdateDungeon();
             Refresh();
         }
 
         void ReportAndWatch(float dt)
         {
+            if (_dungeon) { ReportDungeon(dt); return; }
             ulong main;
             Vector2 feet;
             int facing;
             if (!village.PartyMember(0, out main, out feet, out facing)) return;
-            if (main != _myCharacter) { _pendingSlot = -1; Leave(); return; }                       // another main character: a new session is needed
+            if (main != _myCharacter)
+            {
+                // another main character (the menu): the squad of the session is the same, so the player simply takes over that character and nothing is reset (owner report 2026-10-11);
+                // a fusion changes the squad itself, so a new session is needed then
+                bool plain = _sessionPartner == 0 && (menu == null || menu.FusionMainCharacterId != main) && _entityOf.ContainsKey(main);
+                if (plain) RequestControl(main);
+                else { _pendingSlot = -1; Leave(); return; }
+            }
             // the earring was used or taken off while the session ran: the squad of the session is the old one (the partner would go on fighting beside the fused character);
             // the session ends and the next one starts with the right squad (owner report 2026-10-10)
             ulong partnerNow = menu != null && menu.FusionMainCharacterId == main ? menu.FusionSubCharacterId : 0;
@@ -1549,7 +1633,8 @@ namespace BattleBall.Net
             EntityState foe = null;
             uint foeId;
             if (on && _focusKey != null && _dummyId.TryGetValue(_focusKey, out foeId)) _states.TryGetValue(foeId, out foe);
-            _barRoot.gameObject.SetActive(foe != null);
+            // in a dungeon the small monsters have only the green bar over their heads (owner request 2026-10-11): the big bar of the top is for a boss
+            _barRoot.gameObject.SetActive(foe != null && !(_dungeon && !_bossIds.Contains(foe.EntityId)));
             if (!on && (!_demo || _previewDemo)) EnsurePreviewSkills();
             bool showSkills = _buttons.Count > 0 && !(menu != null && menu.BlocksCombatUi) && (on || _phase == Phase.Starting || _phase == Phase.Idle);
             _skillRoot.gameObject.SetActive(showSkills);
@@ -1744,10 +1829,10 @@ namespace BattleBall.Net
             _barRoot.anchoredPosition = new Vector2(0f, -62f);
             _barRoot.sizeDelta = new Vector2(440f, 104f);
             _barName = NewText("Name", _barRoot, 22, new Color(1f, 0.92f, 0.45f), TextAnchor.MiddleCenter);      // above the frame
-            Place(_barName.rectTransform, 0f, 0f, 440f, 28f);
+            Place(_barName.rectTransform, 0f, 12f, 440f, 28f);
             var frame = NewImage("Frame", _barRoot, bossFrame, Color.white);                                       // around the HP bar only
             frame.type = Image.Type.Sliced;
-            Place(frame.rectTransform, 0f, 30f, 440f, 74f);
+            Place(frame.rectTransform, 19f, 45f, 402f, 44f);                                      // close around the bar (owner request 2026-10-11)
             _barLost = NewImage("Lost", _barRoot, hpLost, Color.white);
             _barLost.type = Image.Type.Sliced;
             Place(_barLost.rectTransform, 30f, 54f, 380f, 26f);

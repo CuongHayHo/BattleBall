@@ -72,6 +72,7 @@ class MatchIntegrationTest {
         // an easier world so that a test squad of level 30 wins quickly: weaker early bosses and a short pause limit
         try (Database admin = new Database(testDb.url, testDb.user, testDb.password, 1); Connection c = admin.connection(); var st = c.createStatement()) {
             st.execute("UPDATE monster_stat_class SET hp = 120000, atk_pct_min = 1, atk_pct_max = 2 WHERE tier = 'early' AND class_key IN ('BOSS','MINI','FINAL')");
+            st.execute("UPDATE monster_stat_class SET hp = 20000, atk_pct_min = 0.2, atk_pct_max = 0.4 WHERE tier = 'early' AND class_key IN ('MOB','ELITE')");      // the waves of small monsters too
             st.execute("UPDATE static_data_version SET version = version + 1 WHERE domain = 'MONSTER'");
         }
         db = new Database(testDb.url, testDb.user, testDb.password, 8);
@@ -251,7 +252,7 @@ class MatchIntegrationTest {
             assertEquals(3, started.getBossCount());
             assertEquals(2, started.getRevivesLeft());
             assertEquals(20, started.getTickRateHz());
-            assertEquals(1600f, started.getArena().getWidth());
+            assertEquals(1800f, started.getArena().getWidth());
             assertEquals(3, started.getEntitiesCount(), "the three squad members; bosses come later");
             assertEquals(1, started.getEntitiesList().stream().filter(e -> e.getControlled()).count());
             assertTrue(started.getSkillsList().stream().anyMatch(s -> s.getSlot() == 0), "the basic punch is a skill of the controlled character");
@@ -343,6 +344,10 @@ class MatchIntegrationTest {
             assertTrue(resumed.getOk());
             assertEquals(started.getRunId(), resumed.getMatch().getRunId());
             assertTrue(resumed.getMatch().getEntitiesCount() >= 3);
+            // the client comes back without a login: the player data follows the MatchResumed (owner request 2026-10-11: the dungeon can be entered again after a lost connection)
+            var snapshot = second.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            assertEquals(3, snapshot.getCharactersCount());
+            assertTrue(snapshot.getDungeonsCount() >= 10);
             MatchFrame after = second.expectCase(Envelope.PayloadCase.MATCH_FRAME, 3000).getMatchFrame();
             assertTrue(after.getServerTick() >= before.getServerTick(), "the simulation continues where it stopped");
             // the resumed connection is logged in as the same account: it can leave the match
@@ -360,8 +365,13 @@ class MatchIntegrationTest {
         update("UPDATE game_character SET level = 50 WHERE account_id = ?", p.accountId());
         update("UPDATE account SET potara_owned = 1 WHERE account_id = ?", p.accountId());
         try (TestClient c = p.client()) {
-            // the snapshot after login already shows the level-50 stats
+            // the snapshot pushed after the login may have been built before the level was raised above (the player is loaded on another thread): ask again and take the
+            // first snapshot that shows level 50 (this was the cause of a rare failure: 372739, the level-30 figure, instead of 430528)
+            c.send(Envelope.newBuilder().setRequestId(9).setPlayerDataRequest(com.battleball.proto.PlayerDataRequest.getDefaultInstance()).build());
             var snap = c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            while (snap.getCharacters(0).getLevel() != 50) {
+                snap = c.expectCase(Envelope.PayloadCase.PLAYER_DATA_SNAPSHOT, 5000).getPlayerDataSnapshot();
+            }
             long mainHp = snap.getCharacters(0).getStats().getHpMax();
             long partnerHp = snap.getCharacters(1).getStats().getHpMax();
             assertEquals(430_528, mainHp);
@@ -491,6 +501,27 @@ class MatchIntegrationTest {
                 }
             }
             assertTrue(kept > 0, "the cooldown of a skill used in training is kept in the database");
+        }
+    }
+
+    @Test
+    void aRealMatchReplacesTheTrainingSessionOfTheVillage() throws Exception {
+        Player p = newPlayer();
+        try (TestClient c = p.client()) {
+            c.send(Envelope.newBuilder().setRequestId(40).setStartTrainingRequest(StartTrainingRequest.newBuilder().setControlledCharacterId(p.characters()[0])
+                    .setArenaW(3000).setArenaH(800).addSpots(TrainingSpot.newBuilder().setKey("moc_nhan").setX(900).setY(200))).build());
+            assertTrue(c.expectCase(Envelope.PayloadCase.MATCH_STARTED, 8000).getMatchStarted().getTraining());
+            // Cui sends the player to a dungeon while the village session still runs: the session closes quietly and the dungeon starts
+            c.send(startRequest(41, 12, p.characters()[0]));
+            Envelope answer = c.expectCase(Envelope.PayloadCase.MATCH_STARTED, 8000);
+            assertEquals(41, answer.getRequestId());
+            assertFalse(answer.getMatchStarted().getTraining());
+            assertTrue(answer.getMatchStarted().getRunId() > 0);
+            // a second real match is still refused
+            c.send(startRequest(42, 12, p.characters()[0]));
+            assertFalse(c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 8000).getActionResult().getOk());
+            c.send(Envelope.newBuilder().setLeaveMatchRequest(LeaveMatchRequest.getDefaultInstance()).build());
+            c.expectCase(Envelope.PayloadCase.MATCH_ENDED, 8000);
         }
     }
 }

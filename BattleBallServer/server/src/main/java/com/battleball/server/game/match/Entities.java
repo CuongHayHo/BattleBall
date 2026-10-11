@@ -142,6 +142,12 @@ public final class Entities {
         public final double originY;
         public final double dirX;
         public final double dirY;
+        /** Against small monsters of a dungeon the beam turns around the caster (docs 15.25): radians per millisecond (0 = a fixed beam), the tick it is at and where it pointed at the last tick. */
+        public double spinRadPerMs;
+        public int tickIndex;
+        public double lastAngle;
+        /** The reach of a spinning beam (a fixed beam uses the length of the skill level). */
+        public double spinLength;
 
         public Channel(StaticData.Skill skill, StaticData.SkillLevel level, long startsAt, long endsAt, long tickMs, double originX, double originY, double dirX, double dirY) {
             this.skill = skill;
@@ -160,7 +166,7 @@ public final class Entities {
         public final long characterId;
         public final String race;
         public final int level;
-        public final boolean controlled;
+        public boolean controlled;                       // changes when the player takes over another character (MatchEngine.switchControl)
         public final boolean fusion;
         public final long partnerCharacterId;
         public final Map<Integer, StaticData.Skill> skillBySlot = new HashMap<>();
@@ -255,6 +261,13 @@ public final class Entities {
         public double leashOvershoot;
         public final Map<String, Long> actionReadyAt = new HashMap<>();
         public Integer lockedTarget;
+        /** A dungeon monster: the planet whose skills it uses (EARTH, NAMEC or XAYDA); a boss draws it at random for the match. */
+        public String planet = "EARTH";
+        /** Called by a boss (docs 15.25): it pays no gold and drops nothing; the waves are what pays. */
+        public boolean summoned;
+        public long shootReadyAt;
+        /** A small monster that is aiming or has just shot stands still until this moment. */
+        public long actionUntil;
 
         public Monster(int id, String name, MonsterKind kind, StaticData.Boss boss, String classKey, String role, double radius) {
             super(id, Team.ENEMY, name, radius);

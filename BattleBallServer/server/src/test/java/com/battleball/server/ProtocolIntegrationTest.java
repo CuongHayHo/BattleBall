@@ -508,7 +508,7 @@ class ProtocolIntegrationTest {
             assertEquals(10, exchange.getItems(0).getFragmentCost());
             assertEquals(101, exchange.getItems(0).getFragmentTemplateId());
             assertEquals(0, exchange.getItems(0).getGoldPrice());
-            assertEquals(3, shop.getTabs(4).getItemsCount(), "the upgrade stone, the stat stone and the crystal stone");
+            assertEquals(5, shop.getTabs(4).getItemsCount(), "the upgrade stone, the stat stone, the crystal stone and the two GEN stones (V039)");
             var crystal = shop.getTabs(4).getItems(2);
             assertEquals(203, crystal.getTemplateId());
             assertEquals(500, crystal.getGemPrice());

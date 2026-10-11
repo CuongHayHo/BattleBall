@@ -21,6 +21,7 @@ namespace BattleBall.Net
         public readonly List<Scenery> Scenery = new List<Scenery>();
         public readonly List<NpcSpec> Npcs = new List<NpcSpec>();
         public bool IsPlaceholder;
+        public bool Flying;                          // a dungeon arena (docs 15.25): no ground, the characters fly in every direction and nothing pulls them down
 
         // ---- a map drawn from real chunk pictures (BbChunkMaps); a placeholder map leaves these empty and has flat ground
         public float UiScale = 2.2f;                      // canvas pixels per Nro pixel
@@ -134,7 +135,7 @@ namespace BattleBall.Net
                 Talk = "Chào cháu! Dùng cần điều khiển để đi lại. Hãy mở menu bên trái để xem nhân vật, hành trang và hòm thư." });
             map.Npcs.Add(new NpcSpec { Id = "shop", Name = "Bà Hạt Mít", CostumeId = 9022, X = 1850, Action = NpcAction.Smith, Talk = "" });          // upgrades gear (docs 15.22)
             map.Npcs.Add(new NpcSpec { Id = "cui", Name = "Cui", CostumeId = 9023, X = 2300, Action = NpcAction.DungeonGate,
-                Talk = "Ta đưa cháu tới các phó bản. Chức năng này sắp có." });
+                Talk = "Cháu muốn đi phó bản nào? Ta đưa cháu tới đó bằng tàu của ta." });
             // Bunma sells clothes and stones (docs 15.17)
             map.Npcs.Add(new NpcSpec { Id = "bunma", Name = "Bunma", CostumeId = 9021, X = 700, Action = NpcAction.Shop, Talk = "" });
             // Urôn sells every skin (docs 15.15)

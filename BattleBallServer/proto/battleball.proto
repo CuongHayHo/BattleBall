@@ -80,6 +80,8 @@ message Envelope {
     // ---- GEN (docs 15.21) ----
     RerollGenRequest reroll_gen_request = 68;           // a GEN stone changes one line of a piece to another random set of its planet; ActionResult, then a fresh PlayerDataSnapshot
     UnlockGenSlotRequest unlock_gen_slot_request = 69;  // GEN slot stones open one more line on a piece
+    SwitchControlRequest switch_control_request = 70;   // in a match or a training session: the player controls another character of the squad (nothing is reset); answered by ControlSwitched
+    ControlSwitched control_switched = 71;
   }
 }
 
@@ -399,6 +401,16 @@ message PlayerDataSnapshot {
   repeated SkillCatalogEntry skill_catalog = 15;   // every enabled skill with its levels (the Kỹ năng tab: learn and raise with gold, UpgradeSkillRequest)
   repeated GenSetInfo gen_sets = 16;               // every GEN set with its steps (what a set does, for the popups)
   GenRulesInfo gen_rules = 17;
+  repeated DungeonInfo dungeons = 18;            // every enabled dungeon that has bosses, for the list of the NPC Cui (docs 15.25)
+}
+
+message DungeonInfo {
+  uint32 dungeon_id = 1;
+  string name = 2;
+  string tier = 3;                  // early, mid or late
+  uint32 recommended_level = 4;     // the reference level of the tier (match_rules.tier_level)
+  uint32 boss_count = 5;            // bosses met in one match
+  uint32 time_limit_s = 6;          // 0 = none
 }
 
 message SkillCatalogEntry {
@@ -593,6 +605,9 @@ message EntitySpawn {
   bool controlled = 19;             // true for the entity this client moves
   string dummy_key = 20;            // training dummies: the key of balance_config training.dummies (the client places it where its map says)
   int32 mob_template_id = 21;       // training dummies drawn as an Nro mob (0 = Mộc nhân), -1 = drawn with costume_id
+  string planet = 22;               // bosses and minions of a dungeon: EARTH, NAMEC or XAYDA, the planet whose skills it uses (a boss draws one at random per match)
+  bool summoned = 23;               // a minion called by a boss (the waves are not)
+  uint64 partner_character_id = 24; // a fused fighter (the character with its Potara partner merged into it): the partner; 0 for the others
 }
 
 message MatchStarted {
@@ -656,6 +671,11 @@ enum Effect {
   MAFUBA_GATHER = 14;               // Ma phong ba: the target is sucked into the jar (target_id, source_id, duration_ms until it comes out as a jar, x, y = the jar)
   JAR = 15;                         // Ma phong ba: the target is a jar for duration_ms (it takes damage every 500 ms and cannot act)
   ULTIMATE_BEAM = 16;               // Super Kamejoko / Cađíc: the beam hits for duration_ms from x, y along dir; length and width of the rectangle
+                                    // (against small monsters in a dungeon it turns once around the caster: see spin_deg_per_s of EffectEvent)
+  WAVE = 17;                        // dungeon: a wave of small monsters comes (skill_id = number of the wave, length = number of waves of the stage, width = monsters in it)
+  BOSS_COMING = 18;                 // dungeon: the last monster of the stage fell, the boss comes (target_id = the boss, x, y = where it stands)
+  SUMMON = 19;                      // dungeon: a boss calls a small monster (source_id = the boss, target_id = the monster, x, y)
+  DIED = 20;                        // an entity died (target_id = who, source_id = what killed it, x, y = where; dir = the way the blow came)
 }
 
 message EntityState {
@@ -699,6 +719,7 @@ message EffectEvent {
   float length = 9;
   float width = 10;
   uint32 skill_id = 11;
+  float spin_deg_per_s = 12;        // ULTIMATE_BEAM against small monsters: the beam turns this fast around the caster (0 = fixed direction)
 }
 
 message ProjectileState {
@@ -735,6 +756,11 @@ message PlayerStateReport {
   float dir_x = 4;
   float dir_y = 5;
   repeated AllyPosition allies = 6; // training only: the AI characters walk in the client's village, their positions come from here
+  // dungeon: the part of the arena the screen shows (the corner with the smallest x and y, and the size; the same pixels as x and y); the AI fight only what is inside it. 0 = not sent
+  float view_x = 7;
+  float view_y = 8;
+  float view_w = 9;
+  float view_h = 10;
 }
 
 message AllyPosition {
@@ -754,6 +780,15 @@ message UseSkillRequest {
 }
 
 message ReviveRequest {}
+
+// The player takes over another character of the squad (the menu: another tab of the characters). The character that was controlled becomes AI where it stands, with
+// everything it has (HP, Ki, buffs, the ape form, a skill in progress); the new one keeps its own state too. Owner request 2026-10-11.
+message SwitchControlRequest { uint32 entity_id = 1; }
+message ControlSwitched {
+  bool ok = 1;                      // false: no such fighter, or the match is over
+  uint32 entity_id = 2;             // the fighter that is controlled now
+  repeated SkillSlot skills = 3;    // its skills (levels, cooldowns left, Ki cost), as MatchStarted.skills lists them for the controlled one
+}
 message LeaveMatchRequest {}         // gives up the match (counts as a loss)
 
 message LevelUp {

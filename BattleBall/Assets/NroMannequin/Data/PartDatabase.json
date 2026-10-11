@@ -1,5 +1,5 @@
 {
-  "totalParts": 948,
+  "totalParts": 995,
   "parts": [
     {
       "partId": 0,
@@ -64916,6 +64916,3618 @@
         {
           "subIndex": 13,
           "iconId": 0,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 12,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 159,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 152,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 153,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 154,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 155,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 156,
+          "dx": 1,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 157,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 160,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 161,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 162,
+          "dx": -1,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 163,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 164,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 165,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 166,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 14,
+          "iconId": 167,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 15,
+          "iconId": 158,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 16,
+          "iconId": 16,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 13,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 168,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 169,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 170,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 171,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 172,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 173,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 174,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 175,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 176,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 177,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 178,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 179,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 180,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 34,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 16,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 238,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 210,
+          "dx": -2,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 211,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 3,
+          "iconId": 212,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 213,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 214,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 215,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 216,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 217,
+          "dx": 1,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 218,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 219,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 220,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 221,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 222,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 14,
+          "iconId": 223,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 15,
+          "iconId": 224,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 16,
+          "iconId": 16,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 65,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 762,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 747,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 748,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 749,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 750,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 751,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 752,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 753,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 754,
+          "dx": 1,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 755,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 756,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 757,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 758,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 761,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 14,
+          "iconId": 759,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 15,
+          "iconId": 760,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 16,
+          "iconId": 16,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 66,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 763,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 764,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 765,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 766,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 767,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 768,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 769,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 770,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 771,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 772,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 773,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 774,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 775,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 34,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 95,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 1268,
+          "dx": 5,
+          "dy": 11
+        },
+        {
+          "subIndex": 1,
+          "iconId": 1269,
+          "dx": 2,
+          "dy": 7
+        },
+        {
+          "subIndex": 2,
+          "iconId": 20,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 96,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 1293,
+          "dx": 0,
+          "dy": 6
+        },
+        {
+          "subIndex": 1,
+          "iconId": 1271,
+          "dx": 3,
+          "dy": 5
+        },
+        {
+          "subIndex": 2,
+          "iconId": 1278,
+          "dx": -2,
+          "dy": 1
+        },
+        {
+          "subIndex": 3,
+          "iconId": 1270,
+          "dx": -5,
+          "dy": -2
+        },
+        {
+          "subIndex": 4,
+          "iconId": 1279,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 1281,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 1280,
+          "dx": 1,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 1282,
+          "dx": 1,
+          "dy": 5
+        },
+        {
+          "subIndex": 8,
+          "iconId": 1285,
+          "dx": 2,
+          "dy": 6
+        },
+        {
+          "subIndex": 9,
+          "iconId": 1298,
+          "dx": 1,
+          "dy": 3
+        },
+        {
+          "subIndex": 10,
+          "iconId": 1286,
+          "dx": 0,
+          "dy": 4
+        },
+        {
+          "subIndex": 11,
+          "iconId": 1287,
+          "dx": -1,
+          "dy": 2
+        },
+        {
+          "subIndex": 12,
+          "iconId": 1288,
+          "dx": 0,
+          "dy": 1
+        },
+        {
+          "subIndex": 13,
+          "iconId": 1289,
+          "dx": 4,
+          "dy": 3
+        },
+        {
+          "subIndex": 14,
+          "iconId": 1290,
+          "dx": 2,
+          "dy": 5
+        },
+        {
+          "subIndex": 15,
+          "iconId": 1291,
+          "dx": 0,
+          "dy": 5
+        },
+        {
+          "subIndex": 16,
+          "iconId": 16,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 97,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 1284,
+          "dx": 6,
+          "dy": -7
+        },
+        {
+          "subIndex": 1,
+          "iconId": 1272,
+          "dx": -4,
+          "dy": -8
+        },
+        {
+          "subIndex": 2,
+          "iconId": 1273,
+          "dx": -4,
+          "dy": -14
+        },
+        {
+          "subIndex": 3,
+          "iconId": 1274,
+          "dx": -3,
+          "dy": -11
+        },
+        {
+          "subIndex": 4,
+          "iconId": 1275,
+          "dx": -6,
+          "dy": -13
+        },
+        {
+          "subIndex": 5,
+          "iconId": 1276,
+          "dx": -1,
+          "dy": -13
+        },
+        {
+          "subIndex": 6,
+          "iconId": 1277,
+          "dx": -5,
+          "dy": -13
+        },
+        {
+          "subIndex": 7,
+          "iconId": 1283,
+          "dx": -3,
+          "dy": -8
+        },
+        {
+          "subIndex": 8,
+          "iconId": 1297,
+          "dx": -2,
+          "dy": 6
+        },
+        {
+          "subIndex": 9,
+          "iconId": 1292,
+          "dx": -1,
+          "dy": -10
+        },
+        {
+          "subIndex": 10,
+          "iconId": 1294,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 1295,
+          "dx": -2,
+          "dy": -6
+        },
+        {
+          "subIndex": 12,
+          "iconId": 1296,
+          "dx": 1,
+          "dy": 1
+        },
+        {
+          "subIndex": 13,
+          "iconId": 34,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 165,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 1840,
+          "dx": 4,
+          "dy": 1
+        },
+        {
+          "subIndex": 1,
+          "iconId": 1841,
+          "dx": 3,
+          "dy": 1
+        },
+        {
+          "subIndex": 2,
+          "iconId": 20,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 166,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 1842,
+          "dx": -5,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 1843,
+          "dx": -6,
+          "dy": -3
+        },
+        {
+          "subIndex": 2,
+          "iconId": 1844,
+          "dx": -6,
+          "dy": -5
+        },
+        {
+          "subIndex": 3,
+          "iconId": 1845,
+          "dx": -2,
+          "dy": -4
+        },
+        {
+          "subIndex": 4,
+          "iconId": 1846,
+          "dx": -3,
+          "dy": -3
+        },
+        {
+          "subIndex": 5,
+          "iconId": 1847,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 6,
+          "iconId": 1848,
+          "dx": -2,
+          "dy": -2
+        },
+        {
+          "subIndex": 7,
+          "iconId": 1849,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 1850,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 1851,
+          "dx": -5,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 1852,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 1853,
+          "dx": -4,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 1854,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 1855,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 14,
+          "iconId": 1856,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 15,
+          "iconId": 1857,
+          "dx": -3,
+          "dy": -2
+        },
+        {
+          "subIndex": 16,
+          "iconId": 16,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 167,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 1870,
+          "dx": 4,
+          "dy": -1
+        },
+        {
+          "subIndex": 1,
+          "iconId": 1858,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 1860,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 1861,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 1862,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 1863,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 1864,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 1868,
+          "dx": -2,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 1869,
+          "dx": -2,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 1859,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 1865,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 1866,
+          "dx": 0,
+          "dy": 1
+        },
+        {
+          "subIndex": 12,
+          "iconId": 1867,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 34,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 362,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3589,
+          "dx": 1,
+          "dy": -7
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3590,
+          "dx": 1,
+          "dy": -8
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3000,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 363,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3591,
+          "dx": -3,
+          "dy": -5
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3592,
+          "dx": -4,
+          "dy": -5
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3606,
+          "dx": -2,
+          "dy": -7
+        },
+        {
+          "subIndex": 3,
+          "iconId": 3605,
+          "dx": -1,
+          "dy": -8
+        },
+        {
+          "subIndex": 4,
+          "iconId": 3602,
+          "dx": 2,
+          "dy": -7
+        },
+        {
+          "subIndex": 5,
+          "iconId": 3603,
+          "dx": 2,
+          "dy": -5
+        },
+        {
+          "subIndex": 6,
+          "iconId": 3604,
+          "dx": 1,
+          "dy": -5
+        },
+        {
+          "subIndex": 7,
+          "iconId": 3601,
+          "dx": -2,
+          "dy": -7
+        },
+        {
+          "subIndex": 8,
+          "iconId": 3600,
+          "dx": 0,
+          "dy": -4
+        },
+        {
+          "subIndex": 9,
+          "iconId": 3599,
+          "dx": 0,
+          "dy": -6
+        },
+        {
+          "subIndex": 10,
+          "iconId": 3598,
+          "dx": 1,
+          "dy": -3
+        },
+        {
+          "subIndex": 11,
+          "iconId": 3597,
+          "dx": -3,
+          "dy": -3
+        },
+        {
+          "subIndex": 12,
+          "iconId": 3596,
+          "dx": 1,
+          "dy": -4
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3593,
+          "dx": 0,
+          "dy": -5
+        },
+        {
+          "subIndex": 14,
+          "iconId": 3595,
+          "dx": 2,
+          "dy": -5
+        },
+        {
+          "subIndex": 15,
+          "iconId": 3594,
+          "dx": 0,
+          "dy": -5
+        },
+        {
+          "subIndex": 16,
+          "iconId": 3001,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 364,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3609,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3607,
+          "dx": 1,
+          "dy": -2
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3618,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 3,
+          "iconId": 3617,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 4,
+          "iconId": 3616,
+          "dx": 0,
+          "dy": -4
+        },
+        {
+          "subIndex": 5,
+          "iconId": 3615,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 3614,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 3619,
+          "dx": -2,
+          "dy": -1
+        },
+        {
+          "subIndex": 8,
+          "iconId": 3608,
+          "dx": -1,
+          "dy": -3
+        },
+        {
+          "subIndex": 9,
+          "iconId": 3613,
+          "dx": 1,
+          "dy": -2
+        },
+        {
+          "subIndex": 10,
+          "iconId": 3610,
+          "dx": 0,
+          "dy": -6
+        },
+        {
+          "subIndex": 11,
+          "iconId": 3612,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 12,
+          "iconId": 3611,
+          "dx": -1,
+          "dy": -4
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3002,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 365,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3620,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3621,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3000,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 366,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3622,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3623,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3635,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 3,
+          "iconId": 3634,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 3631,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 5,
+          "iconId": 3632,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 6,
+          "iconId": 3633,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 3637,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 8,
+          "iconId": 3630,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 9,
+          "iconId": 3629,
+          "dx": 1,
+          "dy": -2
+        },
+        {
+          "subIndex": 10,
+          "iconId": 3628,
+          "dx": 1,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 3627,
+          "dx": 1,
+          "dy": 3
+        },
+        {
+          "subIndex": 12,
+          "iconId": 3626,
+          "dx": 1,
+          "dy": -2
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3625,
+          "dx": 2,
+          "dy": -2
+        },
+        {
+          "subIndex": 14,
+          "iconId": 3624,
+          "dx": 2,
+          "dy": -1
+        },
+        {
+          "subIndex": 15,
+          "iconId": 3636,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 16,
+          "iconId": 3001,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 367,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3650,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3638,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3649,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 3648,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 3647,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 3646,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 3645,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 3644,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 3643,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 3642,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 3641,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 3640,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 3639,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3002,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 368,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3651,
+          "dx": 8,
+          "dy": 2
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3652,
+          "dx": 6,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3000,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 369,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3668,
+          "dx": 1,
+          "dy": -3
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3653,
+          "dx": -2,
+          "dy": -4
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3667,
+          "dx": -3,
+          "dy": -8
+        },
+        {
+          "subIndex": 3,
+          "iconId": 3666,
+          "dx": 0,
+          "dy": -8
+        },
+        {
+          "subIndex": 4,
+          "iconId": 3665,
+          "dx": -1,
+          "dy": -7
+        },
+        {
+          "subIndex": 5,
+          "iconId": 3664,
+          "dx": 1,
+          "dy": -5
+        },
+        {
+          "subIndex": 6,
+          "iconId": 3663,
+          "dx": 0,
+          "dy": -5
+        },
+        {
+          "subIndex": 7,
+          "iconId": 3662,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 8,
+          "iconId": 3661,
+          "dx": 2,
+          "dy": -3
+        },
+        {
+          "subIndex": 9,
+          "iconId": 3660,
+          "dx": 1,
+          "dy": -3
+        },
+        {
+          "subIndex": 10,
+          "iconId": 3659,
+          "dx": 2,
+          "dy": -6
+        },
+        {
+          "subIndex": 11,
+          "iconId": 3658,
+          "dx": 0,
+          "dy": -6
+        },
+        {
+          "subIndex": 12,
+          "iconId": 3657,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3654,
+          "dx": 2,
+          "dy": -8
+        },
+        {
+          "subIndex": 14,
+          "iconId": 3656,
+          "dx": 3,
+          "dy": -4
+        },
+        {
+          "subIndex": 15,
+          "iconId": 3655,
+          "dx": 0,
+          "dy": -5
+        },
+        {
+          "subIndex": 16,
+          "iconId": 3001,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 370,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3677,
+          "dx": 4,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3681,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3675,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 3678,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 4,
+          "iconId": 3679,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 5,
+          "iconId": 3676,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 3680,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 3669,
+          "dx": 0,
+          "dy": 1
+        },
+        {
+          "subIndex": 8,
+          "iconId": 3670,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 9,
+          "iconId": 3674,
+          "dx": -3,
+          "dy": -4
+        },
+        {
+          "subIndex": 10,
+          "iconId": 3671,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 11,
+          "iconId": 3673,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 3672,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3002,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 374,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3713,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3714,
+          "dx": -1,
+          "dy": -4
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3000,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 375,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3730,
+          "dx": 1,
+          "dy": -3
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3715,
+          "dx": -2,
+          "dy": -4
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3729,
+          "dx": -3,
+          "dy": -7
+        },
+        {
+          "subIndex": 3,
+          "iconId": 3728,
+          "dx": -1,
+          "dy": -9
+        },
+        {
+          "subIndex": 4,
+          "iconId": 3727,
+          "dx": 0,
+          "dy": -8
+        },
+        {
+          "subIndex": 5,
+          "iconId": 3726,
+          "dx": 3,
+          "dy": -5
+        },
+        {
+          "subIndex": 6,
+          "iconId": 3725,
+          "dx": 1,
+          "dy": -5
+        },
+        {
+          "subIndex": 7,
+          "iconId": 3724,
+          "dx": -2,
+          "dy": -3
+        },
+        {
+          "subIndex": 8,
+          "iconId": 3723,
+          "dx": 1,
+          "dy": -4
+        },
+        {
+          "subIndex": 9,
+          "iconId": 3722,
+          "dx": -2,
+          "dy": -4
+        },
+        {
+          "subIndex": 10,
+          "iconId": 3721,
+          "dx": 0,
+          "dy": -6
+        },
+        {
+          "subIndex": 11,
+          "iconId": 3720,
+          "dx": -1,
+          "dy": -5
+        },
+        {
+          "subIndex": 12,
+          "iconId": 3719,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3716,
+          "dx": 2,
+          "dy": -6
+        },
+        {
+          "subIndex": 14,
+          "iconId": 3718,
+          "dx": 0,
+          "dy": -5
+        },
+        {
+          "subIndex": 15,
+          "iconId": 3717,
+          "dx": 0,
+          "dy": -5
+        },
+        {
+          "subIndex": 16,
+          "iconId": 3001,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 376,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 3739,
+          "dx": 3,
+          "dy": -1
+        },
+        {
+          "subIndex": 1,
+          "iconId": 3743,
+          "dx": -1,
+          "dy": -2
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3737,
+          "dx": 1,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 3740,
+          "dx": -1,
+          "dy": -3
+        },
+        {
+          "subIndex": 4,
+          "iconId": 3741,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 5,
+          "iconId": 3738,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 6,
+          "iconId": 3742,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 7,
+          "iconId": 3731,
+          "dx": 0,
+          "dy": 1
+        },
+        {
+          "subIndex": 8,
+          "iconId": 3732,
+          "dx": -1,
+          "dy": -2
+        },
+        {
+          "subIndex": 9,
+          "iconId": 3736,
+          "dx": -4,
+          "dy": -4
+        },
+        {
+          "subIndex": 10,
+          "iconId": 3733,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 11,
+          "iconId": 3735,
+          "dx": 0,
+          "dy": 1
+        },
+        {
+          "subIndex": 12,
+          "iconId": 3734,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3002,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 421,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 4197,
+          "dx": 1,
+          "dy": -5
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4198,
+          "dx": 1,
+          "dy": -5
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3000,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 422,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 4199,
+          "dx": 1,
+          "dy": -5
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4200,
+          "dx": -3,
+          "dy": -6
+        },
+        {
+          "subIndex": 2,
+          "iconId": 4201,
+          "dx": -2,
+          "dy": -9
+        },
+        {
+          "subIndex": 3,
+          "iconId": 4202,
+          "dx": -1,
+          "dy": -8
+        },
+        {
+          "subIndex": 4,
+          "iconId": 4203,
+          "dx": 0,
+          "dy": -9
+        },
+        {
+          "subIndex": 5,
+          "iconId": 4204,
+          "dx": 3,
+          "dy": -6
+        },
+        {
+          "subIndex": 6,
+          "iconId": 4205,
+          "dx": 1,
+          "dy": -6
+        },
+        {
+          "subIndex": 7,
+          "iconId": 4206,
+          "dx": -2,
+          "dy": -6
+        },
+        {
+          "subIndex": 8,
+          "iconId": 4207,
+          "dx": 0,
+          "dy": -6
+        },
+        {
+          "subIndex": 9,
+          "iconId": 4212,
+          "dx": -2,
+          "dy": -5
+        },
+        {
+          "subIndex": 10,
+          "iconId": 4208,
+          "dx": 3,
+          "dy": -6
+        },
+        {
+          "subIndex": 11,
+          "iconId": 4211,
+          "dx": -1,
+          "dy": -5
+        },
+        {
+          "subIndex": 12,
+          "iconId": 4209,
+          "dx": 2,
+          "dy": -6
+        },
+        {
+          "subIndex": 13,
+          "iconId": 4213,
+          "dx": 4,
+          "dy": -7
+        },
+        {
+          "subIndex": 14,
+          "iconId": 4210,
+          "dx": 1,
+          "dy": -7
+        },
+        {
+          "subIndex": 15,
+          "iconId": 4227,
+          "dx": 1,
+          "dy": -7
+        },
+        {
+          "subIndex": 16,
+          "iconId": 3001,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 423,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 4214,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4215,
+          "dx": -1,
+          "dy": -4
+        },
+        {
+          "subIndex": 2,
+          "iconId": 4225,
+          "dx": 2,
+          "dy": -1
+        },
+        {
+          "subIndex": 3,
+          "iconId": 4223,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 4,
+          "iconId": 4224,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 5,
+          "iconId": 4222,
+          "dx": -1,
+          "dy": -2
+        },
+        {
+          "subIndex": 6,
+          "iconId": 4221,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 7,
+          "iconId": 4226,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 8,
+          "iconId": 4216,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 4220,
+          "dx": -3,
+          "dy": -5
+        },
+        {
+          "subIndex": 10,
+          "iconId": 4217,
+          "dx": 1,
+          "dy": -3
+        },
+        {
+          "subIndex": 11,
+          "iconId": 4219,
+          "dx": 0,
+          "dy": 1
+        },
+        {
+          "subIndex": 12,
+          "iconId": 4218,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3002,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 424,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 4229,
+          "dx": -3,
+          "dy": -7
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4230,
+          "dx": 1,
+          "dy": -6
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3000,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 425,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 4231,
+          "dx": 1,
+          "dy": -4
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4232,
+          "dx": -2,
+          "dy": -8
+        },
+        {
+          "subIndex": 2,
+          "iconId": 4233,
+          "dx": 0,
+          "dy": -8
+        },
+        {
+          "subIndex": 3,
+          "iconId": 4234,
+          "dx": 2,
+          "dy": -8
+        },
+        {
+          "subIndex": 4,
+          "iconId": 4235,
+          "dx": 2,
+          "dy": -8
+        },
+        {
+          "subIndex": 5,
+          "iconId": 4236,
+          "dx": 3,
+          "dy": -7
+        },
+        {
+          "subIndex": 6,
+          "iconId": 4237,
+          "dx": 2,
+          "dy": -8
+        },
+        {
+          "subIndex": 7,
+          "iconId": 4238,
+          "dx": -1,
+          "dy": -7
+        },
+        {
+          "subIndex": 8,
+          "iconId": 4239,
+          "dx": -1,
+          "dy": -8
+        },
+        {
+          "subIndex": 9,
+          "iconId": 4245,
+          "dx": 0,
+          "dy": -6
+        },
+        {
+          "subIndex": 10,
+          "iconId": 4240,
+          "dx": 2,
+          "dy": -6
+        },
+        {
+          "subIndex": 11,
+          "iconId": 4244,
+          "dx": -2,
+          "dy": -5
+        },
+        {
+          "subIndex": 12,
+          "iconId": 4241,
+          "dx": 2,
+          "dy": -5
+        },
+        {
+          "subIndex": 13,
+          "iconId": 4246,
+          "dx": 3,
+          "dy": -7
+        },
+        {
+          "subIndex": 14,
+          "iconId": 4242,
+          "dx": 1,
+          "dy": -7
+        },
+        {
+          "subIndex": 15,
+          "iconId": 4243,
+          "dx": 1,
+          "dy": -7
+        },
+        {
+          "subIndex": 16,
+          "iconId": 3001,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 426,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 4247,
+          "dx": 1,
+          "dy": -3
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4248,
+          "dx": 0,
+          "dy": -4
+        },
+        {
+          "subIndex": 2,
+          "iconId": 4258,
+          "dx": 3,
+          "dy": -1
+        },
+        {
+          "subIndex": 3,
+          "iconId": 4256,
+          "dx": 3,
+          "dy": -2
+        },
+        {
+          "subIndex": 4,
+          "iconId": 4257,
+          "dx": 2,
+          "dy": -3
+        },
+        {
+          "subIndex": 5,
+          "iconId": 4255,
+          "dx": 1,
+          "dy": -2
+        },
+        {
+          "subIndex": 6,
+          "iconId": 4254,
+          "dx": 1,
+          "dy": -4
+        },
+        {
+          "subIndex": 7,
+          "iconId": 4259,
+          "dx": 1,
+          "dy": -2
+        },
+        {
+          "subIndex": 8,
+          "iconId": 4249,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 4253,
+          "dx": -4,
+          "dy": -5
+        },
+        {
+          "subIndex": 10,
+          "iconId": 4250,
+          "dx": 1,
+          "dy": -3
+        },
+        {
+          "subIndex": 11,
+          "iconId": 4252,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 12,
+          "iconId": 4251,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3002,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 439,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 4300,
+          "dx": 3,
+          "dy": -6
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4301,
+          "dx": 3,
+          "dy": -2
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3000,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 440,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 4302,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4303,
+          "dx": -2,
+          "dy": -5
+        },
+        {
+          "subIndex": 2,
+          "iconId": 4304,
+          "dx": 0,
+          "dy": -7
+        },
+        {
+          "subIndex": 3,
+          "iconId": 4305,
+          "dx": 1,
+          "dy": -5
+        },
+        {
+          "subIndex": 4,
+          "iconId": 4306,
+          "dx": 1,
+          "dy": -6
+        },
+        {
+          "subIndex": 5,
+          "iconId": 4307,
+          "dx": 4,
+          "dy": -5
+        },
+        {
+          "subIndex": 6,
+          "iconId": 4308,
+          "dx": 2,
+          "dy": -5
+        },
+        {
+          "subIndex": 7,
+          "iconId": 4309,
+          "dx": -1,
+          "dy": -5
+        },
+        {
+          "subIndex": 8,
+          "iconId": 4310,
+          "dx": 1,
+          "dy": -6
+        },
+        {
+          "subIndex": 9,
+          "iconId": 4315,
+          "dx": -1,
+          "dy": -5
+        },
+        {
+          "subIndex": 10,
+          "iconId": 4311,
+          "dx": 4,
+          "dy": -3
+        },
+        {
+          "subIndex": 11,
+          "iconId": 4314,
+          "dx": 1,
+          "dy": -2
+        },
+        {
+          "subIndex": 12,
+          "iconId": 4312,
+          "dx": 2,
+          "dy": -3
+        },
+        {
+          "subIndex": 13,
+          "iconId": 4316,
+          "dx": 5,
+          "dy": -3
+        },
+        {
+          "subIndex": 14,
+          "iconId": 4313,
+          "dx": 2,
+          "dy": -5
+        },
+        {
+          "subIndex": 15,
+          "iconId": 4330,
+          "dx": 0,
+          "dy": -5
+        },
+        {
+          "subIndex": 16,
+          "iconId": 3001,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 441,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 4317,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4318,
+          "dx": -1,
+          "dy": -4
+        },
+        {
+          "subIndex": 2,
+          "iconId": 4328,
+          "dx": 3,
+          "dy": -2
+        },
+        {
+          "subIndex": 3,
+          "iconId": 4326,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 4,
+          "iconId": 4327,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 5,
+          "iconId": 4325,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 6,
+          "iconId": 4324,
+          "dx": 2,
+          "dy": -1
+        },
+        {
+          "subIndex": 7,
+          "iconId": 4329,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 8,
+          "iconId": 4319,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 9,
+          "iconId": 4323,
+          "dx": -2,
+          "dy": -5
+        },
+        {
+          "subIndex": 10,
+          "iconId": 4320,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 4322,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 4321,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3002,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 448,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 4341,
+          "dx": 3,
+          "dy": -4
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4341,
+          "dx": 1,
+          "dy": -5
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3000,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 449,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4342,
+          "dx": -2,
+          "dy": -4
+        },
+        {
+          "subIndex": 2,
+          "iconId": 4343,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 3,
+          "iconId": 4344,
+          "dx": 2,
+          "dy": -16
+        },
+        {
+          "subIndex": 4,
+          "iconId": 4345,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 5,
+          "iconId": 4346,
+          "dx": -2,
+          "dy": -4
+        },
+        {
+          "subIndex": 6,
+          "iconId": 4347,
+          "dx": 0,
+          "dy": -7
+        },
+        {
+          "subIndex": 7,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 14,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 15,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 16,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 450,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 4348,
+          "dx": 1,
+          "dy": -1
+        },
+        {
+          "subIndex": 2,
+          "iconId": 4349,
+          "dx": -1,
+          "dy": 1
+        },
+        {
+          "subIndex": 3,
+          "iconId": 4350,
+          "dx": 5,
+          "dy": -5
+        },
+        {
+          "subIndex": 4,
+          "iconId": 4351,
+          "dx": 4,
+          "dy": 1
+        },
+        {
+          "subIndex": 5,
+          "iconId": 4352,
+          "dx": 3,
+          "dy": 1
+        },
+        {
+          "subIndex": 6,
+          "iconId": 4353,
+          "dx": 1,
+          "dy": -2
+        },
+        {
+          "subIndex": 7,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 609,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 610,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 5723,
+          "dx": 9,
+          "dy": -13
+        },
+        {
+          "subIndex": 1,
+          "iconId": 5723,
+          "dx": 10,
+          "dy": -18
+        },
+        {
+          "subIndex": 2,
+          "iconId": 5724,
+          "dx": 2,
+          "dy": -18
+        },
+        {
+          "subIndex": 3,
+          "iconId": 5723,
+          "dx": 2,
+          "dy": -18
+        },
+        {
+          "subIndex": 4,
+          "iconId": 5724,
+          "dx": 2,
+          "dy": -18
+        },
+        {
+          "subIndex": 5,
+          "iconId": 5723,
+          "dx": 2,
+          "dy": -18
+        },
+        {
+          "subIndex": 6,
+          "iconId": 5724,
+          "dx": 2,
+          "dy": -18
+        },
+        {
+          "subIndex": 7,
+          "iconId": 5723,
+          "dx": 2,
+          "dy": -18
+        },
+        {
+          "subIndex": 8,
+          "iconId": 5724,
+          "dx": 2,
+          "dy": -18
+        },
+        {
+          "subIndex": 9,
+          "iconId": 5723,
+          "dx": 2,
+          "dy": -9
+        },
+        {
+          "subIndex": 10,
+          "iconId": 5724,
+          "dx": 2,
+          "dy": -18
+        },
+        {
+          "subIndex": 11,
+          "iconId": 5723,
+          "dx": 2,
+          "dy": -17
+        },
+        {
+          "subIndex": 12,
+          "iconId": 5724,
+          "dx": 8,
+          "dy": -15
+        },
+        {
+          "subIndex": 13,
+          "iconId": 5724,
+          "dx": 3,
+          "dy": -17
+        },
+        {
+          "subIndex": 14,
+          "iconId": 5723,
+          "dx": 4,
+          "dy": -18
+        },
+        {
+          "subIndex": 15,
+          "iconId": 5724,
+          "dx": 2,
+          "dy": -16
+        },
+        {
+          "subIndex": 16,
+          "iconId": 5724,
+          "dx": 5,
+          "dy": -12
+        }
+      ]
+    },
+    {
+      "partId": 611,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 3,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 645,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 6027,
+          "dx": 2,
+          "dy": -2
+        },
+        {
+          "subIndex": 1,
+          "iconId": 6028,
+          "dx": 0,
+          "dy": -4
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3000,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 646,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 6029,
+          "dx": 1,
+          "dy": 0
+        },
+        {
+          "subIndex": 1,
+          "iconId": 6040,
+          "dx": -2,
+          "dy": -2
+        },
+        {
+          "subIndex": 2,
+          "iconId": 6030,
+          "dx": -2,
+          "dy": -3
+        },
+        {
+          "subIndex": 3,
+          "iconId": 6031,
+          "dx": -1,
+          "dy": -4
+        },
+        {
+          "subIndex": 4,
+          "iconId": 6032,
+          "dx": -1,
+          "dy": -3
+        },
+        {
+          "subIndex": 5,
+          "iconId": 6033,
+          "dx": 0,
+          "dy": -1
+        },
+        {
+          "subIndex": 6,
+          "iconId": 6034,
+          "dx": -1,
+          "dy": -2
+        },
+        {
+          "subIndex": 7,
+          "iconId": 6039,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 8,
+          "iconId": 6043,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 9,
+          "iconId": 6038,
+          "dx": -4,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 6042,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 6041,
+          "dx": -3,
+          "dy": 0
+        },
+        {
+          "subIndex": 12,
+          "iconId": 6037,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 6057,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 14,
+          "iconId": 6035,
+          "dx": -2,
+          "dy": -1
+        },
+        {
+          "subIndex": 15,
+          "iconId": 6036,
+          "dx": -3,
+          "dy": 0
+        },
+        {
+          "subIndex": 16,
+          "iconId": 3001,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 647,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 6056,
+          "dx": 0,
+          "dy": -7
+        },
+        {
+          "subIndex": 1,
+          "iconId": 6044,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 2,
+          "iconId": 6045,
+          "dx": -1,
+          "dy": -3
+        },
+        {
+          "subIndex": 3,
+          "iconId": 6046,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 4,
+          "iconId": 6047,
+          "dx": -1,
+          "dy": 0
+        },
+        {
+          "subIndex": 5,
+          "iconId": 6048,
+          "dx": -2,
+          "dy": 0
+        },
+        {
+          "subIndex": 6,
+          "iconId": 6049,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 7,
+          "iconId": 6053,
+          "dx": -5,
+          "dy": -1
+        },
+        {
+          "subIndex": 8,
+          "iconId": 6052,
+          "dx": -4,
+          "dy": -3
+        },
+        {
+          "subIndex": 9,
+          "iconId": 6051,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 10,
+          "iconId": 6050,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 11,
+          "iconId": 6055,
+          "dx": 0,
+          "dy": 1
+        },
+        {
+          "subIndex": 12,
+          "iconId": 6054,
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3002,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 648,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 6058,
+          "dx": 7,
+          "dy": -6
+        },
+        {
+          "subIndex": 1,
+          "iconId": 6059,
+          "dx": 6,
+          "dy": -6
+        },
+        {
+          "subIndex": 2,
+          "iconId": 3000,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 649,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 6067,
+          "dx": -5,
+          "dy": -7
+        },
+        {
+          "subIndex": 1,
+          "iconId": 6060,
+          "dx": -6,
+          "dy": -10
+        },
+        {
+          "subIndex": 2,
+          "iconId": 6061,
+          "dx": -3,
+          "dy": -10
+        },
+        {
+          "subIndex": 3,
+          "iconId": 6062,
+          "dx": -4,
+          "dy": -12
+        },
+        {
+          "subIndex": 4,
+          "iconId": 6085,
+          "dx": -1,
+          "dy": -11
+        },
+        {
+          "subIndex": 5,
+          "iconId": 6086,
+          "dx": 1,
+          "dy": -10
+        },
+        {
+          "subIndex": 6,
+          "iconId": 6063,
+          "dx": -3,
+          "dy": -10
+        },
+        {
+          "subIndex": 7,
+          "iconId": 6066,
+          "dx": -1,
+          "dy": -11
+        },
+        {
+          "subIndex": 8,
+          "iconId": 6065,
+          "dx": -5,
+          "dy": -10
+        },
+        {
+          "subIndex": 9,
+          "iconId": 6071,
+          "dx": -5,
+          "dy": -12
+        },
+        {
+          "subIndex": 10,
+          "iconId": 6068,
+          "dx": -3,
+          "dy": -11
+        },
+        {
+          "subIndex": 11,
+          "iconId": 6064,
+          "dx": -4,
+          "dy": -8
+        },
+        {
+          "subIndex": 12,
+          "iconId": 6087,
+          "dx": -1,
+          "dy": -14
+        },
+        {
+          "subIndex": 13,
+          "iconId": 6088,
+          "dx": 0,
+          "dy": -14
+        },
+        {
+          "subIndex": 14,
+          "iconId": 6069,
+          "dx": -2,
+          "dy": -9
+        },
+        {
+          "subIndex": 15,
+          "iconId": 6070,
+          "dx": -6,
+          "dy": -13
+        },
+        {
+          "subIndex": 16,
+          "iconId": 3001,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 650,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 6081,
+          "dx": 0,
+          "dy": -6
+        },
+        {
+          "subIndex": 1,
+          "iconId": 6072,
+          "dx": -3,
+          "dy": -5
+        },
+        {
+          "subIndex": 2,
+          "iconId": 6083,
+          "dx": 2,
+          "dy": -2
+        },
+        {
+          "subIndex": 3,
+          "iconId": 6078,
+          "dx": 1,
+          "dy": -3
+        },
+        {
+          "subIndex": 4,
+          "iconId": 6082,
+          "dx": -1,
+          "dy": -4
+        },
+        {
+          "subIndex": 5,
+          "iconId": 6084,
+          "dx": -1,
+          "dy": -4
+        },
+        {
+          "subIndex": 6,
+          "iconId": 6079,
+          "dx": 0,
+          "dy": -3
+        },
+        {
+          "subIndex": 7,
+          "iconId": 6076,
+          "dx": -3,
+          "dy": -3
+        },
+        {
+          "subIndex": 8,
+          "iconId": 6077,
+          "dx": -1,
+          "dy": -3
+        },
+        {
+          "subIndex": 9,
+          "iconId": 6074,
+          "dx": -3,
+          "dy": -6
+        },
+        {
+          "subIndex": 10,
+          "iconId": 6080,
+          "dx": 1,
+          "dy": -2
+        },
+        {
+          "subIndex": 11,
+          "iconId": 6075,
+          "dx": 0,
+          "dy": 1
+        },
+        {
+          "subIndex": 12,
+          "iconId": 6073,
+          "dx": -1,
+          "dy": -1
+        },
+        {
+          "subIndex": 13,
+          "iconId": 3002,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 838,
+      "type": 0,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 7679,
+          "dx": 3,
+          "dy": -15
+        },
+        {
+          "subIndex": 1,
+          "iconId": 7680,
+          "dx": 3,
+          "dy": -13
+        },
+        {
+          "subIndex": 2,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 839,
+      "type": 1,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 7681,
+          "dx": 0,
+          "dy": -25
+        },
+        {
+          "subIndex": 1,
+          "iconId": 7682,
+          "dx": -7,
+          "dy": -27
+        },
+        {
+          "subIndex": 2,
+          "iconId": 7683,
+          "dx": -20,
+          "dy": -20
+        },
+        {
+          "subIndex": 3,
+          "iconId": 7684,
+          "dx": -11,
+          "dy": -21
+        },
+        {
+          "subIndex": 4,
+          "iconId": 7685,
+          "dx": -3,
+          "dy": -19
+        },
+        {
+          "subIndex": 5,
+          "iconId": 7686,
+          "dx": 0,
+          "dy": -19
+        },
+        {
+          "subIndex": 6,
+          "iconId": 7687,
+          "dx": 1,
+          "dy": -19
+        },
+        {
+          "subIndex": 7,
+          "iconId": 7688,
+          "dx": -5,
+          "dy": -29
+        },
+        {
+          "subIndex": 8,
+          "iconId": 7689,
+          "dx": -4,
+          "dy": -27
+        },
+        {
+          "subIndex": 9,
+          "iconId": 7690,
+          "dx": -15,
+          "dy": -13
+        },
+        {
+          "subIndex": 10,
+          "iconId": 7691,
+          "dx": -2,
+          "dy": -17
+        },
+        {
+          "subIndex": 11,
+          "iconId": 7692,
+          "dx": -16,
+          "dy": -14
+        },
+        {
+          "subIndex": 12,
+          "iconId": 7693,
+          "dx": -6,
+          "dy": -26
+        },
+        {
+          "subIndex": 13,
+          "iconId": 7694,
+          "dx": -2,
+          "dy": -19
+        },
+        {
+          "subIndex": 14,
+          "iconId": 7695,
+          "dx": -10,
+          "dy": -22
+        },
+        {
+          "subIndex": 15,
+          "iconId": 7696,
+          "dx": -12,
+          "dy": -20
+        },
+        {
+          "subIndex": 16,
+          "iconId": 2955,
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "partId": 840,
+      "type": 2,
+      "images": [
+        {
+          "subIndex": 0,
+          "iconId": 7697,
+          "dx": 0,
+          "dy": -2
+        },
+        {
+          "subIndex": 1,
+          "iconId": 7698,
+          "dx": 0,
+          "dy": -7
+        },
+        {
+          "subIndex": 2,
+          "iconId": 7699,
+          "dx": -1,
+          "dy": -7
+        },
+        {
+          "subIndex": 3,
+          "iconId": 7700,
+          "dx": -1,
+          "dy": -7
+        },
+        {
+          "subIndex": 4,
+          "iconId": 7701,
+          "dx": -1,
+          "dy": -7
+        },
+        {
+          "subIndex": 5,
+          "iconId": 7702,
+          "dx": -2,
+          "dy": -7
+        },
+        {
+          "subIndex": 6,
+          "iconId": 7703,
+          "dx": 0,
+          "dy": -7
+        },
+        {
+          "subIndex": 7,
+          "iconId": 7704,
+          "dx": -1,
+          "dy": -4
+        },
+        {
+          "subIndex": 8,
+          "iconId": 7705,
+          "dx": 0,
+          "dy": -5
+        },
+        {
+          "subIndex": 9,
+          "iconId": 7706,
+          "dx": 1,
+          "dy": -7
+        },
+        {
+          "subIndex": 10,
+          "iconId": 7707,
+          "dx": -1,
+          "dy": -5
+        },
+        {
+          "subIndex": 11,
+          "iconId": 7708,
+          "dx": 0,
+          "dy": 1
+        },
+        {
+          "subIndex": 12,
+          "iconId": 7709,
+          "dx": 0,
+          "dy": -5
+        },
+        {
+          "subIndex": 13,
+          "iconId": 2955,
           "dx": 0,
           "dy": 0
         }

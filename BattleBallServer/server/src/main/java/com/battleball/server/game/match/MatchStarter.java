@@ -248,25 +248,31 @@ public final class MatchStarter {
                     .setHeight((float) training.arenaH()));
         } else {
             b.setDungeonId(dungeon.id()).setDungeonName(dungeon.name())
-                    .setArena(com.battleball.proto.Arena.newBuilder().setWidth((float) Json.num(d.balanceObj("match_rules"), "arena_w", 1600))
-                            .setHeight((float) Json.num(d.balanceObj("match_rules"), "arena_h", 900)))
+                    .setArena(com.battleball.proto.Arena.newBuilder().setWidth((float) engine.arenaWidth()).setHeight((float) engine.arenaHeight()))
                     .setTimeLimitS(dungeon.timeLimitS() == null ? 0 : dungeon.timeLimitS());
         }
         b.addAllEntities(engine.snapshotSpawns());
-        Entities.Fighter f = engine.controlledFighter();
-        if (f != null) {
-            for (Map.Entry<Integer, StaticData.Skill> e : new java.util.TreeMap<>(f.skillBySlot).entrySet()) {
-                StaticData.SkillLevel L = e.getValue().level(f.skillLevelBySlot.get(e.getKey()));
-                if (L == null) {
-                    continue;
-                }
-                boolean all = "ALL".equals(e.getValue().kiMode());
-                b.addSkills(SkillSlot.newBuilder().setSlot(e.getKey()).setSkillId(e.getValue().id()).setLevel(L.level()).setCooldownMs(L.cooldownMs())
-                        .setIconId(Math.max(0, e.getValue().iconId())).setName(e.getValue().name()).setCooldownLeftMs((int) Math.min(Integer.MAX_VALUE, engine.cooldownLeftMs(f, e.getKey())))
-                        .setKiAll(all).setKiCost(all || L.kiCostPct() == null ? 0 : (int) Math.round(f.kiMax * L.kiCostPct() / 100.0)));
-            }
-        }
+        b.addAllSkills(skillSlots(engine, engine.controlledFighter()));
         return b.build();
+    }
+
+    /** The skills of a fighter by slot, as the controlled character's buttons need them (levels, cooldowns left, Ki cost). */
+    public static java.util.List<SkillSlot> skillSlots(MatchEngine engine, Entities.Fighter f) {
+        java.util.List<SkillSlot> out = new java.util.ArrayList<>();
+        if (f == null) {
+            return out;
+        }
+        for (Map.Entry<Integer, StaticData.Skill> e : new java.util.TreeMap<>(f.skillBySlot).entrySet()) {
+            StaticData.SkillLevel L = e.getValue().level(f.skillLevelBySlot.get(e.getKey()));
+            if (L == null) {
+                continue;
+            }
+            boolean all = "ALL".equals(e.getValue().kiMode());
+            out.add(SkillSlot.newBuilder().setSlot(e.getKey()).setSkillId(e.getValue().id()).setLevel(L.level()).setCooldownMs(L.cooldownMs())
+                    .setIconId(Math.max(0, e.getValue().iconId())).setName(e.getValue().name()).setCooldownLeftMs((int) Math.min(Integer.MAX_VALUE, engine.cooldownLeftMs(f, e.getKey())))
+                    .setKiAll(all).setKiCost(all || L.kiCostPct() == null ? 0 : (int) Math.round(f.kiMax * L.kiCostPct() / 100.0)).build());
+        }
+        return out;
     }
 
     /** The figures of a fighter: the character's own, or for a fusion the sum of the main character (with its fusion skin) and its partner. */

@@ -383,6 +383,20 @@ public final class PlayerRepository {
                             .setKiCostPct(L.kiCostPct() == null ? 0 : L.kiCostPct()).setRangePx((int) Math.round(reachPx(sk, L)))));
                     b.addSkillCatalog(e);
                 });
+        // the dungeons of the list of the NPC Cui: enabled ones that have at least one real boss (minions do not count)
+        Map<String, Object> tierLevels = Json.obj(d.balanceObj("match_rules"), "tier_level");
+        d.dungeons().values().stream().filter(StaticData.Dungeon::enabled).sorted(java.util.Comparator.comparingInt(StaticData.Dungeon::id)).forEach(dg -> {
+            long real = dg.bosses().stream().filter(x -> !x.role().equals("MINION")).filter(x -> {
+                StaticData.Boss bs = d.bosses().get(x.bossId());
+                return bs != null && bs.enabled();
+            }).count();
+            if (real == 0) {
+                return;
+            }
+            b.addDungeons(com.battleball.proto.DungeonInfo.newBuilder().setDungeonId(dg.id()).setName(dg.name()).setTier(dg.tier())
+                    .setRecommendedLevel((int) Json.num(tierLevels, dg.tier(), 30)).setBossCount((int) Math.min(Math.max(1, dg.bossesPerMatch()), real))
+                    .setTimeLimitS(dg.timeLimitS() == null ? 0 : dg.timeLimitS()));
+        });
         sh.materials().forEach((id, q) -> {
             MaterialAmount.Builder mb = MaterialAmount.newBuilder().setTemplateId(id).setQuantity(q);
             StaticData.Material m = d.materials().get(id);

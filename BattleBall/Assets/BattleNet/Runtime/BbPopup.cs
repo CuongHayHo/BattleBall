@@ -124,11 +124,12 @@ namespace BattleBall.Net
 
             // the dialog of an NPC (a few words and the choices) needs no room for an icon and bonus lines: a short box (owner request 2026-10-10: in the middle of the screen)
             bool compact = centerOnScreen && string.IsNullOrEmpty(linesRich) && g == 0 && !body && iconSprite == null;
-            box.sizeDelta = new Vector2(box.sizeDelta.x, compact ? 116f : _fullHeight);
+            float compactDesc = compact ? Mathf.Max(56f, description.preferredHeight + 6f) : _descH;          // a longer dialog (a result with several lines) makes the box taller
+            box.sizeDelta = new Vector2(box.sizeDelta.x, compact ? 60f + compactDesc : _fullHeight);
             if (_separator != null) _separator.anchoredPosition = new Vector2(_separator.anchoredPosition.x, compact ? -48f : _sepY);
             var descRect = description.rectTransform;
             descRect.anchoredPosition = new Vector2(descRect.anchoredPosition.x, compact ? -54f : _descY);
-            descRect.sizeDelta = new Vector2(descRect.sizeDelta.x, compact ? 56f : _descH);
+            descRect.sizeDelta = new Vector2(descRect.sizeDelta.x, compact ? compactDesc : _descH);
 
             // the command buttons: rows of three at the bottom (the first row on top), centred in the panel; the box stands on them
             int n = specs != null ? Mathf.Min(specs.Count, buttons.Length) : 0;

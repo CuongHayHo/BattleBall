@@ -239,7 +239,7 @@ def main():
     # Cui, the NPC of the dungeons (owner request 2026-10-11: it takes the place of the placeholder gate of the cut end of the map): in front of the two ships, costume 9023 is
     # his Nro look (parts 48, 49, 50)
     cs, cx = cui_at[0]
-    npcs.append({"id": "cui", "name": "Cui", "costume": 9023, "x": round(world_x(cs, cx, 0), 1), "talk": "Ta đưa cháu tới các phó bản. Chức năng này sắp có.", "action": "DungeonGate"})
+    npcs.append({"id": "cui", "name": "Cui", "costume": 9023, "x": round(world_x(cs, cx, 0), 1), "talk": "Cháu muốn đi phó bản nào? Ta đưa cháu tới đó bằng tàu của ta.", "action": "DungeonGate"})
     # the training dummies (owner decision 2026-10-08, docs/architecture/BattleBallServer.md 15.12) on the flat platform right of the elder;
     # the id is the key of balance_config training.dummies, "mob" an Nro mob template drawn instead of the costume (-1 = the costume)
     for npc_id, name, mob, costume, wx in (("moc_nhan", "Mộc nhân", 0, 0, 880.0), ("saibamen", "Saibamen", -1, 647, 1060.0)):

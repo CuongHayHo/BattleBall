@@ -160,6 +160,11 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
                     matches.useSkill(accountId, msg.getUseSkillRequest());
                 }
             }
+            case SWITCH_CONTROL_REQUEST -> {
+                if (state == State.AUTHENTICATED) {
+                    matches.switchControl(accountId, msg.getSwitchControlRequest().getEntityId());
+                }
+            }
             case REVIVE_REQUEST -> {
                 if (state == State.AUTHENTICATED) {
                     matches.revive(accountId);
@@ -182,6 +187,15 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
                         if (previous != null && previous != ctx.channel()) {
                             kick(previous);
                         }
+                        long resumed = account;                      // the client comes back without a login: it needs the player data too (it follows the MatchResumed)
+                        serial.execute(() -> {
+                            try {
+                                Envelope snapshot = actions.snapshotEnvelope(resumed, 0);
+                                ctx.executor().execute(() -> ctx.writeAndFlush(snapshot));
+                            } catch (java.sql.SQLException e) {
+                                LOG.error("cannot load the player data of {}", resumed, e);
+                            }
+                        });
                     }
                 }
             }

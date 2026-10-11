@@ -75,6 +75,8 @@ namespace BattleBall.Net
             public float beamLength = DefaultBeam;              // Nro px (the server tells the real figure when the gong ends: Release)
             public int dir;                                     // the way the server aimed it (1 right, -1 left, 0 = the way the character faces)
             public int activeTicks = 60;                        // ticks the beam hits for (the server: 2 s)
+            public float spinDeg, angle0;                       // a dungeon, against small monsters: the beam turns this many degrees a second from angle0 (degrees, 0 = to the right)
+            public bool angled;                                 // a dungeon, against a boss: the straight beam goes the real way of the target (up and down too), not only left or right
             public float[] spreadX, spreadY, speed;      // the energy balls of Cađíc: where each one lands (Nro px around the target) and how fast it flies
             public readonly List<Image> pool = new List<Image>();
             public int used;
@@ -112,13 +114,16 @@ namespace BattleBall.Net
         }
 
         /// <summary>The gong is over (the server's ULTIMATE_BEAM): the beam goes {@code lengthNro} Nro px and hits for {@code seconds}, through everything in its way.</summary>
-        public void Release(ulong character, uint skillId, float lengthNro, float seconds)
+        public void Release(ulong character, uint skillId, float lengthNro, float seconds, float spinDegPerSecond = 0f, float dirX = 0f, float dirY = 0f)
         {
             foreach (var r in _runs)
                 if (r.character == character && r.skill == skillId)
                 {
                     if (lengthNro > 100f) r.beamLength = lengthNro;
                     if (seconds > 0.2f) r.activeTicks = Mathf.RoundToInt(seconds * 30f);
+                    r.spinDeg = spinDegPerSecond;
+                    r.angled = spinDegPerSecond == 0f && village != null && village.InArena && Mathf.Abs(dirY) > 0.05f;
+                    r.angle0 = spinDegPerSecond != 0f || r.angled ? Mathf.Atan2(dirY, dirX) * Mathf.Rad2Deg : 0f;
                 }
         }
 
@@ -266,11 +271,24 @@ namespace BattleBall.Net
                 r.used = 0;
                 r.beamUsed = 0;
                 Draw(r, tick, feet, r.dir != 0 ? r.dir : facing >= 0 ? 1 : -1);
+                TurnToBeam(r, tick);
                 for (int k = r.used; k < r.pool.Count; k++) if (r.pool[k] != null) r.pool[k].enabled = false;
                 for (int k = r.beamUsed; k < r.beamPool.Count; k++) if (r.beamPool[k] != null) r.beamPool[k].enabled = false;
                 if (r.beamRoot != null) r.beamRoot.gameObject.SetActive(r.beamUsed > 0);
                 if (r.done) { Clear(r); _runs.RemoveAt(i); }
             }
+        }
+
+        /// <summary>
+        /// In a dungeon the character looks the way its beam (or the ball it throws) goes: when the beam of the turning ultimate swings behind its back the character turns round
+        /// (owner request 2026-10-11).
+        /// </summary>
+        void TurnToBeam(Run r, int tick)
+        {
+            if (!village.InArena || r.skill == 26 || tick < r.gong) return;
+            float angle = r.angle0 + r.spinDeg * (tick - r.gong) * TickSeconds;
+            if (r.spinDeg == 0f && !r.angled) return;                   // a straight beam goes the way the character was turned to when the charge began
+            village.FaceParty(r.character, Mathf.Cos(angle * Mathf.Deg2Rad) >= 0f ? 1 : -1);
         }
 
         void Clear(Run r)
@@ -360,7 +378,8 @@ namespace BattleBall.Net
             else if (k - Hold < fade.Length) frame = fade[k - Hold];
             else { r.done = true; return; }
             float s = village.UiScale;
-            float w = Mathf.Min(r.beamLength, Mathf.Max(20f, r.beamLength / 24f) * (k + 1));          // 20 px a tick in Nro; a longer beam is as fast as it must be to be across in 0.8 s
+            bool spin = r.spinDeg != 0f || r.angled;                    // a turning (or tilted) beam is not clipped (a rotated RectMask2D clips to its bounding box): it grows by scaling
+            float w = spin ? r.beamLength : Mathf.Min(r.beamLength, Mathf.Max(20f, r.beamLength / 24f) * (k + 1));          // 20 px a tick in Nro; a longer beam is as fast as it must be to be across in 0.8 s
             float h = Info[11].h / (float)Info[11].n;
             if (r.beamRoot == null)
             {
@@ -369,11 +388,17 @@ namespace BattleBall.Net
                 r.beamRoot = (RectTransform)go.transform;
                 r.beamRoot.anchorMin = r.beamRoot.anchorMax = Vector2.zero;
                 r.beamRoot.pivot = new Vector2(0f, 0.5f);
+                if (spin) go.GetComponent<RectMask2D>().enabled = false;
             }
             r.beamRoot.SetAsLastSibling();
-            r.beamRoot.anchoredPosition = Nro(feet, dir, 10f, Chest);
+            r.beamRoot.anchoredPosition = spin ? Nro(feet, 1, 0f, Chest) : Nro(feet, dir, 10f, Chest);
             r.beamRoot.sizeDelta = new Vector2(w * s, h * s);
-            r.beamRoot.localScale = new Vector3(dir, 1f, 1f);          // the beam is built facing right and turned as a whole
+            if (spin)
+            {
+                r.beamRoot.localScale = new Vector3(r.angled ? Mathf.Clamp01((k + 1) * Mathf.Max(20f, r.beamLength / 24f) / r.beamLength) : Mathf.Clamp01(k * TickSeconds / 0.3f), 1f, 1f);
+                r.beamRoot.localRotation = Quaternion.Euler(0f, 0f, r.angle0 + r.spinDeg * k * TickSeconds);
+            }
+            else r.beamRoot.localScale = new Vector3(dir, 1f, 1f);          // the beam is built facing right and turned as a whole
             float headW = Info[11].w, bodyW = Info[12].w, footW = Info[13].w;
             float middle = r.beamLength - headW - footW;
             int tiles = middle > 0f ? Mathf.CeilToInt(middle / bodyW) : 0;
@@ -416,7 +441,7 @@ namespace BattleBall.Net
         void DrawBalls(Run r, int k, Vector2 feet, int dir)
         {
             const int Balls = 15;
-            float spacing = 2.4f;                                      // ticks between two balls (80 ms)
+            float spacing = r.spinDeg != 0f ? r.activeTicks / (float)Balls : 2.4f;          // ticks between two balls (80 ms; spread over the whole turn against small monsters)
             float s = village.UiScale;
             Vector2 from = Nro(feet, dir, 20f, Chest);
             bool any = false;
@@ -426,6 +451,12 @@ namespace BattleBall.Net
                 if (t < 0f) { any = true; continue; }
                 bool last = i == Balls - 1;
                 Vector2 to = r.hasTarget ? new Vector2(r.targetX + r.spreadX[i] * s, r.targetY + Chest * s + r.spreadY[i] * s) : from + new Vector2(dir * 300f * s, 0f);
+                if (r.spinDeg != 0f)
+                {
+                    // the turning skill throws every ball in the direction the beam would point at that moment, 400 Nro px out
+                    float a = (r.angle0 + r.spinDeg * i * spacing * TickSeconds) * Mathf.Deg2Rad;
+                    to = from + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * 400f * s;
+                }
                 float distance = Vector2.Distance(from, to) / s;           // Nro px
                 float flight = distance / r.speed[i];                      // ticks
                 if (t < 16f) Put(r, 16, Mathf.FloorToInt(t / 4f), false, from, dir);                // the flash where the ball leaves

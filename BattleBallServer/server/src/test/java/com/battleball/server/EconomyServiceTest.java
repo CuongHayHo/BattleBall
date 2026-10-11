@@ -203,6 +203,24 @@ class EconomyServiceTest {
         assertEquals(9, ultimate.getMaxLevel(), "the ultimates go to level 9 (GDD 4)");
     }
 
+    @Test
+    void theSnapshotListsTheDungeonsForTheNpcCui() throws Exception {
+        long[] a = newAccount();
+        var d = data.get();
+        var snap = PlayerRepository.toProto(d, load(a[0]), 10);
+        assertTrue(snap.getDungeonsCount() >= 10, "the enabled dungeons that have bosses are listed");
+        for (var info : snap.getDungeonsList()) {
+            var dg = d.dungeons().get((int) info.getDungeonId());
+            assertTrue(dg != null && dg.enabled(), "only enabled dungeons");
+            assertEquals(dg.name(), info.getName());
+            assertEquals((int) com.battleball.server.data.Json.num(com.battleball.server.data.Json.obj(d.balanceObj("match_rules"), "tier_level"), dg.tier(), 30), info.getRecommendedLevel(), "level of the tier");
+            assertTrue(info.getBossCount() >= 1 && info.getBossCount() <= Math.max(1, dg.bossesPerMatch()));
+            assertTrue(info.getRecommendedLevel() > 0);
+        }
+        var ids = snap.getDungeonsList().stream().map(x -> x.getDungeonId()).toList();
+        assertEquals(ids.stream().sorted().toList(), ids, "in the order of the ids");
+    }
+
     // ---- gear ----
     @Test
     void fragmentsBecomeGearThatChangesStatsAndCanBeSold() throws Exception {

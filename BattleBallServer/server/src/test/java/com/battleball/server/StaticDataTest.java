@@ -67,7 +67,8 @@ class StaticDataTest {
             assertEquals(412, d.equippedDefaultSkinByRace().get("EARTH"));
             assertNotNull(d.supportItems().get(1224).pet());
             assertEquals(30, d.supportItems().get(1224).pet().durationS() * 3);
-            assertEquals(7, d.dungeons().get(3).bosses().size());
+            assertEquals(10, d.dungeons().get(3).bosses().size(), "seven bosses and the three Halloween small monsters of V040");
+            assertTrue(d.dungeons().values().stream().allMatch(dg -> dg.bosses().stream().anyMatch(b -> b.role().equals("MINION"))), "every dungeon has small monsters");
             assertEquals("Phó bản 6", d.dungeons().get(6).name());
             assertFalse(store.refreshIfChanged(), "nothing changed yet");
 

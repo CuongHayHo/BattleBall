@@ -2,6 +2,9 @@ package com.battleball.server;
 
 import com.battleball.proto.DamageEvent;
 import com.battleball.proto.Effect;
+import com.battleball.proto.EffectEvent;
+import com.battleball.proto.EntityKind;
+import com.battleball.proto.EntitySpawn;
 import com.battleball.proto.MatchFrame;
 import com.battleball.proto.EntityState;
 import com.battleball.proto.MatchResult;
@@ -20,13 +23,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The match simulation against the real static data (loaded from a throw-away database). No network. */
@@ -94,6 +102,12 @@ class MatchEngineTest {
 
     private static MatchEngine engine(int dungeonId, int bosses, List<MatchSetup.SquadMember> squad, long seed) {
         MatchSetup s = new MatchSetup(1, d, d.dungeons().get(dungeonId), squad, encounters(dungeonId, bosses), minions(dungeonId), 10_000_000, new Random(seed));
+        return new MatchEngine(s);
+    }
+
+    /** A dungeon without small monsters: the boss comes after 3 seconds (the tests of one boss do not wait for the waves). */
+    private static MatchEngine engineBare(int dungeonId, int bosses, List<MatchSetup.SquadMember> squad, long seed) {
+        MatchSetup s = new MatchSetup(1, d, d.dungeons().get(dungeonId), squad, encounters(dungeonId, bosses), List.of(), 10_000_000, new Random(seed));
         return new MatchEngine(s);
     }
 
@@ -167,7 +181,8 @@ class MatchEngineTest {
 
     @Test
     void bossUsesItsActionsAndTelegraphsTheUltimate() {
-        MatchEngine e = engine(13, 2, List.of(member(1, "EARTH", 100, true, Map.of(0, 7), 0.0001, 40), member(2, "NAMEC", 100, false, Map.of(2, 7), 0.0001, 40)), 11);
+        MatchEngine e = engineBare(13, 2, List.of(member(1, "EARTH", 100, true, Map.of(0, 7), 0.0001, 40), member(2, "NAMEC", 100, false, Map.of(2, 7), 0.0001, 40)), 11);
+        e.forcePlanet("EARTH");                                           // the area stun is a skill of the Earth planet
         boolean sawTelegraph = false;
         boolean sawStun = false;
         int damageEvents = 0;
@@ -220,7 +235,7 @@ class MatchEngineTest {
 
     @Test
     void shieldAbsorbsAndStunOnABossIsShortened() {
-        MatchEngine e = engine(12, 2, List.of(member(1, "EARTH", 100, true, Map.of(0, 7, 6, 7, 19, 7), 1, 5)), 9);
+        MatchEngine e = engineBare(12, 2, List.of(member(1, "EARTH", 100, true, Map.of(0, 7, 6, 7, 19, 7), 1, 5)), 9);
         Entities.Fighter me = e.controlledFighter();
         for (int i = 0; i < 80; i++) {
             e.step();
@@ -253,18 +268,406 @@ class MatchEngineTest {
         assertEquals(Math.min(3000, Math.round(9000 * 0.3)), stunMs, "level 7: 9000 ms x 0.3, capped at 3000");
     }
 
-    @Test
-    void minionsSwarmDuringTheCellFightAndCountTowardTheCap() {
-        // dungeon 6 is the Cell group: bosses plus seven "Xên con" (elite minions)
-        MatchEngine e = engine(6, 1, List.of(member(1, "EARTH", 1, true, Map.of(0, 1), 0.001, 200), member(2, "NAMEC", 1, false, Map.of(2, 1), 0.001, 200)), 21);
-        int sawMinions = 0;
-        for (int i = 0; i < 20 * 60 && !e.finished(); i++) {
+    // ---- the stages of a dungeon (docs/architecture/BattleBallServer.md 15.25) ----
+
+    /** What a whole run of two stages showed: the order of the waves and the boss, how many monsters there were, what the small monsters did. */
+    private static final class StageLog {
+        final List<String> order = new ArrayList<>();
+        final List<Integer> waveWidths = new ArrayList<>();
+        int wavesLength;
+        int minionsBeforeFirstBoss;
+        int maxAliveBeforeFirstBoss;
+        int aliveAtFirstBoss = -1;
+        int summonsOfFirstBoss;
+        int maxSummonedAlive;
+        int maxMinionShots;
+        final Set<Integer> minionDamageSkills = new HashSet<>();
+        final Set<Integer> minionShotSkills = new HashSet<>();
+        final Set<String> bossPlanets = new HashSet<>();
+        boolean bossComingSeen;
+        int deathsOfMinions;
+        MatchOutcome outcome;
+    }
+
+    private static StageLog stageLog;
+
+    private static StageLog stages() {
+        if (stageLog != null) {
+            return stageLog;
+        }
+        StageLog log = new StageLog();
+        MatchEngine e = engine(12, 2, List.of(member(1, "EARTH", 100, true, EARTH_SKILLS, 8, 60), member(2, "NAMEC", 100, false, NAMEC_SKILLS, 8, 60),
+                member(3, "XAYDA", 100, false, XAYDA_SKILLS, 8, 60)), 7);
+        Map<Integer, EntitySpawn> known = new HashMap<>();
+        Set<Integer> aliveMinions = new HashSet<>();
+        Set<Integer> aliveSummoned = new HashSet<>();
+        int bosses = 0;
+        long firstBossTick = 0;
+        for (int i = 0; i < 20 * 1500 && !e.finished(); i++) {
+            play(e);
             e.step();
             MatchFrame f = e.buildFrame();
-            sawMinions += (int) f.getSpawnsList().stream().filter(s -> s.getKind() == com.battleball.proto.EntityKind.MINION).count();
+            for (EffectEvent ev : f.getEffectsList()) {
+                if (ev.getEffect() == Effect.WAVE) {
+                    log.order.add("W" + ev.getSkillId());
+                    if (bosses == 0) {
+                        log.waveWidths.add((int) ev.getWidth());
+                        log.wavesLength = (int) ev.getLength();
+                    }
+                } else if (ev.getEffect() == Effect.BOSS_COMING) {
+                    log.bossComingSeen = true;
+                } else if (ev.getEffect() == Effect.SUMMON && bosses == 1) {
+                    log.summonsOfFirstBoss++;
+                } else if (ev.getEffect() == Effect.DIED && known.containsKey((int) ev.getTargetId()) && known.get((int) ev.getTargetId()).getKind() == EntityKind.MINION) {
+                    log.deathsOfMinions++;
+                }
+            }
+            for (EntitySpawn sp : f.getSpawnsList()) {
+                known.put(sp.getEntityId(), sp);
+                if (sp.getKind() == EntityKind.MINION) {
+                    aliveMinions.add(sp.getEntityId());
+                    if (sp.getSummoned()) {
+                        aliveSummoned.add(sp.getEntityId());
+                    } else if (bosses == 0) {
+                        log.minionsBeforeFirstBoss++;
+                    }
+                } else if (sp.getKind() == EntityKind.BOSS) {
+                    bosses++;
+                    log.order.add("B");
+                    log.bossPlanets.add(sp.getPlanet());
+                    if (bosses == 1) {
+                        log.aliveAtFirstBoss = (int) aliveMinions.stream().filter(id -> !aliveSummoned.contains(id)).count();
+                    }
+                }
+            }
+            for (var st : f.getStatesList()) {
+                if (!st.getAlive()) {
+                    aliveMinions.remove(st.getEntityId());
+                    aliveSummoned.remove(st.getEntityId());
+                }
+            }
+            for (int id : f.getDespawnsList()) {
+                aliveMinions.remove(id);
+                aliveSummoned.remove(id);
+            }
+            if (bosses == 0) {
+                log.maxAliveBeforeFirstBoss = Math.max(log.maxAliveBeforeFirstBoss, aliveMinions.size());
+            }
+            log.maxSummonedAlive = Math.max(log.maxSummonedAlive, aliveSummoned.size());
+            int shots = 0;
+            for (var pr : f.getProjectilesList()) {
+                EntitySpawn owner = known.get(pr.getOwnerId());
+                if (owner != null && owner.getKind() == EntityKind.MINION) {
+                    shots++;
+                    log.minionShotSkills.add(pr.getSkillId());
+                }
+            }
+            log.maxMinionShots = Math.max(log.maxMinionShots, shots);
+            for (DamageEvent dm : f.getDamagesList()) {
+                EntitySpawn src = known.get(dm.getSourceId());
+                if (src != null && src.getKind() == EntityKind.MINION) {
+                    log.minionDamageSkills.add(dm.getSkillId());
+                }
+            }
         }
-        assertTrue(sawMinions > 0, "elite minions must appear while the boss fights");
-        assertTrue(sawMinions <= 20, "never more than minion_cap_per_match (20)");
+        log.outcome = e.outcome();
+        stageLog = log;
+        return log;
+    }
+
+    @Test
+    void everyBossIsPrecededByFiveWavesOfSmallMonsters() {
+        StageLog log = stages();
+        assertEquals(MatchResult.WON, log.outcome.result(), "the strong squad wins the two stages");
+        assertEquals(List.of(12, 15, 18, 20, 25), log.waveWidths, "the sizes of the waves");
+        assertEquals(5, log.wavesLength);
+        int firstBoss = log.order.indexOf("B");
+        assertEquals(List.of("W1", "W2", "W3", "W4", "W5"), log.order.subList(0, firstBoss), "five waves, then the boss");
+        assertEquals(90, log.minionsBeforeFirstBoss, "12 + 15 + 18 + 20 + 25 small monsters in a stage");
+        assertEquals(0, log.aliveAtFirstBoss, "the boss comes only when the last small monster has fallen");
+        assertTrue(log.maxAliveBeforeFirstBoss <= 30, "never more than 30 alive at once, was " + log.maxAliveBeforeFirstBoss);
+        assertTrue(log.maxAliveBeforeFirstBoss >= 12, "the waves really rush in, was " + log.maxAliveBeforeFirstBoss);
+        int secondStage = log.order.subList(firstBoss + 1, log.order.size()).indexOf("W1");
+        assertTrue(secondStage >= 0, "the second boss has its own waves");
+        assertTrue(log.bossComingSeen);
+    }
+
+    @Test
+    void aBossCallsSmallMonstersWhileItFights() {
+        StageLog log = stages();
+        assertTrue(log.summonsOfFirstBoss >= 5, "five when it appears, then three at a time: " + log.summonsOfFirstBoss);
+        assertTrue(log.summonsOfFirstBoss <= 20, "at most 20 for one boss");
+        assertTrue(log.maxSummonedAlive <= 8, "at most 8 called ones alive, was " + log.maxSummonedAlive);
+    }
+
+    @Test
+    void smallMonstersPunchAndShootAChuongOfLevelOne() {
+        StageLog log = stages();
+        assertTrue(log.minionShotSkills.contains(5), "the Halloween monsters are Xayda: Antomic, " + log.minionShotSkills);
+        assertTrue(log.minionDamageSkills.contains(4), "and Galick punches, " + log.minionDamageSkills);
+        assertTrue(log.maxMinionShots <= 6, "never more than 6 shots in the air, was " + log.maxMinionShots);
+        assertTrue(log.maxMinionShots >= 2, "they do shoot together, was " + log.maxMinionShots);
+        assertTrue(log.deathsOfMinions > 50, "the deaths of the small monsters are announced: " + log.deathsOfMinions);
+    }
+
+    @Test
+    void everyBossDrawsAPlanetAndTheMinionsOfTheMatchStayUnderTheCap() {
+        StageLog log = stages();
+        assertTrue(log.bossPlanets.stream().allMatch(pl -> pl.equals("EARTH") || pl.equals("NAMEC") || pl.equals("XAYDA")), "planets: " + log.bossPlanets);
+        long minionKills = log.outcome.kills().stream().filter(k -> !k.realBoss()).count();
+        assertTrue(minionKills <= d.balanceNum("minion_cap_per_match", 20), "a kill for each wave monster, never above the cap: " + minionKills);
+        assertEquals(180, minionKills, "two stages of 90 (the called monsters pay nothing)");
+    }
+
+    /** Waits until the first wave is in and stuns every small monster for a minute, so that the test places them where it wants. */
+    private static List<Entities.Monster> waveMinionsFrozen(MatchEngine e) {
+        for (int i = 0; i < 20 * 12; i++) {
+            e.step();
+            e.buildFrame();
+            if (e.entities().stream().filter(x -> x instanceof Entities.Monster).count() >= 12) {
+                break;
+            }
+        }
+        List<Entities.Monster> out = new ArrayList<>();
+        for (Entities.Entity x : e.entities()) {
+            if (x instanceof Entities.Monster m) {
+                m.stunUntil = e.nowMs() + 600_000;
+                m.x = 1700;
+                m.y = 500;
+                out.add(m);
+            }
+        }
+        assertTrue(out.size() >= 12, "the first wave of 12 is in");
+        return out;
+    }
+
+    private static MatchEngine strongEngine(Map<Integer, Integer> skills, long seed) {
+        return engine(12, 1, List.of(member(1, "EARTH", 100, true, skills, 8, 60), member(2, "NAMEC", 100, false, NAMEC_SKILLS, 8, 60)), seed);
+    }
+
+    @Test
+    void theChuongOfASkillTwoFliesToTheEdgeOfTheScreenThroughEveryone() {
+        MatchEngine e = strongEngine(Map.of(0, 7, 1, 7), 31);
+        Entities.Fighter me = e.controlledFighter();
+        List<Entities.Monster> ms = waveMinionsFrozen(e);
+        me.x = 100;
+        me.y = 260;
+        e.submit(() -> e.reportView(0, 100, 640, 360));
+        double[] xs = {250, 450, 600, 900};                                    // the last one is outside the screen (it ends at 640)
+        for (int i = 0; i < xs.length; i++) {
+            ms.get(i).x = xs[i];
+            ms.get(i).y = 260;
+            ms.get(i).hp = ms.get(i).hpMax = 1_000_000_000L;
+        }
+        me.skillBySlot.put(1, d.skills().get(1));
+        me.skillLevelBySlot.put(1, 7);
+        me.ki = me.kiMax;
+        e.step();
+        assertTrue(e.useSkill(1, 1, ms.get(0).id, 1, 0));
+        Set<Integer> hit = new HashSet<>();
+        for (int i = 0; i < 60; i++) {
+            e.step();
+            for (DamageEvent dm : e.buildFrame().getDamagesList()) {
+                if (dm.getSourceId() == me.id && dm.getSkillId() == 1 && dm.getAmount() > 0) {
+                    hit.add(dm.getTargetId());
+                }
+            }
+        }
+        assertTrue(hit.contains(ms.get(0).id) && hit.contains(ms.get(1).id), "the one in focus and the one behind it");
+        assertTrue(hit.contains(ms.get(2).id), "and the third one, farther than the 300 px of the skill, still on the screen");
+        assertFalse(hit.contains(ms.get(3).id), "but not the one outside the screen");
+    }
+
+    @Test
+    void theAiFightsOnlyWhatIsOnTheScreenAndDoesNotFollowThePlayer() {
+        MatchEngine e = engineBare(12, 1, List.of(member(1, "EARTH", 100, true, EARTH_SKILLS, 8, 60), member(2, "NAMEC", 100, false, NAMEC_SKILLS, 8, 60)), 5);
+        e.submit(() -> e.reportView(0, 0, 640, 360));
+        for (int i = 0; i < 70; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Fighter ai = e.squad().get(1);
+        Entities.Monster boss = (Entities.Monster) e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+        boss.x = 1500;
+        boss.y = 260;
+        boss.homeX = 1500;
+        boss.homeY = 260;
+        boss.stunUntil = e.nowMs() + 600_000;
+        double ax = ai.x;
+        double ay = ai.y;
+        for (int i = 0; i < 60; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        assertEquals(ax, ai.x, 1e-6, "nothing on the screen: the AI stands where it is");
+        assertEquals(ay, ai.y, 1e-6);
+        e.submit(() -> e.reportView(1000, 0, 700, 360));                      // the screen now shows the boss
+        for (int i = 0; i < 40; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        assertTrue(ai.x > ax + 100, "the boss is on the screen: the AI goes for it, x " + ax + " -> " + ai.x);
+    }
+
+    @Test
+    void anAiCharacterDefendsItselfAgainstWhatIsNextToItEvenOffTheScreen() {
+        MatchEngine e = engineBare(12, 1, List.of(member(1, "EARTH", 100, true, EARTH_SKILLS, 8, 60), member(2, "NAMEC", 100, false, NAMEC_SKILLS, 8, 60)), 6);
+        e.submit(() -> e.reportView(1000, 0, 700, 360));                   // the screen is far from the squad
+        for (int i = 0; i < 70; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Fighter ai = e.squad().get(1);
+        Entities.Monster boss = (Entities.Monster) e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+        boss.x = ai.x + 100;
+        boss.y = ai.y;
+        boss.homeX = boss.x;
+        boss.homeY = boss.y;
+        boss.stunUntil = e.nowMs() + 600_000;
+        boss.shieldUntil = 0;
+        boolean struck = false;
+        for (int i = 0; i < 60 && !struck; i++) {
+            e.step();
+            for (DamageEvent dm : e.buildFrame().getDamagesList()) {
+                struck |= dm.getSourceId() == ai.id && dm.getTargetId() == boss.id && dm.getAmount() > 0;
+            }
+        }
+        assertTrue(struck, "an enemy within 220 px is fought even when it is not on the screen");
+    }
+
+    @Test
+    void anUltimateTurnsOnceAroundAgainstSmallMonstersAndStaysStraightAgainstABoss() {
+        // small monsters all around the caster, the one at 0 degrees in focus: every one of them is hit while the beam turns for 4 seconds
+        MatchEngine e = strongEngine(Map.of(0, 7, 24, 9), 33);
+        Entities.Fighter me = e.controlledFighter();
+        List<Entities.Monster> ms = waveMinionsFrozen(e);
+        me.x = 800;
+        me.y = 260;
+        e.submit(() -> e.reportView(480, 100, 640, 360));
+        double[][] at = {{150, 0}, {0, 150}, {-150, 0}, {0, -150}, {250, 120}, {-250, -100}};
+        for (int i = 0; i < at.length; i++) {
+            ms.get(i).x = me.x + at[i][0];
+            ms.get(i).y = me.y + at[i][1];
+            ms.get(i).hp = ms.get(i).hpMax = 1_000_000_000L;
+        }
+        me.skillBySlot.put(8, d.skills().get(24));
+        me.skillLevelBySlot.put(8, 9);
+        me.ki = me.kiMax;
+        e.step();
+        assertTrue(e.useSkill(1, 8, ms.get(0).id, 1, 0));
+        Map<Integer, Integer> hits = new HashMap<>();
+        boolean spinning = false;
+        long beamMs = 0;
+        for (int i = 0; i < 20 * 7; i++) {
+            e.step();
+            MatchFrame f = e.buildFrame();
+            for (EffectEvent ev : f.getEffectsList()) {
+                if (ev.getEffect() == Effect.ULTIMATE_BEAM) {
+                    spinning = ev.getSpinDegPerS() > 0;
+                    beamMs = ev.getDurationMs();
+                    assertEquals(90.0, ev.getSpinDegPerS(), 0.5, "one turn in 4 seconds");
+                }
+            }
+            for (DamageEvent dm : f.getDamagesList()) {
+                if (dm.getSourceId() == me.id && dm.getSkillId() == 24 && dm.getAmount() > 0) {
+                    hits.merge(dm.getTargetId(), 1, Integer::sum);
+                }
+            }
+        }
+        assertTrue(spinning);
+        assertEquals(4000, beamMs);
+        for (int i = 0; i < at.length; i++) {
+            assertTrue(hits.getOrDefault(ms.get(i).id, 0) >= 1, "the small monster " + i + " at " + at[i][0] + "," + at[i][1] + " is hit by the turning beam: " + hits);
+        }
+        // against a boss in focus the beam is straight and lasts the usual 2 seconds
+        MatchEngine b = engineBare(12, 1, List.of(member(1, "EARTH", 100, true, Map.of(0, 7, 24, 9), 8, 60)), 34);
+        for (int i = 0; i < 70; i++) {
+            b.step();
+            b.buildFrame();
+        }
+        Entities.Fighter hero = b.controlledFighter();
+        Entities.Monster boss = (Entities.Monster) b.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+        boss.stunUntil = b.nowMs() + 600_000;
+        hero.skillBySlot.put(8, d.skills().get(24));
+        hero.skillLevelBySlot.put(8, 9);
+        hero.ki = hero.kiMax;
+        hero.x = boss.x - 200;
+        hero.y = boss.y;
+        assertTrue(b.useSkill(1, 8, boss.id, 1, 0));
+        float spin = -1;
+        long straightMs = 0;
+        for (int i = 0; i < 20 * 3; i++) {
+            b.step();
+            for (EffectEvent ev : b.buildFrame().getEffectsList()) {
+                if (ev.getEffect() == Effect.ULTIMATE_BEAM) {
+                    spin = ev.getSpinDegPerS();
+                    straightMs = ev.getDurationMs();
+                }
+            }
+        }
+        assertEquals(0f, spin, "a beam on a boss does not turn");
+        assertEquals(2000, straightMs);
+    }
+
+    @Test
+    void aBossFightsWithTheSkillsOfThePlanetItDrew() {
+        for (String planet : new String[] {"EARTH", "NAMEC", "XAYDA"}) {
+            MatchEngine e = engineBare(13, 1, List.of(member(1, "EARTH", 100, true, Map.of(0, 7), 0.0001, 4000), member(2, "NAMEC", 100, false, Map.of(2, 7), 0.0001, 4000)), 41);
+            e.forcePlanet(planet);
+            Set<Integer> skills = new HashSet<>();
+            Set<Integer> shots = new HashSet<>();
+            for (int i = 0; i < 20 * 150 && !e.finished(); i++) {
+                e.step();
+                MatchFrame f = e.buildFrame();
+                for (DamageEvent dm : f.getDamagesList()) {
+                    if (dm.getSourceId() != e.controlledFighter().id && e.squad().stream().noneMatch(q -> q.id == dm.getSourceId())) {
+                        skills.add(dm.getSkillId());
+                    }
+                }
+                f.getProjectilesList().forEach(pr -> shots.add(pr.getSkillId()));
+            }
+            Set<Integer> allowed = switch (planet) {
+                case "EARTH" -> Set.of(0, 1, 6, 10, 24);
+                case "NAMEC" -> Set.of(2, 3, 11);
+                default -> Set.of(4, 5, 25);
+            };
+            assertFalse(skills.isEmpty(), planet + ": the boss hurt somebody");
+            assertTrue(allowed.containsAll(skills), planet + " uses only its own skills, used " + skills);
+            assertTrue(allowed.containsAll(shots), planet + " shoots only its own chuong, shot " + shots);
+            if (planet.equals("EARTH")) {
+                assertTrue(skills.contains(6) || skills.contains(10), "an Earth boss has the area stun and the bomb: " + skills);
+            } else {
+                assertFalse(skills.contains(6) || skills.contains(10), planet + " has neither the Earth stun nor the bomb: " + skills);
+            }
+        }
+    }
+
+    @Test
+    void aDeathIsAnnouncedWithWhatKilledIt() {
+        MatchEngine e = engineBare(12, 1, List.of(member(1, "EARTH", 100, true, Map.of(0, 7), 8, 60)), 51);
+        for (int i = 0; i < 70; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Fighter me = e.controlledFighter();
+        Entities.Monster boss = (Entities.Monster) e.entities().stream().filter(x -> x instanceof Entities.Monster).findFirst().orElseThrow();
+        boss.shieldUntil = 0;
+        boss.hp = 1;
+        me.x = boss.x - 30;
+        me.y = boss.y;
+        assertTrue(e.useSkill(1, 0, boss.id, 1, 0));
+        EffectEvent died = null;
+        for (int i = 0; i < 6 && died == null; i++) {
+            e.step();
+            for (EffectEvent ev : e.buildFrame().getEffectsList()) {
+                if (ev.getEffect() == Effect.DIED && ev.getTargetId() == boss.id) {
+                    died = ev;
+                }
+            }
+        }
+        assertNotNull(died, "the death of the boss is an event");
+        assertEquals(me.id, died.getSourceId());
+        assertTrue(died.getDirX() > 0.9f, "the blow came from the left, so the body is thrown to the right: " + died.getDirX());
     }
 
     @Test
@@ -303,7 +706,7 @@ class MatchEngineTest {
         StatCalculator.CharacterStats s = StatCalculator.compute(d, 100, List.of(), List.of());
         StatCalculator.CharacterStats noCrit = new StatCalculator.CharacterStats(s.hpMax() * 100, s.kiMax(), s.atk(), s.armor(), 0, s.critDmgPct(), 0, 0.5, 5, Map.of());
         MatchSetup.SquadMember m = new MatchSetup.SquadMember(1, "x", "EARTH", 100, true, false, 0, noCrit, Map.of(0, 7), 0, null);
-        MatchEngine e = engine(12, 1, List.of(m), 13);
+        MatchEngine e = engineBare(12, 1, List.of(m), 13);
         for (int i = 0; i < 80; i++) {
             e.step();
         }
@@ -334,7 +737,7 @@ class MatchEngineTest {
         StatCalculator.CharacterStats s = StatCalculator.compute(d, 100, List.of(), List.of());
         StatCalculator.CharacterStats st = new StatCalculator.CharacterStats(s.hpMax() * 100, s.kiMax(), s.atk(), s.armor(), 0, s.critDmgPct(), 0, 0.5, 5, gen);
         MatchSetup.SquadMember m = new MatchSetup.SquadMember(1, "x", "EARTH", 100, true, false, 0, st, Map.of(0, 7), 0, null);
-        MatchEngine e = engine(12, 1, List.of(m), 13);
+        MatchEngine e = engineBare(12, 1, List.of(m), 13);
         for (int i = 0; i < 80; i++) {
             e.step();
         }
@@ -708,5 +1111,33 @@ class MatchEngineTest {
         List<MatchFrame> frames = steps(e, 3 * 20 + 5, null);
         assertEquals(1, hits(frames, 11, a.id), "the target in focus is hit after the charge of 3 s");
         assertEquals(0, hits(frames, 11, behind.id), "what stands behind it is not (Nro: plTarget or mobTarget)");
+    }
+
+    @Test
+    void takingOverAnotherCharacterResetsNothing() {
+        MatchEngine e = engineBare(12, 1, List.of(member(1, "EARTH", 100, true, EARTH_SKILLS, 8, 60), member(2, "NAMEC", 100, false, NAMEC_SKILLS, 8, 60)), 7);
+        for (int i = 0; i < 10; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Fighter first = e.squad().get(0);
+        Entities.Fighter second = e.squad().get(1);
+        second.hp = second.hpMax / 2;
+        second.shieldUntil = e.nowMs() + 600_000;                       // a buff the switch must not touch
+        long hp = second.hp;
+        double x = second.x;
+        assertSame(first, e.controlledFighter());
+        e.submit(() -> assertSame(second, e.switchControl(second.id)));
+        e.step();
+        assertSame(second, e.controlledFighter());
+        assertTrue(second.controlled);
+        assertFalse(first.controlled, "the old one is AI now");
+        assertTrue(second.hp >= hp && second.hp < second.hpMax, "HP kept (it only regenerates a little)");
+        assertTrue(second.shieldUntil > e.nowMs(), "the buff is kept");
+        assertEquals(x, second.x, 1e-6, "it stays where it stood");
+        e.submit(() -> e.reportPosition(1, 700, 300, 1, 0));            // the player moves the new one: the report goes to it
+        e.step();
+        assertEquals(700, second.x, 1e-6);
+        assertNull(e.switchControl(9999), "no such fighter");
     }
 }

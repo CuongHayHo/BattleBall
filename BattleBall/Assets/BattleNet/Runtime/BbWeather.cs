@@ -210,11 +210,20 @@ namespace BattleBall.Net
             Apply(0f);
         }
 
+        bool _hidden;
+
+        /// <summary>The overlay is not drawn while a dungeon is shown (it has its own sky); the weather goes on in the background.</summary>
+        public void SetVisible(bool visible)
+        {
+            _hidden = !visible;
+            if (_root != null && _hidden) _root.gameObject.SetActive(false);
+        }
+
         void Update()
         {
             if (_root == null) return;
             float dt = Time.unscaledDeltaTime;
-            if (!Enabled)
+            if (!Enabled || _hidden)
             {
                 if (_root.gameObject.activeSelf) _root.gameObject.SetActive(false);
                 return;

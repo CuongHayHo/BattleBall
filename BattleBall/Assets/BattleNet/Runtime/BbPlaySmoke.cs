@@ -408,6 +408,372 @@ namespace BattleBall.Net
             Log("fist with a dummy in focus: automatic skills on " + training.AutoOn + ", dialog open " + menu.popup.IsOpen);
         }
 
+        /// <summary>
+        /// The way into a dungeon with the real server (docs 15.25, stage 1): Cui is in focus, the fist opens his dialog, the list shows the dungeons of the server, Vào starts the
+        /// ship (a screenshot every few tenths of a second), the dungeon screen appears, leaving shows the result, the ship brings the player back and the village fights again.
+        /// </summary>
+        async Task DungeonRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            NpcSpec cui = null;
+            foreach (var n in village.Map.Npcs) if (n.Id == "cui") cui = n;
+            if (cui == null) { Log("FAILED: no Cui in the village map"); return; }
+            Log("Cui: action " + cui.Action + ", costume " + cui.CostumeId + ", x " + cui.X + "; the snapshot lists " + client.Snapshot.Dungeons.Count + " dungeons");
+            village.TeleportMain(cui.X - 90f);
+            await Wait(1.5f);
+            Log("near Cui: focus " + training.FocusKey);
+            training.DebugFist();
+            await Wait(0.8f);
+            Log("fist: dialog open " + menu.popup.IsOpen + ", button " + menu.popup.buttons[0].gameObject.activeSelf + " " + menu.popup.buttonLabels[0].text.Replace("\n", " "));
+            Shoot("dungeon_dialog");
+            menu.popup.buttons[0].onClick.Invoke();
+            await Wait(0.6f);
+            Log("the list is open: " + menu.DebugDungeon());
+            Shoot("dungeon_list");
+            var picker = menu.dungeonPicker;
+            Log("Vào is enabled before a choice: " + picker.enter.interactable);
+            picker.DemoSelect(12);
+            await Wait(0.3f);
+            Log("Vào is enabled after a choice: " + picker.enter.interactable);
+            Shoot("dungeon_list_chosen");
+            // the server refuses a dungeon it does not know: the ship flies in, the player is back in the village with a message and the village fights again
+            Log("refusal: entering a dungeon the server does not know");
+            menu.DebugEnterDungeon(9999, "Phó bản lỗi");
+            await Wait(1.0f);
+            Shoot("dungeon_fail_ship");
+            bool back0 = await WaitFor(() => !menu.InDungeon, 12f);
+            await Wait(0.3f);
+            Log("after the refusal: back " + back0 + ", " + menu.DebugDungeon() + ", training suspended " + training.Suspended + ", toast '" + menu.toastText.text + "'");
+            Shoot("dungeon_fail_back");
+            menu.DebugOpenDungeonList();
+            await Wait(0.4f);
+            picker.DemoSelect(12);
+            await Wait(0.3f);
+            picker.DemoEnter();
+            float t0 = Time.unscaledTime;
+            float[] marks = { 0.4f, 1.0f, 1.8f, 2.4f };
+            string[] names = { "ship_a", "ship_b", "ship_c", "ship_d" };
+            for (int i = 0; i < marks.Length; i++)
+            {
+                float wait = marks[i] - (Time.unscaledTime - t0);
+                if (wait > 0) await Wait(wait);
+                Log("t=" + (Time.unscaledTime - t0).ToString("0.0") + ": " + menu.DebugDungeon());
+                Shoot("dungeon_" + names[i]);
+            }
+            bool arrived = await WaitFor(() => menu.DebugDungeon().Contains("InDungeon") && !menu.DebugDungeon().Contains("(ship)"), 15f);
+            Log("arrived in the dungeon: " + arrived + " after " + (Time.unscaledTime - t0).ToString("0.0") + " s; " + menu.DebugDungeon() + "; training suspended " + training.Suspended);
+            await Wait(1.5f);
+            Shoot("dungeon_screen");
+            await Wait(2.0f);
+            menu.DebugLeaveDungeon();
+            bool result = await WaitFor(() => menu.popup.IsOpen, 10f);
+            Log("result popup: " + result);
+            await Wait(0.5f);
+            Shoot("dungeon_result");
+            menu.popup.buttons[0].onClick.Invoke();
+            await Wait(1.2f);
+            Log("on the way back: " + menu.DebugDungeon());
+            Shoot("dungeon_return_ship");
+            bool home = await WaitFor(() => !menu.InDungeon, 15f);
+            await Wait(1.0f);
+            Log("back in the village: " + home + "; " + menu.DebugDungeon() + "; training suspended " + training.Suspended + "; gold " + client.Snapshot.Gold);
+            Shoot("dungeon_back");
+            await Wait(3.0f);
+            Log("the village fights again: focus " + (training.FocusKey ?? "none"));
+        }
+
+        /// <summary>The parts of the dungeon screen that a real fight rarely shows on cue: the telegraphs of a boss, the fall of the main character and the box that offers a revive.</summary>
+        async Task DungeonUiRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            menu.DemoSelect(0);
+            await Wait(1.0f);
+            menu.DebugOpenDungeonList();
+            await Wait(0.5f);
+            menu.dungeonPicker.DemoSelect(12);
+            menu.dungeonPicker.DemoEnter();
+            bool arena = await WaitFor(() => village.InArena && training.InDungeon && !menu.transport.IsPlaying, 25f);
+            Log("in the arena: " + arena);
+            if (!arena) return;
+            await Wait(1.0f);
+            training.DebugDungeonUi(false);
+            await Wait(2.5f);
+            Shoot("dgui_telegraph");
+            training.DebugDungeonUi(true);
+            await Wait(0.5f);
+            Shoot("dgui_falling");
+            await Wait(2.5f);
+            Shoot("dgui_dead");
+            Log("main fell: " + Party(training, village));
+            menu.DebugLeaveDungeon();
+            await WaitFor(() => menu.popup.IsOpen, 10f);
+            menu.popup.buttons[0].onClick.Invoke();
+            await WaitFor(() => !menu.InDungeon, 15f);
+            Log("back: " + menu.DebugDungeon());
+        }
+
+        /// <summary>
+        /// A fused team in a dungeon (docs 15.26): the earring is refused inside, the tabs of the fusion form and of its two characters are one fighter, the other character can be
+        /// taken over, and after a lost connection the fusion and the tab under control come back.
+        /// </summary>
+        async Task DungeonFusionRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            menu.DemoSelect(0);
+            await Wait(1.0f);
+            menu.DemoFuse(0, 1);                                        // Trái Đất (chủ) + Xayda, Namếc stays an AI
+            await Wait(0.5f);
+            Log("fused in the menu: " + menu.DebugPage() + "; party " + village.PartyCount);
+            menu.DebugOpenDungeonList();
+            await Wait(0.5f);
+            menu.dungeonPicker.DemoSelect(12);
+            menu.dungeonPicker.DemoEnter();
+            bool arena = await WaitFor(() => village.InArena && training.InDungeon && !menu.transport.IsPlaying, 25f);
+            if (!arena) { Log("FAILED: no arena"); return; }
+            await Wait(3.0f);
+            Log("in the dungeon: party " + village.PartyCount + "; " + training.DebugControl() + "; " + menu.DebugPage() + "; " + Party(training, village));
+            menu.DemoEarring();
+            await Wait(0.3f);
+            Log("the earring in the dungeon: " + menu.DebugPage() + "; popup " + menu.popup.IsOpen);
+            menu.DebugSelectRace(2);                                    // the tab of Namếc: the AI is taken over
+            await Wait(1.0f);
+            Log("Namếc taken over: " + menu.DebugPage() + "; " + training.DebugControl());
+            menu.DebugSelectRace(1);                                    // the tab of Xayda, who is merged into the main character: the fused fighter is taken over
+            await Wait(1.0f);
+            Log("the fused fighter again: " + menu.DebugPage() + "; " + training.DebugControl() + "; " + Party(training, village));
+            menu.DebugSelectRace(2);
+            await Wait(1.0f);
+            Log("Namếc again before the cut: " + menu.DebugPage());
+            client.Connection.Close();
+            bool back = await WaitFor(() =>
+            {
+                var m2 = FindObjectOfType<BbMenuUi>();
+                var t2 = FindObjectOfType<BbTraining>();
+                var v2 = FindObjectOfType<BbVillageView>();
+                return m2 != null && t2 != null && v2 != null && t2 != training && v2.InArena && t2.InDungeon && !m2.transport.IsPlaying;
+            }, 60f);
+            Log("back after the drop: " + back);
+            if (!back) return;
+            var menu2 = FindObjectOfType<BbMenuUi>();
+            var training2 = FindObjectOfType<BbTraining>();
+            var village2 = FindObjectOfType<BbVillageView>();
+            _menu = menu2;
+            _training = training2;
+            await Wait(2.0f);
+            Log("after the resume: party " + village2.PartyCount + "; " + training2.DebugControl() + "; " + menu2.DebugPage() + "; " + Party(training2, village2));
+            Shoot("dgfu_after");
+            menu2.DebugLeaveDungeon();
+            await WaitFor(() => menu2.popup.IsOpen, 10f);
+            menu2.popup.buttons[0].onClick.Invoke();
+            await WaitFor(() => !menu2.InDungeon, 15f);
+            Log("back: " + menu2.DebugDungeon());
+        }
+
+        /// <summary>The same in the village: the training session goes on (same match token) when the player takes over another character through the tabs.</summary>
+        async Task TrainSwitchRun(BbMenuUi menu, BbTraining training, BbVillageView village)
+        {
+            menu.DemoSelect(0);
+            NpcSpec dummy = null;
+            foreach (var n in village.Map.Npcs) if (n.Id == "moc_nhan") dummy = n;
+            menu.SetPanelOpen(false, true);
+            village.TeleportMain(dummy.X - 260f);
+            bool on = await WaitFor(() => training.SessionMainCharacter != 0, 15f);
+            string token = training.SessionToken;
+            Log("session: " + on + ", token " + token + ", " + training.DebugControl());
+            menu.DebugSelectRace(1);
+            await Wait(1.5f);
+            Log("after Xayda: session main " + training.SessionMainCharacter + ", same token " + (training.SessionToken == token) + ", " + training.DebugControl());
+            menu.DebugSelectRace(2);
+            await Wait(1.5f);
+            Log("after Namếc: session main " + training.SessionMainCharacter + ", same token " + (training.SessionToken == token) + ", " + training.DebugControl());
+            Shoot("trainsw");
+        }
+
+        /// <summary>The player takes over another character in the dungeon through the tabs of the menu: nothing is reset (the ape form stays an ape), the skill buttons follow (docs 15.26).</summary>
+        async Task DungeonSwitchRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            menu.DemoSelect(0);
+            await Wait(1.0f);
+            menu.DebugOpenDungeonList();
+            await Wait(0.5f);
+            menu.dungeonPicker.DemoSelect(12);
+            menu.dungeonPicker.DemoEnter();
+            bool arena = await WaitFor(() => village.InArena && training.InDungeon && !menu.transport.IsPlaying, 25f);
+            if (!arena) { Log("FAILED: no arena"); return; }
+            await Wait(5.0f);
+            ulong earth = training.MyCharacter, xayda = 0;
+            for (int i = 1; i < village.PartyCount; i++) { ulong id; Vector2 f; int fc; village.PartyMember(i, out id, out f, out fc); if (xayda == 0) xayda = id; }
+            Log("start: " + training.DebugControl() + "; " + Party(training, village));
+            menu.DebugSelectRace(1);                                    // the tab of the characters: Xayda
+            await Wait(0.8f);
+            ulong now1;
+            Vector2 ft;
+            int fcg;
+            village.PartyMember(0, out now1, out ft, out fcg);
+            Log("after the tab of Xayda: main " + now1 + " (xayda tab char " + (BbSession.Snapshot.Characters.Count > 1 ? BbSession.Snapshot.Characters[1].CharacterId : 0) + "); " + training.DebugControl() + "; " + Party(training, village));
+            Shoot("dgsw_a");
+            training.DebugUse(13);                                      // Biến hình: the great ape
+            await Wait(3.0f);
+            ulong ape = now1;
+            Log("the ape: look " + village.LookOf(ape) + "; " + Party(training, village));
+            Shoot("dgsw_ape");
+            menu.DebugSelectRace(2);                                    // Namếc
+            await Wait(1.0f);
+            village.PartyMember(0, out now1, out ft, out fcg);
+            Log("after the tab of Namếc: main " + now1 + "; ape look " + village.LookOf(ape) + "; " + training.DebugControl() + "; " + Party(training, village));
+            Shoot("dgsw_b");
+            await Wait(2.0f);
+            menu.DebugSelectRace(1);
+            await Wait(1.0f);
+            village.PartyMember(0, out now1, out ft, out fcg);
+            Log("back to Xayda: main " + now1 + "; ape look " + village.LookOf(ape) + "; " + training.DebugControl() + "; " + Party(training, village));
+            Shoot("dgsw_c");
+            menu.DebugLeaveDungeon();
+            await WaitFor(() => menu.popup.IsOpen, 10f);
+            menu.popup.buttons[0].onClick.Invoke();
+            await WaitFor(() => !menu.InDungeon, 15f);
+            Log("back: " + menu.DebugDungeon());
+        }
+
+        /// <summary>The connection is lost in the middle of a dungeon: the login screen connects again with the match token and the fight goes on where it stopped (docs 15.25).</summary>
+        async Task DungeonResumeRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            menu.DemoSelect(0);
+            await Wait(1.0f);
+            menu.DebugOpenDungeonList();
+            await Wait(0.5f);
+            menu.dungeonPicker.DemoSelect(12);
+            menu.dungeonPicker.DemoEnter();
+            bool arena = await WaitFor(() => village.InArena && training.InDungeon && !menu.transport.IsPlaying, 25f);
+            if (!arena) { Log("FAILED: no arena"); return; }
+            await Wait(7.0f);
+            Log("before the drop: enemies " + village.EnemyCount + "; " + Party(training, village) + "; token " + (BbSession.DungeonToken != null));
+            Shoot("dgres_before");
+            Log("the connection is cut");
+            client.Connection.Close();
+            bool back = await WaitFor(() =>
+            {
+                var m2 = FindObjectOfType<BbMenuUi>();
+                var t2 = FindObjectOfType<BbTraining>();
+                var v2 = FindObjectOfType<BbVillageView>();
+                return m2 != null && t2 != null && v2 != null && t2 != training && v2.InArena && t2.InDungeon && !m2.transport.IsPlaying;          // new objects: the scene was loaded again
+            }, 60f);
+            Log("back in the dungeon after the drop: " + back + "; scene " + UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
+            if (!back) return;
+            var menu2 = FindObjectOfType<BbMenuUi>();
+            var training2 = FindObjectOfType<BbTraining>();
+            var village2 = FindObjectOfType<BbVillageView>();
+            _menu = menu2;
+            _training = training2;
+            await Wait(2.0f);
+            Log("after the resume: enemies " + village2.EnemyCount + "; " + Party(training2, village2) + "; " + menu2.DebugDungeon());
+            Shoot("dgres_after");
+            await Wait(4.0f);
+            Log("still fighting: enemies " + village2.EnemyCount + "; " + Party(training2, village2));
+            menu2.DebugLeaveDungeon();
+            bool result = await WaitFor(() => menu2.popup.IsOpen, 10f);
+            Log("result popup: " + result);
+            menu2.popup.buttons[0].onClick.Invoke();
+            bool home = await WaitFor(() => !menu2.InDungeon, 15f);
+            Log("back in the village: " + home + "; token " + (BbSession.DungeonToken != null));
+        }
+
+        float _fpsT;
+        int _fpsF;
+
+        string Party(BbTraining training, BbVillageView village)
+        {
+            var sb = new System.Text.StringBuilder();
+            float since = Time.realtimeSinceStartup - _fpsT;
+            int frames = Time.frameCount - _fpsF;
+            _fpsT = Time.realtimeSinceStartup;
+            _fpsF = Time.frameCount;
+            sb.Append("fps ").Append(since > 0.3f ? (frames / since).ToString("0") : "-").Append("  ");
+            for (int i = 0; i < village.PartyCount; i++)
+            {
+                ulong id;
+                Vector2 feet;
+                int facing;
+                village.PartyMember(i, out id, out feet, out facing);
+                BbTraining.Live live;
+                bool ok = training.TryLive(id, out live);
+                sb.Append(i == 0 ? "main " : "ai ").Append(ok ? (live.Hp * 100 / Math.Max(1UL, live.HpMax)) + "%" : "?").Append(village.IsGhost(id) ? " DEAD" : "").Append(" @").Append(Mathf.RoundToInt(feet.x)).Append(",").Append(Mathf.RoundToInt(feet.y)).Append("  ");
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// A dungeon fought for real with the server (docs 15.25): in through Cui, the arena, the waves rushing in, the fist on auto, a chuong and an ultimate, flying about, and out
+        /// again. Screenshots and the state every few seconds go to the log.
+        /// </summary>
+        async Task DungeonFightRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            menu.DemoSelect(0);                                         // the Earth character is the main one: it has the chuong and the ultimate
+            await Wait(1.0f);
+            menu.DebugOpenDungeonList();
+            await Wait(0.5f);
+            menu.dungeonPicker.DemoSelect(12);
+            await Wait(0.2f);
+            menu.dungeonPicker.DemoEnter();
+            bool arena = await WaitFor(() => village.InArena && training.InDungeon && !menu.transport.IsPlaying, 25f);
+            Log("in the arena: " + arena + "; " + menu.DebugDungeon() + "; " + Party(training, village));
+            if (!arena) return;
+            await Wait(0.6f);
+            Shoot("dg_start");
+            await WaitFor(() => training.DebugBanner.StartsWith("Đợt"), 6f);
+            await Wait(0.3f);
+            Log("banner: " + training.DebugBanner);
+            Shoot("dg_wave1");
+            Log("wave 1: enemies " + village.EnemyCount + ", on screen " + village.EnemiesOnScreen + ", focus " + (training.FocusKey ?? "none") + "; " + Party(training, village));
+            training.DebugFist();                                       // the fist: use the skill in focus again and again
+            for (int i = 0; i < 6; i++)
+            {
+                await Wait(2.0f);
+                Log("t+" + (2 * (i + 1)) + "s: enemies " + village.EnemyCount + ", on screen " + village.EnemiesOnScreen + ", focus " + (training.FocusKey ?? "none") + "; " + Party(training, village));
+                if (i == 1) Shoot("dg_fight_a");
+                if (i == 4) Shoot("dg_fight_b");
+            }
+            training.DebugUse(1);                                       // a chuong
+            await Wait(0.45f);
+            Shoot("dg_chuong");
+            await Wait(1.0f);
+            training.DebugUse(24);                                      // the ultimate
+            await Wait(2.4f);
+            Shoot("dg_ultimate_gong");
+            await Wait(1.6f);
+            Shoot("dg_ultimate_beam_a");
+            await Wait(1.4f);
+            Shoot("dg_ultimate_beam_b");
+            await Wait(2.2f);
+            Log("after the ultimate: enemies " + village.EnemyCount + ", on screen " + village.EnemiesOnScreen + "; " + Party(training, village));
+            village.DebugStick = new Vector2(1f, 0.4f);                 // fly about a little: the screen follows
+            await Wait(0.5f);
+            village.DebugStick = Vector2.zero;
+            Shoot("dg_flown");
+            Log("flown: " + Party(training, village) + "; " + village.DebugCamera);
+            bool shotDead = false, shotBoss = false;
+            for (int i = 0; i < 40; i++)
+            {
+                await Wait(3.0f);
+                Log("t+" + (3 * (i + 1)) + "s: enemies " + village.EnemyCount + ", on screen " + village.EnemiesOnScreen + ", focus " + (training.FocusKey ?? "none") + ", banner '" + training.DebugBanner.Replace("\n", " ") + "'; " + Party(training, village));
+                if (i == 2) Shoot("dg_fight_c");
+                if (!shotBoss && training.DebugBanner.StartsWith("BOSS")) { shotBoss = true; Shoot("dg_boss_coming"); await Wait(2.5f); Shoot("dg_boss_fight"); }
+                ulong mainId;
+                Vector2 f0;
+                int fc;
+                village.PartyMember(0, out mainId, out f0, out fc);
+                if (!shotDead && village.IsGhost(mainId)) { shotDead = true; await Wait(1.0f); Shoot("dg_dead"); }
+                if (!menu.DebugDungeon().Contains("InDungeon") || menu.popup.IsOpen) break;
+            }
+            menu.DebugLeaveDungeon();
+            bool result = await WaitFor(() => menu.popup.IsOpen, 10f);
+            Log("result popup: " + result);
+            await Wait(0.5f);
+            Shoot("dg_result");
+            menu.popup.buttons[0].onClick.Invoke();
+            bool home = await WaitFor(() => !menu.InDungeon, 15f);
+            await Wait(1.0f);
+            Log("back in the village: " + home + "; arena " + village.InArena + "; " + menu.DebugDungeon());
+            Shoot("dg_back");
+        }
+
         /// <summary>The panel of Bà Hạt Mít with the real server: the piece and the stone are put in, the button runs the request (docs 15.22).</summary>
         async Task SmithRun(BbMenuUi menu, BbVillageView village, BbClient client)
         {
@@ -963,6 +1329,13 @@ namespace BattleBall.Net
             if (scenario == "gen") { await GenRun(menu, village, client); return; }
             if (scenario == "smith") { await SmithRun(menu, village, client); return; }
             if (scenario == "focus") { await FocusRun(menu, training, village); return; }
+            if (scenario == "dungeon") { await DungeonRun(menu, training, village, client); return; }
+            if (scenario == "dungeonfight") { await DungeonFightRun(menu, training, village, client); return; }
+            if (scenario == "dungeonfusion") { await DungeonFusionRun(menu, training, village, client); return; }
+            if (scenario == "trainswitch") { await TrainSwitchRun(menu, training, village); return; }
+            if (scenario == "dungeonswitch") { await DungeonSwitchRun(menu, training, village, client); return; }
+            if (scenario == "dungeonui") { await DungeonUiRun(menu, training, village, client); return; }
+            if (scenario == "dungeonresume") { await DungeonResumeRun(menu, training, village, client); return; }
             if (scenario == "sights") { await SightsRun(menu, village); return; }
             if (scenario == "gearfuse") { await GearFuseRun(menu, training, village, client); return; }
             if (scenario == "bunma") { await BunmaRun(menu, village); return; }

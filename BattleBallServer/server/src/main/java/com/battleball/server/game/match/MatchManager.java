@@ -123,9 +123,15 @@ public final class MatchManager implements AutoCloseable {
     /** Blocking (database): call it from the DB executor. Replies on the channel. */
     public void start(long accountId, int requestId, StartMatchRequest req, Channel channel) {
         try {
-            if (byAccount.containsKey(accountId)) {
+            Running old = byAccount.get(accountId);
+            if (old != null && !old.training()) {
                 reply(channel, requestId, ActionError.INVALID_ARGUMENT, "a match is already running: resume it");
                 return;
+            }
+            if (old != null) {                            // the training session of the village closes quietly when a real match starts (owner request 2026-10-11: Cui sends the player to a dungeon)
+                old.channel = null;
+                old.engine.submit(old.engine::leave);
+                stop(old);
             }
             MatchStarter.Started s = starter.start(accountId, req, random);
             Running r = new Running(s, channel);
@@ -233,6 +239,9 @@ public final class MatchManager implements AutoCloseable {
         if (r != null) {
             r.engine.submit(() -> {
                 r.engine.reportPosition(m.getSeq(), m.getX(), m.getY(), m.getDirX(), m.getDirY());
+                if (m.getViewW() > 0 && m.getViewH() > 0) {
+                    r.engine.reportView(m.getViewX(), m.getViewY(), m.getViewW(), m.getViewH());
+                }
                 for (com.battleball.proto.AllyPosition a : m.getAlliesList()) {
                     r.engine.reportAlly(a.getEntityId(), a.getX(), a.getY(), a.getDirX(), a.getDirY());
                 }
@@ -244,6 +253,24 @@ public final class MatchManager implements AutoCloseable {
         Running r = byAccount.get(accountId);
         if (r != null) {
             r.engine.submit(() -> r.engine.useSkill(m.getSeq(), m.getSlot(), m.getTargetId(), m.getDirX(), m.getDirY()));
+        }
+    }
+
+    /** The player takes over another fighter of the squad: the answer carries the new fighter's skills (docs 15.26). */
+    public void switchControl(long accountId, int entityId) {
+        Running r = byAccount.get(accountId);
+        if (r != null) {
+            r.engine.submit(() -> {
+                var f = r.engine.switchControl(entityId);
+                var reply = com.battleball.proto.ControlSwitched.newBuilder().setOk(f != null);
+                if (f != null) {
+                    reply.setEntityId(f.id).addAllSkills(MatchStarter.skillSlots(r.engine, f));
+                }
+                Channel ch = r.channel;
+                if (ch != null) {
+                    ch.writeAndFlush(Envelope.newBuilder().setControlSwitched(reply).build());
+                }
+            });
         }
     }
 

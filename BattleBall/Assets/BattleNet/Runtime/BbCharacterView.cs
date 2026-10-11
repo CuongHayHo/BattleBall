@@ -40,6 +40,15 @@ namespace BattleBall.Net
 
         public bool HasCostume { get; private set; }
 
+        /// <summary>Only the head is drawn (a dead character of a dungeon: the head over a ghost body, Nro Char.paint at statusMe 14).</summary>
+        public bool HeadOnly
+        {
+            get { return _headOnly; }
+            set { if (_headOnly == value) return; _headOnly = value; if (HasCostume) Place(); }
+        }
+
+        bool _headOnly;
+
         // ---- the aura of the account (owner decision 2026-10-08): drawn behind and in front of the character as Nro does (Char.paintAura*). Nro draws it only while the
         // character stands. The village sets this to true for the AI characters and leaves it false for the main one, which keeps its aura while it runs (owner request 2026-10-08).
         [Tooltip("true: the aura is drawn only while the character stands (the Nro behaviour); false: in every pose")]
@@ -140,6 +149,7 @@ namespace BattleBall.Net
         {
             EnsureImages();
             if (_aura != null) _aura.Reorder();                      // the slots made just now must lie between the two layers of the aura
+            _fromTop = false;
             HasCostume = false;
             var catalog = NroCostumeCatalog.Instance;
             var entry = catalog != null ? catalog.GetCostume(costumeId) : null;
@@ -178,6 +188,43 @@ namespace BattleBall.Net
             if (_aura != null) { _aura.Reorder(); RefreshAura(); }
             return true;
         }
+
+        /// <summary>
+        /// Shows a figure made of these Nro parts (a boss or a small monster of a dungeon, which is not a costume of the catalog; docs 15.25); false when none of the parts is known.
+        /// The overhead height is taken from the top of the figure, so the name and the HP bar sit just above it.
+        /// </summary>
+        public bool ShowParts(int headPartId, int bodyPartId, int legPartId)
+        {
+            EnsureImages();
+            if (_aura != null) _aura.Reorder();
+            var catalog = NroCostumeCatalog.Instance;
+            _headPart = _bodyPart = _legPart = null;
+            _headCycle = null;
+            HasCostume = false;
+            if (catalog != null)
+            {
+                int zoom = BbAssetCache.Scale;
+                if (headPartId >= 0) _headPart = catalog.GetPart(headPartId, zoom);
+                if (bodyPartId >= 0) _bodyPart = catalog.GetPart(bodyPartId, zoom);
+                if (legPartId >= 0) _legPart = catalog.GetPart(legPartId, zoom);
+            }
+            _headFrame = 0;
+            _headClock = 0f;
+            _breath = false;
+            _timer = 0f;
+            HasCostume = _headPart != null || _bodyPart != null || _legPart != null;
+            _fromTop = true;
+            Place();
+            OverheadHeight = Mathf.Max(60f, FigureHeight);
+            return HasCostume;
+        }
+
+        bool _fromTop;                                // the overhead height follows the figure (ShowParts) instead of the Nro HP bar offset of a costume
+
+        /// <summary>The top of the figure above the feet and its widest part in the pose now, in UI pixels (a monster draws its HP bar this wide).</summary>
+        public float FigureHeight { get; private set; }
+        public float FigureWidth { get; private set; }
+        float _topNro, _widest;
 
         void Update()
         {
@@ -236,9 +283,14 @@ namespace BattleBall.Net
             }
             // flying has one pose in the Nro table, so the parts swing like the idle breathing does (head and body one Nro pixel up on every other beat)
             int bob = _state == PoseState.Fly && _breath ? 1 : 0;
+            _topNro = 0f;
+            _widest = 0f;
             PlaceSlot(_head, _headPart, NroSlot.Head, cf, bob);
-            PlaceSlot(_leg, _legPart, NroSlot.Leg, cf, 0);
-            PlaceSlot(_body, _bodyPart, NroSlot.Body, cf, bob);
+            PlaceSlot(_leg, _headOnly ? null : _legPart, NroSlot.Leg, cf, 0);
+            PlaceSlot(_body, _headOnly ? null : _bodyPart, NroSlot.Body, cf, bob);
+            FigureHeight = _topNro * uiScale;
+            FigureWidth = _widest;
+            if (_fromTop) OverheadHeight = Mathf.Max(60f, FigureHeight);
         }
 
         void PlaceSlot(Image img, NroPartData part, NroSlot slot, int cf, int extraDy)
@@ -257,6 +309,8 @@ namespace BattleBall.Net
             float zoom = f.sprite.pixelsPerUnit / 100f;
             var r = img.rectTransform;
             r.sizeDelta = f.sprite.rect.size * (uiScale / zoom);
+            _topNro = Mathf.Max(_topNro, py);
+            _widest = Mathf.Max(_widest, r.sizeDelta.x);
             // smaller than the texture (x3 or x4 drawn at a lower scale): filter smoothly, point filtering would shimmer; at 1:1 or larger keep the crisp Nro look
             f.sprite.texture.filterMode = uiScale / zoom < 1f ? FilterMode.Bilinear : FilterMode.Point;
             r.anchoredPosition = new Vector2(px * uiScale, py * uiScale);

@@ -221,6 +221,7 @@ namespace BattleBall.EditorTools
             village.font = BuiltinFont;
             village.whiteSprite = Sprite("white");
             village.dotSprite = Sprite("dot");
+            village.flareSprite = Sprite("nro_flare");
             ui.village = village;
 
             var joyBase = Image("Joystick", root, "joy_base", false);
@@ -579,6 +580,10 @@ namespace BattleBall.EditorTools
             cc.anchoredPosition = new Vector2(0f, 30f);
             chooser.gameObject.SetActive(false);
 
+            // ---- the way into a dungeon (docs 15.25): the list of the NPC Cui, then the ship screen on top of everything
+            ui.dungeonPicker = BuildDungeonPicker(root);
+            ui.transport = BuildTransport(root);
+
             Directory.CreateDirectory("Assets/Scenes");
             EditorSceneManager.SaveScene(scene, MenuScenePath);
             PutFirstInBuild();
@@ -587,6 +592,86 @@ namespace BattleBall.EditorTools
 
         static readonly Color Dark = new Color(0.30f, 0.14f, 0.05f);
         static readonly Color Brown = new Color(0.45f, 0.30f, 0.15f);
+
+        /// <summary>The list of dungeons of the NPC Cui: a box in the middle of the screen with six rows, a pager, the details of the chosen dungeon and Vào / Đóng.</summary>
+        static BbDungeonPicker BuildDungeonPicker(Transform canvasRoot)
+        {
+            const float BoxW = 640f, BoxH = 640f;
+            var dimRect = Stretched("DungeonPicker", canvasRoot);
+            var dim = dimRect.gameObject.AddComponent<Image>();
+            dim.sprite = Sprite("white");
+            dim.color = new Color(0f, 0f, 0f, 0.55f);
+            var picker = dimRect.gameObject.AddComponent<BbDungeonPicker>();
+            picker.root = dimRect.gameObject;
+            var box = Image("Box", dimRect, "nro_popup", true);
+            Center(box.rectTransform, Vector2.zero, new Vector2(BoxW, BoxH));
+            box.gameObject.AddComponent<Button>().transition = Selectable.Transition.None;      // a tap on the box does not fall through
+            picker.title = PlacedText("Title", box.transform, "", 28, Dark, 16, 12, BoxW - 32, 40, TextAnchor.MiddleCenter);
+            picker.teamText = PlacedText("Team", box.transform, "", 18, Brown, 16, 54, BoxW - 32, 30, TextAnchor.MiddleCenter);
+            picker.rowIdle = Sprite("nro_cell_bag");
+            picker.rowSelected = Sprite("nro_cell_sel");
+            const int count = 6;
+            picker.rows = new Button[count];
+            picker.rowImages = new UnityEngine.UI.Image[count];
+            picker.rowNames = new Text[count];
+            picker.rowInfos = new Text[count];
+            for (int i = 0; i < count; i++)
+            {
+                var row = Image("Row" + i, box.transform, "nro_cell_bag", true);
+                TopLeft(row.rectTransform, 20, 92 + i * 54, BoxW - 40, 50);
+                var button = row.gameObject.AddComponent<Button>();
+                button.targetGraphic = row;
+                picker.rows[i] = button;
+                picker.rowImages[i] = row;
+                picker.rowNames[i] = PlacedText("Name", row.transform, "", 22, Color.white, 14, 0, 380, 50, TextAnchor.MiddleLeft);
+                AddOutline(picker.rowNames[i].gameObject, 1f);
+                picker.rowInfos[i] = PlacedText("Info", row.transform, "", 19, StatYellow, 394, 0, BoxW - 40 - 394 - 12, 50, TextAnchor.MiddleRight);
+                AddOutline(picker.rowInfos[i].gameObject, 1f);
+            }
+            picker.prev = NroButton("Prev", box.transform, 20, 420, 90, 40, "<", 22, false);
+            picker.next = NroButton("Next", box.transform, BoxW - 110, 420, 90, 40, ">", 22, false);
+            picker.pageText = PlacedText("Page", box.transform, "", 20, Dark, BoxW * 0.5f - 60, 420, 120, 40, TextAnchor.MiddleCenter);
+            picker.detailText = PlacedText("Detail", box.transform, "", 19, Dark, 24, 466, BoxW - 48, 84, TextAnchor.UpperCenter, false);
+            picker.detailText.resizeTextForBestFit = true;
+            picker.detailText.resizeTextMinSize = 14;
+            picker.detailText.resizeTextMaxSize = 19;
+            picker.detailText.verticalOverflow = VerticalWrapMode.Truncate;
+            picker.enter = NroButton("Enter", box.transform, BoxW * 0.5f - 230, BoxH - 84, 210, 64, "Vào", 26, true);
+            picker.close = NroButton("Close", box.transform, BoxW * 0.5f + 20, BoxH - 84, 210, 64, "Đóng", 26, false);
+            dimRect.gameObject.SetActive(false);
+            return picker;
+        }
+
+        /// <summary>The ship screen between the village and a dungeon (Nro TransportScr, type 1): the background of the login screen, streaks of light and the ship.</summary>
+        static BbTransport BuildTransport(Transform canvasRoot)
+        {
+            var rootRect = Stretched("Transport", canvasRoot);
+            var blocker = rootRect.gameObject.AddComponent<Image>();           // black, and it swallows every touch while the ship flies
+            blocker.sprite = Sprite("white");
+            blocker.color = Color.black;
+            var group = rootRect.gameObject.AddComponent<CanvasGroup>();
+            var t = rootRect.gameObject.AddComponent<BbTransport>();
+            t.root = rootRect.gameObject;
+            t.area = rootRect;
+            t.fade = group;
+            var bg = Stretched("Background", rootRect);
+            var space = bg.gameObject.AddComponent<BbSpaceBackground>();
+            space.background = Sprite("space_bg", "jpg");
+            space.planetA = Sprite("planet_a");
+            space.planetB = Sprite("planet_b");
+            space.Build();
+            t.space = space;
+            var ship = Image("Ship", rootRect, "nro_taungam", false);
+            ship.preserveAspect = true;
+            ship.raycastTarget = false;
+            t.ship = ship;
+            t.streakSprite = Sprite("white");
+            t.caption = Label("Caption", rootRect, "", 30, Color.white, Vector2.zero, new Vector2(1000f, 46f), true);
+            t.caption.rectTransform.anchorMin = t.caption.rectTransform.anchorMax = Vector2.zero;
+            AddOutline(t.caption.gameObject, 1f);
+            rootRect.gameObject.SetActive(false);
+            return t;
+        }
 
         // ---- the Nro panel (Panel.cs, Paint.paintFrameSimple, PopUp.paintPopUp): sizes in Nro pixels times G, colours as Nro draws them
         const float PW = 320f;                                             // panel width: Nro's 176 px at 25% of the 1280 reference width
@@ -1499,6 +1584,8 @@ namespace BattleBall.EditorTools
             Border("nro_boss_frame", new Vector4(24, 24, 24, 24), 256);
             Border("nro_skill", Vector4.zero, 128);
             Border("nro_skill_on", Vector4.zero, 128);
+            Border("nro_taungam", Vector4.zero, 1024);
+            Border("nro_flare", Vector4.zero, 256);
             AssetDatabase.Refresh();
         }
 

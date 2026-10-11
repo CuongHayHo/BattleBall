@@ -144,6 +144,7 @@ namespace BattleBall.Net
             if (auras != null) auras.Tapped = OnAuraTapped;
             if (shop != null) { shop.menu = this; shop.Closed = OnShopClosed; shop.Warm(); }
             if (smith != null) { smith.menu = this; smith.Closed = OnShopClosed; }
+            WireDungeon();
             WirePopupSide();
             _panelOpen = PlayerPrefs.GetInt(KeyPanel, 1) != 0;
             SetPanelOpen(_panelOpen, true);
@@ -180,10 +181,12 @@ namespace BattleBall.Net
             }
             BbSession.Client.SnapshotChanged += OnSnapshot;
             SetSnapshot(BbSession.Snapshot);
+            if (BbSession.ResumedMatch != null) ResumeDungeonAfterDrop();
         }
 
         void OnDestroy()
         {
+            UnsubscribeDungeon();
             if (BbSession.Client != null) BbSession.Client.SnapshotChanged -= OnSnapshot;
         }
 
@@ -406,6 +409,13 @@ namespace BattleBall.Net
             if (!_pages[page].fusion && _pages[page].main >= 0) PlayerPrefs.SetInt(KeyPage, _pages[page].main);
             _page = page;
             ShowPage(page, true);
+            if (village != null && village.InArena && training != null && _pages[page].main >= 0)
+            {
+                // the player takes over that character in the dungeon, nothing is reset; with a fusion the tab of the fusion form and the tabs of its two characters are one fighter
+                var chosen = CharacterOf(Races[_pages[page].main]);
+                if (_fusionMain >= 0 && !_pages[page].fusion && _pages[page].main == _fusionSub) chosen = CharacterOf(Races[_fusionMain]);
+                if (chosen != null) training.SwitchDungeonMain(chosen.CharacterId);
+            }
         }
 
         void Go(int delta)
@@ -623,6 +633,7 @@ namespace BattleBall.Net
         /// </summary>
         void RefreshVillage(Page pg)
         {
+            if (village != null && village.InArena) return;                  // the arena of a dungeon has its own party
             bool fused = _fusionMain >= 0;
             int mainRace = fused ? _fusionMain : pg.main;
             var main = CharacterOf(Races[mainRace]);
@@ -668,15 +679,15 @@ namespace BattleBall.Net
             if (npc.Action == NpcAction.Shop && shop != null) { OpenShop(npc); return; }
             if (npc.Action == NpcAction.Smith && smith != null) { OpenSmithMenu(npc); return; }
             var specs = new List<BbPopup.ButtonSpec>();
-            if (npc.Action == NpcAction.DungeonGate) specs.Add(new BbPopup.ButtonSpec("Chọn phó bản", false, false));
+            if (npc.Action == NpcAction.DungeonGate && dungeonPicker != null) specs.Add(new BbPopup.ButtonSpec("Chọn\nphó bản", true, true));
             popup.centerOnScreen = true;
-            popup.Show(null, npc.Name, "", npc.Talk, null, null, specs, null);
+            popup.Show(null, npc.Name, "", npc.Talk, null, null, specs, specs.Count == 0 ? (Action<int>)null : i => { popup.Hide(); OpenDungeonList(npc); });
         }
 
         /// <summary>True while the panel, a popup (an NPC talking, an item) or the function list is open: the combat buttons stay hidden then (owner request 2026-10-09).</summary>
         public bool BlocksCombatUi
         {
-            get { return _panelOpen || popup.IsOpen || chooserRoot.activeSelf || (functions != null && functions.IsOpen) || (shop != null && shop.IsOpen) || (smith != null && smith.IsOpen); }
+            get { return _panelOpen || popup.IsOpen || chooserRoot.activeSelf || (functions != null && functions.IsOpen) || (shop != null && shop.IsOpen) || (smith != null && smith.IsOpen) || DungeonBlocksCombatUi || (dungeonPicker != null && dungeonPicker.IsOpen); }
         }
 
         /// <summary>Folds the panel away to the left (the village fills the screen, the X of the panel) or brings it back (the triangle); the choice is remembered.</summary>
@@ -685,7 +696,7 @@ namespace BattleBall.Net
         public void SetPanelOpen(bool open, bool immediate, bool remember = true)
         {
             _panelOpen = open;
-            panelToggle.gameObject.SetActive(!open);
+            panelToggle.gameObject.SetActive(!open && !DungeonBlocksCombatUi);
             if (remember && !_demo && !_dockRight) PlayerPrefs.SetInt(KeyPanel, open ? 1 : 0);        // beside a shop the panel is open on purpose: keep what the player chose
             if (immediate) { _panelX = open ? 0f : -PanelWidth; ApplyPanelX(); }
         }
@@ -693,7 +704,7 @@ namespace BattleBall.Net
         void ApplyPanelX()
         {
             panelRect.anchoredPosition = new Vector2(_dockRight ? -_panelX : _panelX, 0f);
-            panelToggle.gameObject.SetActive(!_panelOpen);                        // Nro shows its menu triangle only while the panel is closed
+            panelToggle.gameObject.SetActive(!_panelOpen && !DungeonBlocksCombatUi);          // Nro shows its menu triangle only while the panel is closed (and not while the ship flies)
             ApplyInsets();
         }
 
@@ -1309,6 +1320,7 @@ namespace BattleBall.Net
         {
             var potara = _snapshot != null ? _snapshot.Potara : null;
             if (potara == null || !potara.Owned) { Toast("Chưa có Bông tai Potara"); return; }
+            if (InDungeon) { Toast("Không thể hợp thể hay tách khi đang ở phó bản"); return; }          // the squad of a match is fixed when it starts (docs 15.26)
             var resolver = NroSpriteResolver.Instance;
             Sprite icon = resolver != null && potara.IconId > 0 ? resolver.ResolveSprite((int)potara.IconId, BbAssetCache.Scale) : null;
             var specs = new List<BbPopup.ButtonSpec>();

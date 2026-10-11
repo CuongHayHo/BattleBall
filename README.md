@@ -23,7 +23,7 @@ Game hack & slash chơi đơn cho Android: đội 3 nhân vật (1 người chơ
 - Hợp thể bằng Bông tai Potara; tài nguyên game gửi qua chính kết nối game (không dùng HTTP).
 - Trận đấu có thẩm quyền ở server, tick 20 Hz, có phần thưởng, nhật ký trận và cho phép vào lại khi mất kết nối.
 - Phiên huấn luyện với mộc nhân trong làng.
-- Có 87 kiểm thử tự động. Các kiểm thử cần DB chỉ chạy khi đặt `BB_TEST_DB_URL`.
+- Có 98 kiểm thử tự động. Các kiểm thử cần DB chỉ chạy khi đặt `BB_TEST_DB_URL`.
 
 **Cơ sở dữ liệu** (`BattleBallServer/db/migrations/`): các migration đánh số `V001` đến `V039`, tự áp dụng khi server khởi động. Đã kiểm chứng trên MariaDB 10.4; chưa thử trên 10.6 trở lên.
 
@@ -31,13 +31,13 @@ Game hack & slash chơi đơn cho Android: đội 3 nhân vật (1 người chơ
 
 **Client** (`BattleBall/Assets/`):
 - `BattleNet`: tầng mạng (Protobuf, TLS, đăng ký/đăng nhập, tải tài nguyên qua kết nối game) và giao diện menu: làng tân thủ, bảng nhân vật và túi (xem skin hoặc xem đồ và đá), tab Aura, tab Kỹ năng, tab Chức năng (thư, thông báo, tài khoản).
-- NPC trong làng: Urôn bán cải trang, Bunma bán đồ và đá, Bà Hạt Mít nâng cấp đồ, đổi GEN và mở ô GEN (bỏ đồ và đá vào bảng của bà), Cui (cổng phó bản, chức năng chưa có), hai mục tiêu huấn luyện. Focus tự chọn mục tiêu hoặc NPC gần nhất; nút nắm đấm nói chuyện với NPC đang focus.
+- NPC trong làng: Urôn bán cải trang, Bunma bán đồ và đá, Bà Hạt Mít nâng cấp đồ, đổi GEN và mở ô GEN (bỏ đồ và đá vào bảng của bà), Cui (chọn phó bản; màn tàu bay vào và ra), hai mục tiêu huấn luyện. Focus tự chọn mục tiêu hoặc NPC gần nhất; nút nắm đấm nói chuyện với NPC đang focus.
 - Huấn luyện với mộc nhân: kỹ năng có hình, số sát thương, thanh máu mục tiêu, khung HP/KI của đội, tự động dùng kỹ năng.
 - `NroMannequin`: công cụ xem trước bộ trang phục. Hình ảnh trang phục tải từ server qua kết nối game, không nằm trong client.
 
 ## Chưa có
 
-- Đường vào trận đấu từ giao diện, và lối chơi trong trận (boss, phó bản).
+- Cân bằng phó bản sau khi chơi thử, bản đồ riêng cho từng phó bản, kiểm trên điện thoại thật.
 - Đá chỉ số, đá pha lê và các chức năng khác của Bà Hạt Mít (ép sao, pha lê hóa) chưa có luật; GEN chưa có nguồn rơi; mảnh đồ Hủy Diệt và Thiên Sứ chưa có nơi rơi.
 - Chưa thử trên điện thoại cho các phần mới (đồ, GEN, NPC).
 - Máy chủ chạy thật: hiện chỉ chạy cục bộ để phát triển.
