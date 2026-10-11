@@ -625,6 +625,7 @@ class ProtocolIntegrationTest {
         createAccount(user, "password123");
         try (TestClient c = connected()) {
             long account = scalar("SELECT account_id FROM account WHERE username = ?", user);
+            update("DELETE FROM mail WHERE account_id = ?", account);                       // the welcome mail (V047) of the new account is not what this test counts
             update("INSERT INTO mail (account_id, title, body, sent_by) VALUES (?, 'Quà tặng', 'Chúc vui', 'test')", account);
             long mailId = scalar("SELECT MAX(mail_id) FROM mail WHERE account_id = ?", account);
             update("INSERT INTO mail_attachment (mail_id, line_no, kind, ref_id, quantity) VALUES (?, 1, 'GEMS', 0, 50)", mailId);

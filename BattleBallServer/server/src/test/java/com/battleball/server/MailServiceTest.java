@@ -39,6 +39,7 @@ class MailServiceTest {
         data = new StaticDataStore(new StaticDataLoader(db));
         accounts = new AccountRepository(db);
         mail = new MailService(db, data);
+        update("UPDATE welcome_mail_setting SET enabled = 0");           // the other tests count the mails of a new account; the welcome mail has its own test
     }
 
     @AfterAll
@@ -174,6 +175,31 @@ class MailServiceTest {
         assertEquals(1, mail.list(a).getMailsCount());
         assertEquals(gift2, mail.list(a).getMails(0).getMailId());
         assertError(ActionError.NOT_FOUND, mail.delete(a, plain));
+    }
+
+    @Test
+    void aNewAccountGetsTheWelcomeMailOnlyWhileTheSwitchIsOn() throws Exception {
+        update("UPDATE welcome_mail_setting SET enabled = 1");
+        long a;
+        try {
+            a = newAccount();
+        } finally {
+            update("UPDATE welcome_mail_setting SET enabled = 0");
+        }
+        assertEquals(1, mail.list(a).getMailsCount());
+        MailInfo info = mail.list(a).getMails(0);
+        assertEquals("Quà tân thủ", info.getTitle());
+        assertEquals(7, info.getAttachmentsCount());
+        assertTrue(mail.claim(a, info.getMailId()).getOk());
+        var ch = character(a);
+        assertEquals(1_000_000, ch.gold());
+        assertEquals(10_000, ch.gems());
+        for (int stone = 201; stone <= 205; stone++) {
+            assertEquals(200, ch.materials().get(stone), "stone " + stone);
+        }
+
+        long b = newAccount();                                                          // switched off: no mail
+        assertEquals(0, mail.list(b).getMailsCount());
     }
 
     @Test

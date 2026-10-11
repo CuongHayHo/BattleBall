@@ -431,7 +431,7 @@ function layout_start(string $title, string $active = ''): void
     $menu = [
         'home' => 'Tổng quan', 'stats' => 'Chỉ số', 'skins' => 'Skin', 'kinds' => 'Loại skin', 'rarity' => 'Độ hiếm', 'groups' => 'Giá theo nhóm',
         'supports' => 'Đồ hỗ trợ', 'bookpool' => 'Sách tuyệt kỹ', 'dungeons' => 'Phó bản', 'monsters' => 'Quái phó bản', 'monsterstats' => 'Chỉ số quái', 'bossmult' => 'Hệ số boss', 'droprules' => 'Bảng rơi đồ', 'gemrewards' => 'Nguồn đá quý', 'dropmult' => 'Hệ số rơi phó bản', 'dungeonbosses' => 'Boss phó bản', 'bossgroups' => 'Nhóm boss', 'recipes' => 'Công thức ghép', 'recipeinputs' => 'Nguyên liệu ghép', 'achievements' => 'Thành tích', 'defaultskins' => 'Avatar mặc định',
-        'mail' => 'Hòm thư', 'notices' => 'Thông báo', 'balance' => 'Cân bằng', 'boss_group_picker.html' => 'Nhóm boss phó bản', 'drop_picker.html' => 'Chọn boss rơi', 'runs' => 'Các trận', 'anomalies' => 'Bất thường', 'audit' => 'Nhật ký',
+        'mail' => 'Hòm thư', 'welcome' => 'Quà tân thủ', 'notices' => 'Thông báo', 'balance' => 'Cân bằng', 'boss_group_picker.html' => 'Nhóm boss phó bản', 'drop_picker.html' => 'Chọn boss rơi', 'runs' => 'Các trận', 'anomalies' => 'Bất thường', 'audit' => 'Nhật ký',
     ];
     echo '<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         . '<title>' . h($title) . ' · BattleBall Admin</title><link rel="stylesheet" href="style.css"></head><body>';

@@ -225,3 +225,71 @@ function page_notices(PDO $pdo): void
     echo '</tbody></table></div>';
     layout_end();
 }
+
+const WELCOME_MAX_LINES = 10;
+
+/** The welcome mail every new account gets (V047): the switch, the text and the gift lines. Turning it off only stops FUTURE accounts; mails already sent stay. */
+function page_welcome(PDO $pdo): void
+{
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $enabled = isset($_POST['enabled']) ? 1 : 0;
+        $title = trim((string)($_POST['title'] ?? ''));
+        $body = trim((string)($_POST['body'] ?? ''));
+        $lines = [];
+        $ok = in_tx($pdo, function () use ($pdo, $enabled, $title, $body, &$lines) {
+            if ($title === '' || mb_strlen($title) > 80) {
+                throw new RuntimeException('Tiêu đề không được trống và tối đa 80 ký tự.');
+            }
+            if (mb_strlen($body) > 1000) {
+                throw new RuntimeException('Nội dung tối đa 1000 ký tự.');
+            }
+            for ($i = 0; $i < WELCOME_MAX_LINES; $i++) {
+                $kind = (string)($_POST['kind'][$i] ?? '');
+                if ($kind === '') {
+                    continue;
+                }
+                $lines[] = mail_check_line($pdo, $kind, (string)($_POST['ref'][$i] ?? ''), (string)($_POST['qty'][$i] ?? ''));
+            }
+            $before = $pdo->query('SELECT enabled, title FROM welcome_mail_setting WHERE setting_id = 1')->fetch(PDO::FETCH_ASSOC) ?: null;
+            $pdo->prepare('UPDATE welcome_mail_setting SET enabled = ?, title = ?, body = ?, updated_by = ? WHERE setting_id = 1')->execute([$enabled, $title, $body, admin_name()]);
+            $pdo->exec('DELETE FROM welcome_gift');
+            $ins = $pdo->prepare('INSERT INTO welcome_gift (line_no, kind, ref_id, quantity) VALUES (?,?,?,?)');
+            foreach ($lines as $n => [$kind, $ref, $qty]) {
+                $ins->execute([$n + 1, $kind, $ref, $qty]);
+            }
+            audit($pdo, 'welcome_mail', '1', 'UPDATE', $before, ['enabled' => $enabled, 'title' => $title, 'gifts' => $lines]);
+        });
+        if ($ok) {
+            flash($enabled ? 'Đã lưu. Tài khoản mới sẽ nhận thư quà tân thủ.' : 'Đã lưu. Quà tân thủ đang TẮT: tài khoản mới không nhận thư.');
+        }
+        redirect('?p=welcome');
+    }
+
+    $set = $pdo->query('SELECT enabled, title, body, updated_at, updated_by FROM welcome_mail_setting WHERE setting_id = 1')->fetch(PDO::FETCH_ASSOC);
+    if (!$set) {
+        $set = ['enabled' => 0, 'title' => 'Quà tân thủ', 'body' => '', 'updated_at' => '', 'updated_by' => ''];
+    }
+    $gifts = $pdo->query('SELECT kind, ref_id, quantity FROM welcome_gift ORDER BY line_no')->fetchAll(PDO::FETCH_ASSOC);
+    $sentTotal = (int)$pdo->query("SELECT COUNT(*) FROM mail WHERE sent_by = 'system'")->fetchColumn();
+
+    layout_start('Quà tân thủ', 'welcome');
+    echo '<h1>Quà tân thủ: thư gửi tự động cho tài khoản mới</h1><p class="muted">Mỗi tài khoản mới (đăng ký trong game hoặc trên web) nhận ngay một thư này trong Hòm thư. '
+        . 'Tắt công tắc thì tài khoản tạo từ lúc đó không nhận nữa; thư đã gửi trước đó vẫn nằm trong hòm thư của người chơi. Đã gửi tổng cộng: ' . $sentTotal . ' thư.</p>';
+    echo '<form method="post" action="?p=welcome" class="card">' . csrf_field()
+        . '<label><input type="checkbox" name="enabled" value="1"' . ($set['enabled'] ? ' checked' : '') . '> <strong>BẬT</strong> gửi quà tân thủ cho tài khoản mới</label>'
+        . '<label>Tiêu đề<input type="text" name="title" maxlength="80" value="' . h($set['title']) . '" required></label>'
+        . '<label>Nội dung<textarea name="body" rows="4" maxlength="1000">' . h($set['body']) . '</textarea></label>'
+        . '<table><thead><tr><th>Quà kèm (tối đa ' . WELCOME_MAX_LINES . ')</th><th>Mã</th><th>Số lượng</th></tr></thead><tbody>';
+    for ($i = 0; $i < WELCOME_MAX_LINES; $i++) {
+        $g = $gifts[$i] ?? null;
+        echo '<tr><td><select name="kind[' . $i . ']"><option value="">(không)</option>';
+        foreach (MAIL_KINDS as $k => $lab) {
+            echo '<option value="' . h($k) . '"' . ($g && $g['kind'] === $k ? ' selected' : '') . '>' . h($lab) . '</option>';
+        }
+        echo '</select></td><td><input class="num" type="text" name="ref[' . $i . ']" value="' . h($g ? $g['ref_id'] : '') . '"></td>'
+            . '<td><input class="num" type="text" name="qty[' . $i . ']" value="' . h($g ? $g['quantity'] : '1') . '"></td></tr>';
+    }
+    echo '</tbody></table><button type="submit">Lưu</button></form>';
+    echo '<p class="muted">Mã nguyên liệu: 201 Đá nâng cấp, 202 Đá chỉ số, 203 Đá pha lê, 204 Đá GEN, 205 Đá mở ô GEN. Lần lưu cuối: ' . h($set['updated_at']) . ' bởi ' . h($set['updated_by']) . '.</p>';
+    layout_end();
+}

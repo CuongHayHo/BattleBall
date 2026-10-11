@@ -1477,9 +1477,29 @@ class MatchEngineTest {
             hp[i] = boss.hpMax;
             atk[i] = boss.atkPerHit;
         }
-        assertEquals(easy.hpMult(), hp[1] / hp[0], 0.001);
-        assertEquals(easy.atkMult(), atk[1] / atk[0], 0.001);
-        assertEquals(hell.hpMult(), hp[2] / hp[0], 0.001);
-        assertEquals(hell.atkMult(), atk[2] / atk[0], 0.001);
+        assertEquals(d.dungeons().get(12).tier(), "early");
+        assertEquals(easy.hpMult("early"), hp[1] / hp[0], 0.001);                // dungeon 12 is an early one: the multiplier of the tier is part of it
+        assertEquals(easy.atkMult("early"), atk[1] / atk[0], 0.001);
+        assertEquals(hell.hpMult("early"), hp[2] / hp[0], 0.001);
+        assertEquals(hell.atkMult("early"), atk[2] / atk[0], 0.001);
+        // the basic dungeons are gentler for a new player (docs 15.35): on easy a level-1 squad without gear has to be able to win them, which asks for HP x0.3 and damage x0.04
+        assertTrue(easy.hpMult("early") < easy.hpMult("mid") && easy.atkMult("early") < easy.atkMult("mid"), "early is lower than mid");
+        assertEquals(easy.hpMult("mid"), easy.hpMult(), 1e-9, "mid and late keep the multipliers of the difficulty");
+        assertEquals(easy.atkMult("late"), easy.atkMult(), 1e-9);
+        assertTrue(easy.atkMult("early") <= 0.05 && easy.hpMult("early") <= 0.35, "easy early: " + easy.hpMult("early") + " / " + easy.atkMult("early"));
+    }
+
+    @Test
+    void aNewSquadWithNoGearCanWinTheFirstDungeonOnEasy() {
+        // a new account: three characters of level 1, no gear, skills at level 1 (owner report 2026-10-12: the basic dungeons were too hard for a new player)
+        var easy = com.battleball.server.game.match.Difficulty.find(d, "EASY");
+        for (int seed = 1; seed <= 3; seed++) {
+            MatchSetup setup = new MatchSetup(1, d, d.dungeons().get(1), List.of(member(1, "EARTH", 1, true, Map.of(0, 1, 1, 1)), member(2, "NAMEC", 1, false, Map.of(2, 1, 3, 1)),
+                    member(3, "XAYDA", 1, false, Map.of(4, 1, 5, 1))), encounters(1, 5), minions(1), 10_000_000, new Random(seed)).withDifficulty(easy);
+            MatchEngine e = new MatchEngine(setup);
+            MatchOutcome out = run(e, 1500);
+            assertEquals(MatchResult.WON, out.result(), "seed " + seed + ": " + out.bossesDefeated() + " bosses");
+            assertEquals(5, out.bossesDefeated());
+        }
     }
 }

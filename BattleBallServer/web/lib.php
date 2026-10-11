@@ -157,6 +157,12 @@ function create_account(PDO $pdo, string $username, string $password): string
         $accountId = (int)$pdo->lastInsertId();
         // the three characters share one wallet and one set of owned skins (V026)
         $pdo->prepare('INSERT INTO account_wallet (account_id) VALUES (?)')->execute([$accountId]);
+        // welcome mail (V047): while the admin switch is on, one mail with the gift lines of welcome_gift (same rows as AccountRepository.sendWelcomeMail)
+        $mail = $pdo->prepare("INSERT INTO mail (account_id, title, body, sent_by) SELECT ?, title, body, 'system' FROM welcome_mail_setting WHERE setting_id = 1 AND enabled = 1");
+        $mail->execute([$accountId]);
+        if ($mail->rowCount() === 1) {
+            $pdo->prepare('INSERT INTO mail_attachment (mail_id, line_no, kind, ref_id, quantity) SELECT ?, line_no, kind, ref_id, quantity FROM welcome_gift')->execute([(int)$pdo->lastInsertId()]);
+        }
         $pdo->prepare("INSERT IGNORE INTO owned_skin (account_id, costume_id, source) SELECT ?, costume_id, 'DEFAULT' FROM race_default_skin")->execute([$accountId]);
         foreach (['EARTH', 'NAMEC', 'XAYDA'] as $race) {
             $pdo->prepare('INSERT INTO game_character (account_id, race) VALUES (?, ?)')->execute([$accountId, $race]);

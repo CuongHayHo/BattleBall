@@ -29,7 +29,7 @@ $grids = grid_specs($pdo);
 $routes = [
     'home' => 'page_home', 'logout' => 'page_logout', 'skins' => 'page_skins', 'skin' => 'page_skin',
     'supports' => 'page_supports', 'monsters' => 'page_monsters', 'support' => 'page_support', 'support_new' => 'page_support_new', 'audit' => 'page_audit',
-    'mail' => 'page_mail', 'notices' => 'page_notices',
+    'mail' => 'page_mail', 'notices' => 'page_notices', 'welcome' => 'page_welcome',
 ];
 if (isset($grids[$page])) {
     grid_page($pdo, $grids[$page], $page);

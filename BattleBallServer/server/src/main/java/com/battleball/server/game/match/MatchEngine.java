@@ -1976,9 +1976,10 @@ public final class MatchEngine {
             return;
         }
         Difficulty level = setup.difficulty();                  // docs 15.33: the difficulty of the run scales every monster and boss
-        m.hpMax = m.hp = Math.max(1, Math.round(ms.hp() * boss.hpMult() * level.hpMult()));
+        String tier = setup.dungeon() == null ? "" : setup.dungeon().tier();
+        m.hpMax = m.hp = Math.max(1, Math.round(ms.hp() * boss.hpMult() * level.hpMult(tier)));
         double atkPct = ms.atkMin() + rng.nextDouble() * (ms.atkMax() - ms.atkMin());
-        m.atkPerHit = atkPct / 100.0 * d.balanceNum("max_atk_total", 500_000) * boss.atkMult() * level.atkMult();
+        m.atkPerHit = atkPct / 100.0 * d.balanceNum("max_atk_total", 500_000) * boss.atkMult() * level.atkMult(tier);
         m.atk = m.atkPerHit;
         m.armorReduction = (ms.armorMin() + ms.armorMax()) / 2.0 / 100.0;
         m.critRatePct = 0;

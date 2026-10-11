@@ -11,9 +11,28 @@ import java.util.Map;
  * One difficulty of a dungeon run (balance_config dungeon_difficulty, docs 15.33, owner request 2026-10-11: every dungeon can be run at easy, hard or hell). The numbers are
  * multipliers over the monster table (monster_stat_class x boss_template): the HP and the damage of every monster and boss, and the gold, EXP and drop chance of the reward.
  */
-public record Difficulty(String key, String name, double hpMult, double atkMult, double rewardMult, double dropMult, String note) {
+public record Difficulty(String key, String name, double hpMult, double atkMult, double rewardMult, double dropMult, String note, Map<String, double[]> tiers) {
     /** The unscaled numbers: a match without a difficulty (a training session, or the tests of the engine) uses these. */
     public static final Difficulty NONE = new Difficulty("", "", 1, 1, 1, 1, "");
+
+    public Difficulty(String key, String name, double hpMult, double atkMult, double rewardMult, double dropMult, String note) {
+        this(key, name, hpMult, atkMult, rewardMult, dropMult, note, Map.of());
+    }
+
+    /**
+     * The HP multiplier for a dungeon of this tier (early, mid or late): the multiplier of the difficulty times the one of the tier. The early dungeons are the first a new player
+     * meets, with a squad of level 1 and no gear, so they are scaled down further (owner report 2026-10-12: the bosses of the basic dungeons have too much HP and hit too hard).
+     */
+    public double hpMult(String tier) {
+        double[] t = tiers.get(tier);
+        return hpMult * (t == null ? 1 : t[0]);
+    }
+
+    /** The damage multiplier for a dungeon of this tier, see {@link #hpMult(String)}. */
+    public double atkMult(String tier) {
+        double[] t = tiers.get(tier);
+        return atkMult * (t == null ? 1 : t[1]);
+    }
 
     /** Every difficulty of the configuration, easiest first. */
     public static List<Difficulty> all(StaticData d) {
@@ -23,8 +42,14 @@ public record Difficulty(String key, String name, double hpMult, double atkMult,
                 if (o instanceof Map<?, ?> raw) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> m = (Map<String, Object>) raw;
+                    Map<String, double[]> tiers = new java.util.HashMap<>();
+                    for (Map.Entry<String, Object> e : Json.obj(m, "tier_mult").entrySet()) {
+                        if (e.getValue() instanceof Map<?, ?> tm) {
+                            tiers.put(e.getKey(), new double[] {tm.get("hp") instanceof Double h ? h : 1, tm.get("atk") instanceof Double a ? a : 1});
+                        }
+                    }
                     out.add(new Difficulty(String.valueOf(m.get("key")), String.valueOf(m.get("name")), Json.num(m, "hp_mult", 1), Json.num(m, "atk_mult", 1),
-                            Json.num(m, "reward_mult", 1), Json.num(m, "drop_mult", 1), m.get("note") instanceof String s ? s : ""));
+                            Json.num(m, "reward_mult", 1), Json.num(m, "drop_mult", 1), m.get("note") instanceof String s ? s : "", Map.copyOf(tiers)));
                 }
             }
         }

@@ -34,8 +34,33 @@ public final class AccountRepository {
     public enum CreateResult { CREATED, USERNAME_TAKEN }
 
     /**
+     * Welcome mail (V047, owner request 2026-10-11): while the admin switch welcome_mail_setting.enabled is on, a new account gets one mail with the
+     * gift lines of welcome_gift. Same transaction as the account; the web page does the same in web/lib.php.
+     */
+    private static void sendWelcomeMail(Connection c, long accountId) throws SQLException {
+        long mailId;
+        try (PreparedStatement ps = c.prepareStatement(
+                "INSERT INTO mail (account_id, title, body, sent_by) SELECT ?, title, body, 'system' FROM welcome_mail_setting WHERE setting_id = 1 AND enabled = 1",
+                Statement.RETURN_GENERATED_KEYS)) {
+            ps.setLong(1, accountId);
+            if (ps.executeUpdate() == 0) {
+                return;                                     // switched off
+            }
+            try (ResultSet keys = ps.getGeneratedKeys()) {
+                keys.next();
+                mailId = keys.getLong(1);
+            }
+        }
+        try (PreparedStatement ps = c.prepareStatement(
+                "INSERT INTO mail_attachment (mail_id, line_no, kind, ref_id, quantity) SELECT ?, line_no, kind, ref_id, quantity FROM welcome_gift")) {
+            ps.setLong(1, mailId);
+            ps.executeUpdate();
+        }
+    }
+
+    /**
      * Creates the account and, in the same transaction, the 3 characters (one per race, level 1), their wallets, the starter avatars
-     * (race_default_skin) and the equipped starter skin (docs/database/BattleBall.md 3.1 and 10.18).
+     * (race_default_skin), the equipped starter skin (docs/database/BattleBall.md 3.1 and 10.18) and the welcome mail (V047).
      */
     public CreateResult createAccount(String username, String passwordHash) throws SQLException {
         try (Connection c = db.connection()) {
@@ -54,6 +79,7 @@ public final class AccountRepository {
                 }
                 // the three characters share one wallet and one set of owned skins (V026)
                 execute(c, "INSERT INTO account_wallet (account_id) VALUES (?)", accountId);
+                sendWelcomeMail(c, accountId);
                 try (PreparedStatement ps = c.prepareStatement(
                         "INSERT IGNORE INTO owned_skin (account_id, costume_id, source) SELECT ?, costume_id, 'DEFAULT' FROM race_default_skin")) {
                     ps.setLong(1, accountId);
