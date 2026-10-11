@@ -298,7 +298,6 @@ namespace BattleBall.Net
             string last = PlayerPrefs.GetString(KeyServer, "");
             MakeButton(rt, "Chơi Local" + (last == BbSession.ServerLocal ? "  (lần trước)" : ""), new Vector2(0f, 50f), new Vector2(460f, 76f), () => ChooseServer(BbSession.ServerLocal), new Color(0.2f, 0.45f, 0.75f));
             MakeButton(rt, "Chơi VPS" + (last == BbSession.ServerVps ? "  (lần trước)" : ""), new Vector2(0f, -50f), new Vector2(460f, 76f), () => ChooseServer(BbSession.ServerVps), new Color(0.18f, 0.55f, 0.28f));
-            MakeText(rt, "Local: " + BbConfig.Current.gameHost + ":" + BbConfig.Current.gamePort + "     VPS: " + BbConfig.Current.vpsHost + ":" + BbConfig.Current.vpsPort, 18, new Vector2(0f, -135f), new Vector2(900f, 40f));
             _chooserRoot.SetActive(false);
 
             _changeServerButton = MakeButton(parent, "Đổi máy chủ", Vector2.zero, new Vector2(190f, 48f), ShowServerChooser, new Color(0f, 0f, 0f, 0.55f));
