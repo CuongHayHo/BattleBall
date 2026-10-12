@@ -163,6 +163,12 @@ function create_account(PDO $pdo, string $username, string $password): string
         if ($mail->rowCount() === 1) {
             $pdo->prepare('INSERT INTO mail_attachment (mail_id, line_no, kind, ref_id, quantity) SELECT ?, line_no, kind, ref_id, quantity FROM welcome_gift')->execute([(int)$pdo->lastInsertId()]);
         }
+        // campaign mails (V050): one mail for every campaign that is on, with its gift lines (same rows as AccountRepository.sendCampaignMails)
+        $campaigns = $pdo->query('SELECT campaign_id FROM signup_campaign WHERE enabled = 1 AND ends_at > NOW() ORDER BY campaign_id')->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($campaigns as $campaignId) {
+            $pdo->prepare("INSERT INTO mail (account_id, title, body, sent_by, expires_at) SELECT ?, title, body, CONCAT('campaign:', campaign_id), ends_at FROM signup_campaign WHERE campaign_id = ?")->execute([$accountId, (int)$campaignId]);
+            $pdo->prepare('INSERT INTO mail_attachment (mail_id, line_no, kind, ref_id, quantity) SELECT ?, line_no, kind, ref_id, quantity FROM signup_campaign_gift WHERE campaign_id = ?')->execute([(int)$pdo->lastInsertId(), (int)$campaignId]);
+        }
         $pdo->prepare("INSERT IGNORE INTO owned_skin (account_id, costume_id, source) SELECT ?, costume_id, 'DEFAULT' FROM race_default_skin")->execute([$accountId]);
         foreach (['EARTH', 'NAMEC', 'XAYDA'] as $race) {
             $pdo->prepare('INSERT INTO game_character (account_id, race) VALUES (?, ?)')->execute([$accountId, $race]);

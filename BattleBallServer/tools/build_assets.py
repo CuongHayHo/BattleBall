@@ -47,7 +47,7 @@ FIXED_TIME = (2026, 1, 1, 0, 0, 0)
 # 728: the portrait of Urôn (the NPC shop shows it at the top, like the avatar of an NPC in Nro).
 # 562: the portrait of Bunma. The shop of Bunma (V036, V037, V038): the pieces of the three sets for the three planets, the fragments 10197 to 10201, the stones 10204, 10206 and 6467.
 BUNMA_SHOP_ICON_IDS = (562, 4647, 4648, 4649, 4650, 4652, 4654, 4655, 4656, 4657, 4658, 4659, 4660, 6310, 6311, 6312, 6314, 6315, 6316, 6317, 6318, 6320, 6321, 6322, 6323, 6467, 10165, 10166, 10167, 10168, 10169, 10175, 10176, 10177, 10178, 10179, 10185, 10186, 10187, 10188, 10189, 10197, 10198, 10199, 10200, 10201, 10204, 10206, 10208, 10209)
-EXTRA_ICON_IDS = (13538, 15614, 15613, 11569, 11572, 15412, 728, 11166, 11167, 11168, 11169, 11170, 11171, 11172)      # the last seven: the jar of Ma phong ba (parts 1218 to 1220)
+EXTRA_ICON_IDS = (7396, 13538, 15614, 15613, 11569, 11572, 15412, 728, 11166, 11167, 11168, 11169, 11170, 11171, 11172)      # the last seven: the jar of Ma phong ba (parts 1218 to 1220)
 # the skill buttons of the village training (skill_template.icon_id of the 25 skills, docs/architecture/BattleBallServer.md 15.12)
 SKILL_ICON_IDS = (539, 540, 717, 724, 720, 716, 711, 723, 722, 718, 2248, 3778, 3780, 3784, 3783, 3781, 3782, 3779, 11162, 11193, 11194)
 

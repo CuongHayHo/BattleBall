@@ -65,7 +65,7 @@ public final class PlayerActions {
                  ASSEMBLE_ITEM_REQUEST, EQUIP_ITEM_REQUEST, UNEQUIP_ITEM_REQUEST, SELL_ITEMS_REQUEST, UPGRADE_ITEM_REQUEST, BUY_SUPPORT_REQUEST,
                  EQUIP_SUPPORT_REQUEST, UNEQUIP_SUPPORT_REQUEST, CRAFT_REQUEST, BUY_POTARA_SHARDS_REQUEST, ASSEMBLE_POTARA_REQUEST,
                  MAIL_LIST_REQUEST, MAIL_ACTION_REQUEST, NOTICE_LIST_REQUEST, DISCARD_SKIN_REQUEST, EQUIP_AURA_REQUEST, SHOP_REQUEST, SHOP_BUY_REQUEST,
-                 REROLL_GEN_REQUEST, UNLOCK_GEN_SLOT_REQUEST, STAT_STONE_REQUEST, CRYSTALIZE_REQUEST, ATTENDANCE_REQUEST, CLAIM_ATTENDANCE_REQUEST, CLAIM_QUEST_REQUEST -> true;
+                 REROLL_GEN_REQUEST, UNLOCK_GEN_SLOT_REQUEST, STAT_STONE_REQUEST, CRYSTALIZE_REQUEST, ATTENDANCE_REQUEST, CLAIM_ATTENDANCE_REQUEST, CLAIM_QUEST_REQUEST, USE_EXP_BAG_REQUEST -> true;
             default -> false;
         };
     }
@@ -132,6 +132,7 @@ public final class PlayerActions {
                     return out;
                 }
                 case CLAIM_QUEST_REQUEST -> r = quests.claim(accountId, req.getClaimQuestRequest().getQuestId());
+                case USE_EXP_BAG_REQUEST -> r = economy.useExpBag(accountId, req.getUseExpBagRequest().getCharacterId());
                 case MAIL_ACTION_REQUEST -> {
                     var q = req.getMailActionRequest();
                     r = switch (q.getAction()) {
@@ -201,7 +202,7 @@ public final class PlayerActions {
             if (r.getOk()) {
                 out.add(snapshotEnvelope(accountId, 0));
                 switch (req.getPayloadCase()) {
-                    case EQUIP_ITEM_REQUEST, UNEQUIP_ITEM_REQUEST, UPGRADE_ITEM_REQUEST, REROLL_GEN_REQUEST, UNLOCK_GEN_SLOT_REQUEST, STAT_STONE_REQUEST, CRYSTALIZE_REQUEST, EQUIP_SKIN_REQUEST, EQUIP_AURA_REQUEST, EQUIP_SUPPORT_REQUEST, UNEQUIP_SUPPORT_REQUEST,
+                    case USE_EXP_BAG_REQUEST, EQUIP_ITEM_REQUEST, UNEQUIP_ITEM_REQUEST, UPGRADE_ITEM_REQUEST, REROLL_GEN_REQUEST, UNLOCK_GEN_SLOT_REQUEST, STAT_STONE_REQUEST, CRYSTALIZE_REQUEST, EQUIP_SKIN_REQUEST, EQUIP_AURA_REQUEST, EQUIP_SUPPORT_REQUEST, UNEQUIP_SUPPORT_REQUEST,
                          DISCARD_SKIN_REQUEST -> statsChanged.accept(accountId);
                     default -> { }
                 }

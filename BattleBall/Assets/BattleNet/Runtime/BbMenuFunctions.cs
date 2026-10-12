@@ -222,6 +222,12 @@ namespace BattleBall.Net
             if (_view == View.Mails) BuildMailRows();
         }
 
+        /// <summary>The time a mail gift runs out, as the player's clock shows it ("23:59 17/10").</summary>
+        static string Until(ulong ms)
+        {
+            return DateTimeOffset.FromUnixTimeMilliseconds((long)ms).ToLocalTime().ToString("HH:mm dd/MM");
+        }
+
         void BuildMailRows()
         {
             ClearRows();
@@ -229,9 +235,9 @@ namespace BattleBall.Net
             foreach (var mail in _mails.Mails)
             {
                 var m = mail;
-                bool hasGift = m.Attachments.Count > 0 && !m.Claimed;
+                bool hasGift = m.Attachments.Count > 0 && !m.Claimed && !m.Expired;
                 anyGift |= hasGift;
-                string sub = SentAt(m.SentAtMs) + (hasGift ? "   Có quà" : m.Attachments.Count > 0 ? "   Đã nhận quà" : "");
+                string sub = SentAt(m.SentAtMs) + (hasGift ? "   Có quà" + (m.ExpiresAtMs > 0 ? " (hạn " + Until(m.ExpiresAtMs) + ")" : "") : m.Expired ? "   Quà đã hết hạn" : m.Attachments.Count > 0 ? "   Đã nhận quà" : "");
                 AddRow(m.Title, sub, !m.Read, hasGift, () => OpenMail(m));
             }
             emptyText.text = _mails.Mails.Count == 0 ? "Chưa có thư nào" : "";
@@ -254,10 +260,11 @@ namespace BattleBall.Net
                 lines.Append("<color=#1E8F1E>").Append(GiftText(a)).Append("</color>");
             }
             var specs = new List<BbPopup.ButtonSpec>();
-            bool hasGift = mail.Attachments.Count > 0 && !mail.Claimed;
+            bool hasGift = mail.Attachments.Count > 0 && !mail.Claimed && !mail.Expired;
             if (hasGift) specs.Add(new BbPopup.ButtonSpec("Nhận quà", true, true));
             else specs.Add(new BbPopup.ButtonSpec("Xóa thư", true, false));
-            string state = mail.Attachments.Count > 0 && mail.Claimed ? "\n(Đã nhận quà)" : "";
+            string state = mail.Attachments.Count > 0 && mail.Claimed ? "\n(Đã nhận quà)" : mail.Expired ? "\n(Quà đã hết hạn, không nhận được nữa)"
+                         : hasGift && mail.ExpiresAtMs > 0 ? "\nHạn nhận quà: " + Until(mail.ExpiresAtMs) : "";
             popup.Show(null, mail.Title, lines.ToString(), mail.Body + state, sprites, texts, specs, i =>
             {
                 popup.Hide();

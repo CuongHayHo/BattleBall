@@ -193,6 +193,13 @@ namespace BattleBall.Net
             return a.ActionResult;
         }
 
+        /// <summary>Uses one EXP bag on a character (it gets the experience of the bag; ActionResult MAXED at level 100); the answer is followed by a fresh snapshot.</summary>
+        public async Task<ActionResult> UseExpBagAsync(ulong characterId)
+        {
+            var a = await Ask(new Envelope { UseExpBagRequest = new UseExpBagRequest { CharacterId = characterId } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
         /// <summary>Takes the reward of a finished quest of Ông Gôhan (an empty id: of every finished one); the answer is followed by a fresh snapshot.</summary>
         public async Task<ActionResult> ClaimQuestAsync(string questId)
         {

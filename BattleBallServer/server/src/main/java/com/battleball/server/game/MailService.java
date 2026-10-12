@@ -45,7 +45,7 @@ public final class MailService {
     /** Mails not read yet or with a gift not taken yet (the badge on the menu). */
     public static int unread(Connection c, long accountId) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement("SELECT COUNT(*) FROM mail m WHERE m.account_id = ? AND (m.read_at IS NULL OR (m.claimed_at IS NULL "
-                + "AND EXISTS (SELECT 1 FROM mail_attachment a WHERE a.mail_id = m.mail_id)))")) {
+                + "AND (m.expires_at IS NULL OR m.expires_at > NOW()) AND EXISTS (SELECT 1 FROM mail_attachment a WHERE a.mail_id = m.mail_id)))")) {
             ps.setLong(1, accountId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
@@ -58,13 +58,15 @@ public final class MailService {
         StaticData d = data.get();
         try (Connection c = db.connection()) {
             Map<Long, MailInfo.Builder> mails = new LinkedHashMap<>();
-            try (PreparedStatement ps = c.prepareStatement("SELECT mail_id, title, body, UNIX_TIMESTAMP(sent_at) * 1000, read_at IS NOT NULL, claimed_at IS NOT NULL "
+            try (PreparedStatement ps = c.prepareStatement("SELECT mail_id, title, body, UNIX_TIMESTAMP(sent_at) * 1000, read_at IS NOT NULL, claimed_at IS NOT NULL, "
+                    + "COALESCE(UNIX_TIMESTAMP(expires_at) * 1000, 0), expires_at IS NOT NULL AND expires_at <= NOW() "
                     + "FROM mail WHERE account_id = ? ORDER BY mail_id DESC LIMIT " + LIST_LIMIT)) {
                 ps.setLong(1, accountId);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
                         mails.put(rs.getLong(1), MailInfo.newBuilder().setMailId(rs.getLong(1)).setTitle(rs.getString(2)).setBody(rs.getString(3))
-                                .setSentAtMs(rs.getLong(4)).setRead(rs.getBoolean(5)).setClaimed(rs.getBoolean(6)));
+                                .setSentAtMs(rs.getLong(4)).setRead(rs.getBoolean(5)).setClaimed(rs.getBoolean(6))
+                                .setExpiresAtMs(rs.getLong(7)).setExpired(rs.getBoolean(8) && !rs.getBoolean(6)));
                     }
                 }
             }
@@ -162,7 +164,7 @@ public final class MailService {
     public ActionResult delete(long accountId, long mailId) {
         try (Connection c = db.connection()) {
             // a gift that was not taken keeps the mail (the player must not lose it by a mistaken tap)
-            try (PreparedStatement ps = c.prepareStatement("DELETE FROM mail WHERE mail_id = ? AND account_id = ? AND (claimed_at IS NOT NULL "
+            try (PreparedStatement ps = c.prepareStatement("DELETE FROM mail WHERE mail_id = ? AND account_id = ? AND (claimed_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at <= NOW()) "
                     + "OR NOT EXISTS (SELECT 1 FROM mail_attachment a WHERE a.mail_id = mail.mail_id))")) {
                 ps.setLong(1, mailId);
                 ps.setLong(2, accountId);
@@ -208,7 +210,7 @@ public final class MailService {
     public ActionResult claimAll(long accountId) {
         List<Long> ids = new ArrayList<>();
         try (Connection c = db.connection();
-             PreparedStatement ps = c.prepareStatement("SELECT m.mail_id FROM mail m WHERE m.account_id = ? AND m.claimed_at IS NULL "
+             PreparedStatement ps = c.prepareStatement("SELECT m.mail_id FROM mail m WHERE m.account_id = ? AND m.claimed_at IS NULL AND (m.expires_at IS NULL OR m.expires_at > NOW()) "
                      + "AND EXISTS (SELECT 1 FROM mail_attachment a WHERE a.mail_id = m.mail_id) ORDER BY m.mail_id")) {
             ps.setLong(1, accountId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -235,8 +237,8 @@ public final class MailService {
     }
 
     private ActionResult claimIn(Connection c, StaticData d, long accountId, long mailId) throws SQLException {
-        boolean claimed;
-        try (PreparedStatement ps = c.prepareStatement("SELECT claimed_at IS NOT NULL FROM mail WHERE mail_id = ? AND account_id = ? FOR UPDATE")) {
+        boolean claimed, expired;
+        try (PreparedStatement ps = c.prepareStatement("SELECT claimed_at IS NOT NULL, expires_at IS NOT NULL AND expires_at <= NOW() FROM mail WHERE mail_id = ? AND account_id = ? FOR UPDATE")) {
             ps.setLong(1, mailId);
             ps.setLong(2, accountId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -244,10 +246,14 @@ public final class MailService {
                     return fail(ActionError.NOT_FOUND, "mail not found");
                 }
                 claimed = rs.getBoolean(1);
+                expired = rs.getBoolean(2);
             }
         }
         if (claimed) {
             return fail(ActionError.ALREADY_OWNED, "the gift was already taken");
+        }
+        if (expired) {
+            return fail(ActionError.DISABLED, "the gift has expired");
         }
         record Line(String kind, int ref, long qty) {
         }

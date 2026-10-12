@@ -201,7 +201,7 @@ public final class MatchSettlement {
     }
 
     /** Adds EXP, applies level-ups (100 x L^2 to leave level L), returns {level before, level after}. At level 100 the extra EXP is dropped. */
-    private int[] applyExp(Connection c, StaticData d, long characterId, long gained) throws SQLException {
+    public static int[] applyExp(Connection c, StaticData d, long characterId, long gained) throws SQLException {
         int level;
         long exp;
         try (PreparedStatement ps = c.prepareStatement("SELECT level, exp FROM game_character WHERE character_id = ? FOR UPDATE")) {

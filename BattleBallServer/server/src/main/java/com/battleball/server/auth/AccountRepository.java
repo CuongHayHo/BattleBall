@@ -10,8 +10,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 
 /** SQL for accounts and login tokens (V003 tables). Every statement is parameterised; one transaction per business operation. */
@@ -59,6 +61,40 @@ public final class AccountRepository {
     }
 
     /**
+     * Campaign mails (V050, owner request 2026-10-12): every campaign that is on (enabled, ends_at in the future) gives a new account one mail with its gift lines; the mail
+     * expires when the campaign ends. Same transaction as the account; the web page does the same in web/lib.php.
+     */
+    private static void sendCampaignMails(Connection c, long accountId) throws SQLException {
+        List<Integer> campaigns = new ArrayList<>();
+        try (PreparedStatement ps = c.prepareStatement("SELECT campaign_id FROM signup_campaign WHERE enabled = 1 AND ends_at > NOW() ORDER BY campaign_id");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                campaigns.add(rs.getInt(1));
+            }
+        }
+        for (int campaign : campaigns) {
+            long mailId;
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO mail (account_id, title, body, sent_by, expires_at) SELECT ?, title, body, CONCAT('campaign:', campaign_id), ends_at FROM signup_campaign WHERE campaign_id = ?",
+                    Statement.RETURN_GENERATED_KEYS)) {
+                ps.setLong(1, accountId);
+                ps.setInt(2, campaign);
+                ps.executeUpdate();
+                try (ResultSet keys = ps.getGeneratedKeys()) {
+                    keys.next();
+                    mailId = keys.getLong(1);
+                }
+            }
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO mail_attachment (mail_id, line_no, kind, ref_id, quantity) SELECT ?, line_no, kind, ref_id, quantity FROM signup_campaign_gift WHERE campaign_id = ?")) {
+                ps.setLong(1, mailId);
+                ps.setInt(2, campaign);
+                ps.executeUpdate();
+            }
+        }
+    }
+
+    /**
      * Creates the account and, in the same transaction, the 3 characters (one per race, level 1), their wallets, the starter avatars
      * (race_default_skin), the equipped starter skin (docs/database/BattleBall.md 3.1 and 10.18) and the welcome mail (V047).
      */
@@ -80,6 +116,7 @@ public final class AccountRepository {
                 // the three characters share one wallet and one set of owned skins (V026)
                 execute(c, "INSERT INTO account_wallet (account_id) VALUES (?)", accountId);
                 sendWelcomeMail(c, accountId);
+                sendCampaignMails(c, accountId);
                 try (PreparedStatement ps = c.prepareStatement(
                         "INSERT IGNORE INTO owned_skin (account_id, costume_id, source) SELECT ?, costume_id, 'DEFAULT' FROM race_default_skin")) {
                     ps.setLong(1, accountId);

@@ -140,7 +140,7 @@ namespace BattleBall.Net
             _gearView.Sort((a, b) => CompareGear(a, b, ch.Race));
             _stoneView.Clear();                                                  // the stones follow the pieces (a bag of Nro holds them as items)
             if (_snapshot != null)
-                foreach (var m in _snapshot.Materials) if (m.Quantity > 0 && m.Kind.EndsWith("STONE")) _stoneView.Add(m);
+                foreach (var m in _snapshot.Materials) if (m.Quantity > 0 && (m.Kind.EndsWith("STONE") || m.Kind == "EXP_BAG" || m.Kind == "SKILL_CARD")) _stoneView.Add(m);
             _stoneView.Sort((a, b) => a.TemplateId.CompareTo(b.TemplateId));
             int perPage = BagPerPage();
             int total = _gearView.Count + _stoneView.Count;
@@ -166,6 +166,60 @@ namespace BattleBall.Net
             }
         }
 
+        /// <summary>
+        /// The popup of the EXP bag (a button that uses it on the character of the open tab) and of the skill card (what it is for). The gift of 2026-10-12 (docs 15.35).
+        /// </summary>
+        void ShowBagMaterial(MaterialAmount m)
+        {
+            var specs = new List<BbPopup.ButtonSpec>();
+            string desc;
+            Action use = null;
+            if (m.Kind == "EXP_BAG")
+            {
+                // one bag serves the three planets: each character below level 100 gets the experience (owner request 2026-10-12), from whatever tab the bag was tapped
+                var levels = new StringBuilder();
+                bool can = false;
+                if (_snapshot != null)
+                    foreach (var ch in _snapshot.Characters)
+                    {
+                        if (levels.Length > 0) levels.Append(", ");
+                        levels.Append(PlanetOf(ch.Race)).Append(" cấp ").Append(ch.Level);
+                        can |= ch.Level < 100;
+                    }
+                desc = (m.Note.Length > 0 ? m.Note + "\n" : "") + "Có " + m.Quantity + " túi. " + (can ? "Dùng một túi cho cả ba hành tinh (" + levels + ")." : "Cả ba nhân vật đã cấp tối đa.");
+                specs.Add(new BbPopup.ButtonSpec("Dùng", can, true));
+                if (can) use = UseExpBag;
+            }
+            else desc = (m.Note.Length > 0 ? m.Note + "\n" : "") + "Có " + m.Quantity + " thẻ. Dùng ở tab Kỹ năng để học hoặc nâng kỹ năng; nhận từ nhiệm vụ của Ông Gôhan.";
+            popup.Show(MaterialIcon(m), m.Name, "", desc, null, null, specs, i => { popup.Hide(); if (use != null) use(); });
+        }
+
+        /// <summary>For the scripted run: a tap on the cell of this material in the bag (gear mode), as a finger does. False when it is not in the bag.</summary>
+        public bool DebugTapBagMaterial(uint templateId)
+        {
+            int k = _stoneView.FindIndex(m => m.TemplateId == templateId);
+            if (k < 0) return false;
+            int index = _gearView.Count + k, per = BagPerPage();
+            _bagPage = index / per;
+            ShowPage(_page, false);
+            OnBagGear(index % per);
+            return true;
+        }
+
+        /// <summary>For the scripted run: the popup of a bag material.</summary>
+        public void DebugShowBagMaterial(MaterialAmount m) { ShowBagMaterial(m); }
+
+        async void UseExpBag()
+        {
+            if (_demo || !BbSession.IsActive || _snapshot == null || _snapshot.Characters.Count == 0) { Toast("Cần kết nối máy chủ"); return; }
+            try
+            {
+                var result = await BbSession.Client.UseExpBagAsync(_snapshot.Characters[0].CharacterId);       // any character: the server serves all three
+                Toast(result.Ok ? "Cả ba hành tinh nhận kinh nghiệm" : result.Error == ActionError.Maxed ? "Cả ba nhân vật đã cấp tối đa" : ActionText(result));
+            }
+            catch (Exception e) { Toast("Không gửi được lệnh: " + e.Message); }
+        }
+
         void OnBagGear(int slot)
         {
             int index = _bagPage * BagPerPage() + slot;
@@ -173,6 +227,7 @@ namespace BattleBall.Net
             if (index >= _gearView.Count)
             {
                 var stone = _stoneView[index - _gearView.Count];
+                if (stone.Kind == "EXP_BAG" || stone.Kind == "SKILL_CARD") { ShowBagMaterial(stone); _selectedCell = slot; RefreshSelection(); return; }
                 if (smith != null && smith.IsOpen) { smith.PutStone(stone); return; }
                 popup.Show(MaterialIcon(stone), stone.Name, "", (stone.Note.Length > 0 ? stone.Note + "\n" : "") + "Có " + stone.Quantity + " viên. Dùng ở Bà Hạt Mít (nâng cấp, ép sao, pha lê hóa, đổi GEN, mở ô GEN).",
                     null, null, new List<BbPopup.ButtonSpec>(), null);

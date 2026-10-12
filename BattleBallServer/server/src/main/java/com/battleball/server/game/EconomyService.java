@@ -91,9 +91,12 @@ public final class EconomyService {
                 throw e;
             }
         } catch (SQLException e) {
+            LOG.error("economy action failed (account {}, character {})", accountId, characterId, e);        // the player only sees "database error": the reason must be in the log
             return fail(ActionError.ACTION_INTERNAL, "database error");
         }
     }
+
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(EconomyService.class);
 
     private static Ch lockCharacter(Connection c, long accountId, long characterId) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement("SELECT c.race, c.level, w.gold, w.gems FROM game_character c JOIN account_wallet w ON w.account_id = c.account_id "
@@ -408,6 +411,42 @@ public final class EconomyService {
                 ps.setInt(2, skillId);
                 ps.setInt(3, current + 1);
                 ps.executeUpdate();
+            }
+            return ok();
+        });
+    }
+
+    /**
+     * The EXP bag (material_template 207): one bag gives balance_config exp_bag.exp experience (enough to take a new character to level 100) to EACH of the three characters of the
+     * account, the three planets (owner request 2026-10-12: "túi kinh nghiệm dùng cho cả 3 hành tinh"; docs 15.35). A character already at the top level gets nothing; when all
+     * three are there the bag is not used. {@code characterId} is any character of the account (it only gives the transaction something to lock).
+     */
+    public static final int EXP_BAG = 207;
+
+    public ActionResult useExpBag(long accountId, long characterId) {
+        return tx(accountId, characterId, (c, d, ch) -> {
+            int max = (int) Json.num(d.balanceObj("char_stats_lv100"), "max_level", 100);
+            List<Long> below = new ArrayList<>();
+            try (PreparedStatement ps = c.prepareStatement("SELECT character_id FROM game_character WHERE account_id = ? AND level < ? ORDER BY character_id")) {
+                ps.setLong(1, ch.accountId());
+                ps.setInt(2, max);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        below.add(rs.getLong(1));
+                    }
+                }
+            }
+            if (below.isEmpty()) {
+                return fail(ActionError.MAXED, "every character is at the maximum level");
+            }
+            if (materialQty(c, ch.accountId(), EXP_BAG) < 1) {
+                return fail(ActionError.NOT_ENOUGH_MATERIAL, "no EXP bag");
+            }
+            addMaterial(c, ch.accountId(), EXP_BAG, -1);
+            itemLog(c, ch.id(), "UPGRADE", "MATERIAL", EXP_BAG, null, 1, null);
+            long exp = (long) Json.num(d.balanceObj("exp_bag"), "exp", 32_835_000);
+            for (long id : below) {
+                com.battleball.server.game.match.MatchSettlement.applyExp(c, d, id, exp);
             }
             return ok();
         });

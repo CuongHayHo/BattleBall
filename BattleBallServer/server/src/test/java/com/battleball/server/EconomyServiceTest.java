@@ -173,6 +173,28 @@ class EconomyServiceTest {
     }
 
     @Test
+    void anExpBagTakesAllThreeCharactersFromLevelOneToLevelOneHundred() throws Exception {
+        long[] a = newAccount();
+        assertError(ActionError.NOT_ENOUGH_MATERIAL, eco.useExpBag(a[0], a[1]));
+        giveMaterial(a[1], 207, 3);
+        assertTrue(eco.useExpBag(a[0], a[2]).getOk(), "any character of the account will do");
+        for (int i = 1; i <= 3; i++) {
+            assertEquals(100, character(a[0], a[i]).level(), "32.835.000 experience = the sum of 100 x L^2 for L = 1..99, for each of the three planets");
+        }
+        assertEquals(2, scalar("SELECT quantity FROM material_stack WHERE account_id = ? AND template_id = 207", a[0]), "one bag for the three characters");
+        assertError(ActionError.MAXED, eco.useExpBag(a[0], a[1]));
+        assertEquals(2, scalar("SELECT quantity FROM material_stack WHERE account_id = ? AND template_id = 207", a[0]), "a refused use costs nothing");
+        // one character already at the top: the bag still serves the others
+        long[] b = newAccount();
+        giveMaterial(b[1], 207, 1);
+        update("UPDATE game_character SET level = 100 WHERE character_id = ?", b[1]);
+        assertTrue(eco.useExpBag(b[0], b[1]).getOk());
+        assertEquals(100, character(b[0], b[2]).level());
+        assertEquals(100, character(b[0], b[3]).level());
+        assertEquals(0, scalar("SELECT quantity FROM material_stack WHERE account_id = ? AND template_id = 207", b[0]));
+    }
+
+    @Test
     void learningAndRaisingASkillCostsGoldAndSkillCards() throws Exception {
         long[] a = newAccount();
         var d = data.get();

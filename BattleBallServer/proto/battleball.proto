@@ -82,6 +82,7 @@ message Envelope {
     AttendanceInfo attendance_info = 81;
     ClaimAttendanceRequest claim_attendance_request = 82;   // checks in for today: ActionResult (ALREADY_OWNED when it was done), then a fresh AttendanceInfo and PlayerDataSnapshot
     // ---- the quests of Ong Gohan (docs 15.32): the list comes inside every PlayerDataSnapshot (PlayerDataSnapshot.quests) ----
+    UseExpBagRequest use_exp_bag_request = 85;           // uses one EXP bag (material 207) on a character: ActionResult (MAXED at level 100), then a fresh PlayerDataSnapshot (docs 15.35)
     MatchReady match_ready = 84;                         // the client shows the dungeon now: a match started with StartMatchRequest.wait_for_ready begins to run (docs 15.34)
     ClaimQuestRequest claim_quest_request = 83;          // the reward of a finished quest (an empty id = every finished one); ActionResult, then a fresh PlayerDataSnapshot
     // ---- GEN (docs 15.21) ----
@@ -498,7 +499,11 @@ message MailInfo {
   bool read = 5;
   bool claimed = 6;                 // the gift was taken (a mail without a gift counts as taken)
   repeated MailAttachment attachments = 7;
+  uint64 expires_at_ms = 8;         // the gift can be taken until then (0 = no limit); after it the mail stays but the gift is lost
+  bool expired = 9;                 // the limit has passed and the gift was not taken
 }
+
+message UseExpBagRequest { uint64 character_id = 1; }   // the bag gives balance_config exp_bag.exp experience to this character (the level rules of a match apply, the maximum level is 100)
 
 message MailListRequest {}
 message MailList { repeated MailInfo mails = 1; }       // newest first, at most 100

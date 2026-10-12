@@ -25,6 +25,15 @@
 # ---- Source data copied from the reference games (about 950 MB, 167k files; keep only its scripts) ----
 /BattleBall/SourceData/*
 !/BattleBall/SourceData/tools/
+# small data files kept for the project report (2026-10-12): the skill effect and pose tables and the village map layout (JSON only, no pictures)
+!/BattleBall/SourceData/data/
+/BattleBall/SourceData/data/*
+!/BattleBall/SourceData/data/skill/
+!/BattleBall/SourceData/data/map/
+/BattleBall/SourceData/data/map/*
+!/BattleBall/SourceData/data/map/village_start/
+/BattleBall/SourceData/data/map/village_start/*
+!/BattleBall/SourceData/data/map/village_start/*.json
 
 # ---- Server: build output, logs, local tools, secrets ----
 /BattleBallServer/logs/

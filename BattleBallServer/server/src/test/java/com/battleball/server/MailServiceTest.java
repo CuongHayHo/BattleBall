@@ -39,6 +39,7 @@ class MailServiceTest {
         data = new StaticDataStore(new StaticDataLoader(db));
         accounts = new AccountRepository(db);
         mail = new MailService(db, data);
+        update("UPDATE signup_campaign SET enabled = 0");                  // the campaign mails (V050) are counted by their own test
         update("UPDATE welcome_mail_setting SET enabled = 0");           // the other tests count the mails of a new account; the welcome mail has its own test
     }
 
@@ -94,6 +95,50 @@ class MailServiceTest {
     private static void assertError(ActionError expected, ActionResult r) {
         assertFalse(r.getOk(), "should have been refused");
         assertEquals(expected, r.getError(), r.getMessage());
+    }
+
+    @Test
+    void aNewAccountGetsTheMailOfEveryCampaignThatIsOnAndNothingAfterItEnds() throws Exception {
+        update("UPDATE signup_campaign SET enabled = 1, ends_at = NOW() + INTERVAL 2 DAY");
+        try {
+            long a = newAccount();
+            var list = mail.list(a).getMailsList();
+            assertEquals(5, list.size(), "cards and bag, shards, three sets of fragments");
+            assertTrue(list.stream().allMatch(m -> m.getAttachmentsCount() >= 1 && m.getAttachmentsCount() <= 5 && m.getExpiresAtMs() > System.currentTimeMillis()),
+                    "at most five gifts a mail (the popup shows five) and every mail ends with the campaign");
+            assertTrue(mail.claimAll(a).getOk());
+            assertEquals(99, scalar("SELECT quantity FROM material_stack WHERE account_id = ? AND template_id = 206", a));
+            assertEquals(1, scalar("SELECT quantity FROM material_stack WHERE account_id = ? AND template_id = 207", a));
+            for (int fragment = 101; fragment <= 115; fragment++) {
+                assertEquals(100, scalar("SELECT quantity FROM material_stack WHERE account_id = ? AND template_id = ?", a, fragment), "fragment " + fragment);
+            }
+            assertEquals(100, scalar("SELECT potara_fragments FROM account WHERE account_id = ?", a), "the earring shards");
+            update("UPDATE signup_campaign SET ends_at = NOW() - INTERVAL 1 MINUTE");
+            assertEquals(0, mail.list(newAccount()).getMailsCount(), "the campaign is over");
+        } finally {
+            update("UPDATE signup_campaign SET enabled = 0");
+        }
+    }
+
+    @Test
+    void aGiftThatPassedItsLimitCannotBeTakenAndItsMailCanBeDeleted() throws Exception {
+        long a = newAccount();
+        long late = send(a, "Hết hạn", new Object[]{"MATERIAL", 206, 99});
+        update("UPDATE mail SET expires_at = NOW() - INTERVAL 1 HOUR WHERE mail_id = ?", late);
+        long open = send(a, "Còn hạn", new Object[]{"MATERIAL", 206, 99});
+        update("UPDATE mail SET expires_at = NOW() + INTERVAL 1 HOUR WHERE mail_id = ?", open);
+        var list = mail.list(a).getMailsList();
+        assertTrue(list.stream().filter(m -> m.getMailId() == late).findFirst().orElseThrow().getExpired());
+        assertFalse(list.stream().filter(m -> m.getMailId() == open).findFirst().orElseThrow().getExpired());
+        assertTrue(list.stream().filter(m -> m.getMailId() == open).findFirst().orElseThrow().getExpiresAtMs() > System.currentTimeMillis());
+        assertError(ActionError.DISABLED, mail.claim(a, late));
+        assertEquals(0, scalar("SELECT COALESCE(SUM(quantity), 0) FROM material_stack WHERE account_id = ? AND template_id = 206", a), "nothing was paid");
+        assertTrue(mail.claim(a, open).getOk());
+        assertEquals(99, scalar("SELECT quantity FROM material_stack WHERE account_id = ? AND template_id = 206", a));
+        assertTrue(mail.delete(a, late).getOk(), "a lost gift no longer keeps its mail");
+        long late2 = send(a, "Hết hạn 2", new Object[]{"MATERIAL", 206, 5});
+        update("UPDATE mail SET expires_at = NOW() - INTERVAL 1 MINUTE WHERE mail_id = ?", late2);
+        assertError(ActionError.NOT_FOUND, mail.claimAll(a));           // claim-all skips what expired
     }
 
     @Test

@@ -379,6 +379,47 @@ namespace BattleBall.Net
             Shoot("attend_again");
         }
 
+        /// <summary>The gift mail of 2026-10-12 (docs 15.35): the mail is claimed (99 skill cards and an EXP bag), the bag is used on the Earth character and takes it to level 100.</summary>
+        async Task GiftRun(BbMenuUi menu, BbClient client)
+        {
+            menu.SetPanelOpen(true, true);
+            Log("unread mails " + client.Snapshot.UnreadMail);
+            var r = await client.MailActionAsync(0, MailAction.MailClaimAll);
+            Log("claim all: ok " + r.Ok + " (" + r.Error + "), mails taken " + r.NewId);
+            await Wait(0.8f);
+            MaterialAmount bag = null;
+            foreach (var m in client.Snapshot.Materials) if (m.TemplateId == 207) bag = m;
+            Log("cards " + BbQuestPanel.CardsOf(client.Snapshot) + ", EXP bags " + (bag != null ? bag.Quantity : 0));
+            ulong earth = 0;
+            foreach (var c in client.Snapshot.Characters) if (c.Race == "EARTH") { earth = c.CharacterId; Log("Earth level " + c.Level); }
+            // the way a finger does it: "Xem đồ", the cell of the bag, the button "Dùng" of the popup
+            menu.bagModeButton.onClick.Invoke();
+            await WaitFor(() => menu.DebugGearLoaded, 8f);
+            await Wait(0.5f);
+            bool tapped = menu.DebugTapBagMaterial(207);
+            await Wait(0.5f);
+            Log("tapped the EXP bag in the bag: " + tapped + ", popup open " + menu.popup.IsOpen + ", button enabled " + (menu.popup.buttons.Length > 0 && menu.popup.buttons[0].gameObject.activeInHierarchy && menu.popup.buttons[0].interactable));
+            Shoot("gift_bag_popup");
+            if (menu.popup.buttons.Length > 0)
+            {
+                // what a finger would hit on the button "Dùng": the topmost thing under its centre (a real tap needs the button itself, or its text, to be the one)
+                var rt = (RectTransform)menu.popup.buttons[0].transform;
+                var canvas = menu.GetComponentInParent<Canvas>();
+                Vector2 screen = RectTransformUtility.WorldToScreenPoint(canvas.worldCamera, rt.TransformPoint(rt.rect.center));
+                var hits = new List<UnityEngine.EventSystems.RaycastResult>();
+                UnityEngine.EventSystems.EventSystem.current.RaycastAll(new UnityEngine.EventSystems.PointerEventData(UnityEngine.EventSystems.EventSystem.current) { position = screen }, hits);
+                Log("under the button Dùng at " + screen + ": " + (hits.Count > 0 ? hits[0].gameObject.name + " (parent " + hits[0].gameObject.transform.parent.name + ")" : "nothing") + ", " + hits.Count + " hits");
+                menu.popup.buttons[0].onClick.Invoke();
+            }
+            await Wait(1.5f);
+            foreach (var c in client.Snapshot.Characters) Log("after the button Dùng: " + c.Race + " level " + c.Level);
+            var used = await client.UseExpBagAsync(earth);
+            await Wait(1.0f);
+            foreach (var c in client.Snapshot.Characters) if (c.Race == "EARTH") Log("used the bag: ok " + used.Ok + ", Earth level " + c.Level);
+            var again = await client.UseExpBagAsync(earth);
+            Log("again at level 100: ok " + again.Ok + " (" + again.Error + ")");
+        }
+
         /// <summary>
         /// The quests of Ông Gôhan with the real server (docs 15.32): the first quest and where the arrow points, the arrow at the edge of the screen, a finished quest (the arrow goes back to
         /// Gôhan), his dialog, the reward, and the skill cards that learning a skill takes.
@@ -1665,6 +1706,7 @@ namespace BattleBall.Net
             if (scenario == "gen") { await GenRun(menu, village, client); return; }
             if (scenario == "smith") { await SmithRun(menu, village, client); return; }
             if (scenario == "attend") { await AttendRun(menu, village, client); return; }
+            if (scenario == "gift") { await GiftRun(menu, client); return; }
             if (scenario == "quest") { await QuestRun(menu, training, village, client); return; }
             if (scenario == "smithstar") { await SmithStarRun(menu, village, client); return; }
             if (scenario == "focus") { await FocusRun(menu, training, village); return; }
