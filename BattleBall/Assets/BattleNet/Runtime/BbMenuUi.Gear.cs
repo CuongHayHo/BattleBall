@@ -180,8 +180,7 @@ namespace BattleBall.Net
                 RefreshSelection();
                 return;
             }
-            if (smith != null && smith.IsOpen) { smith.PutItem(_gearView[index]); return; }          // beside Bà Hạt Mít a tap puts the piece in her panel
-            ShowGearPopup(_gearView[index], null);
+            ShowGearPopup(_gearView[index], null);                                                     // beside Bà Hạt Mít the popup offers the function of her panel instead of wear and sell
             _selectedCell = slot;
             RefreshSelection();
         }
@@ -224,7 +223,7 @@ namespace BattleBall.Net
             var ch = CharacterOf(Races[_pages[_page].main]);
             if (ch == null) return;
             var it = WornIn(ch, GearKeys[slot]);
-            if (smith != null && smith.IsOpen) { if (it != null) smith.PutItem(it); return; }
+            if (smith != null && smith.IsOpen && it == null) return;
             if (it == null)
             {
                 Toast("Ô " + SlotNames[slot] + " trống: chọn món trong túi (nút Xem đồ)");
@@ -261,7 +260,16 @@ namespace BattleBall.Net
             var specs = new List<BbPopup.ButtonSpec>();
             var actions = new List<Action>();
             var user = wearer ?? CharacterOf(it.Race);
-            if (wearer != null)
+            bool forSmith = smith != null && smith.IsOpen;
+            if (forSmith)
+            {
+                // beside Bà Hạt Mít (owner request 2026-10-12): the piece is not put in her panel by a tap; the popup shows its figures and asks (the function of her panel, or cancel)
+                specs.Add(new BbPopup.ButtonSpec(smith.ModeName, true, true));
+                actions.Add(() => { popup.Hide(); smith.PutItem(it); });
+                specs.Add(new BbPopup.ButtonSpec("Hủy", true, false));
+                actions.Add(() => popup.Hide());
+            }
+            else if (wearer != null)
             {
                 specs.Add(new BbPopup.ButtonSpec("Tháo", true, true));
                 actions.Add(() => UnequipGear(wearer, it.Slot));
@@ -275,12 +283,13 @@ namespace BattleBall.Net
                 specs.Add(new BbPopup.ButtonSpec(label, user != null && levelOk, true));
                 actions.Add(() => EquipGear(user, it));
             }
-            if (wearer == null)
+            if (wearer == null && !forSmith)
             {
                 specs.Add(new BbPopup.ButtonSpec("Bán", true, false));
                 actions.Add(() => ConfirmSellGear(it));
             }
-            desc.Append("\nNâng cấp, ép sao, pha lê hóa, đổi GEN: đến Bà Hạt Mít.");
+            if (forSmith) desc.Append("\nBấm \"").Append(smith.ModeName).Append("\" để đặt món này vào bảng của Bà Hạt Mít.");
+            else desc.Append("\nNâng cấp, ép sao, pha lê hóa, đổi GEN: đến Bà Hạt Mít.");
             popup.Show(ItemIcon(it), it.Name.Length > 0 ? it.Name : "Đồ #" + it.ItemId, lines.ToString(), desc.ToString(), null, null, specs,
                 i => { if (i < actions.Count) actions[i](); });
         }

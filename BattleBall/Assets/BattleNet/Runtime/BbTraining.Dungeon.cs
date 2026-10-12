@@ -43,6 +43,12 @@ namespace BattleBall.Net
         readonly HashSet<uint> _bossIds = new HashSet<uint>();            // the entities that are bosses (only they get the big HP bar)
 
         public bool InDungeon { get { return _dungeon; } }
+        /// <summary>For the play scenario: presses the button "Rời phó bản" as a finger does (the first touch arms it, the second leaves).</summary>
+        public void DebugPressLeave() { OnLeavePressed(); }
+
+        /// <summary>For the play scenario: the leave button is on the screen and can be pressed, and what it says.</summary>
+        public string DebugLeaveButton { get { return _leaveButton == null ? "none" : (_leaveButton.gameObject.activeSelf ? "shown" : "hidden") + (_leaveButton.interactable ? ", can be pressed" : ", LOCKED") + ", says '" + (_leaveLabel == null ? "" : _leaveLabel.text) + "'"; } }
+
         public string DebugBanner { get { return _banner != null && _banner.gameObject.activeSelf ? _banner.text : ""; } }
 
         /// <summary>For the play scenario: draws the two telegraphs of a boss near the main character, and makes the main character fall as if killed (the box of the revive appears).</summary>
@@ -100,6 +106,10 @@ namespace BattleBall.Net
             Begin(started, mainCharacter);
             EnsureDungeonUi();
             _reviveRoot.gameObject.SetActive(false);
+            // pressing it twice locked the button ("Đang rời...") and the next dungeon showed it locked: every run starts with the button as new (owner report 2026-10-12)
+            _leaveArmedUntil = 0f;
+            _leaveButton.interactable = true;
+            _leaveLabel.text = "Rời phó bản";
             _leaveButton.gameObject.SetActive(true);
             ShowBanner(started.DungeonName, new Color(1f, 0.92f, 0.45f), 2.2f);
         }

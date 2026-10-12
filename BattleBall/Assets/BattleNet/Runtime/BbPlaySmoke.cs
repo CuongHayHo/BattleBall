@@ -913,6 +913,35 @@ namespace BattleBall.Net
         }
 
         /// <summary>
+        /// Leaving a dungeon with its own button, then starting another run and leaving that one too (owner report 2026-10-12: "when leaving by hand and choosing a new run, the dungeon
+        /// cannot be left while playing"). The button is pressed as a finger does (two touches), not through the menu shortcut the other scenarios use.
+        /// </summary>
+        async Task DungeonRejoinRun(BbMenuUi menu, BbTraining training, BbVillageView village)
+        {
+            for (int run = 1; run <= 2; run++)
+            {
+                menu.DebugOpenDungeonList();
+                await Wait(0.5f);
+                menu.dungeonPicker.DemoSelect(12);
+                await Wait(0.3f);
+                menu.dungeonPicker.DemoEnter();
+                bool arena = await WaitFor(() => village.InArena && training.InDungeon && !menu.transport.IsPlaying, 25f);
+                await Wait(1.5f);
+                Log("run " + run + ": in the arena " + arena + "; leave button " + training.DebugLeaveButton);
+                training.DebugPressLeave();
+                await Wait(0.3f);
+                training.DebugPressLeave();
+                bool popup = await WaitFor(() => menu.popup.IsOpen, 8f);
+                Log("run " + run + ": after two presses the result box is open: " + popup + "; " + menu.DebugDungeon());
+                if (!popup) { Shoot("rejoin_stuck_" + run); return; }
+                menu.popup.buttons[0].onClick.Invoke();
+                await WaitFor(() => !menu.InDungeon, 15f);
+                await Wait(0.5f);
+                Log("run " + run + ": back in the village: " + menu.DebugDungeon());
+            }
+        }
+
+        /// <summary>
         /// The difficulty of a dungeon (docs 15.33) with the real server: the list of Cui shows Dễ / Khó / Địa ngục, the chosen one is lit; the run starts at the one chosen
         /// (the server says which one in MatchStarted) and every skill is ready.
         /// </summary>
@@ -972,6 +1001,26 @@ namespace BattleBall.Net
             {
                 menu.DemoSmith(modes[i]);
                 await Wait(0.6f);
+                if (i == 0)
+                {
+                    // a tap on a piece beside her shows its figures with the buttons of her function and "Hủy" (owner request 2026-10-12); nothing goes into her panel by itself
+                    menu.DebugShowGearPopup(piece);
+                    await Wait(0.5f);
+                    Log("popup of the piece: open " + menu.popup.IsOpen + ", piece in her panel " + smith.DebugHasItem);
+                    Shoot("smith_item_popup");
+                    menu.popup.buttons[1].onClick.Invoke();
+                    await Wait(0.3f);
+                    Log("Hủy: popup open " + menu.popup.IsOpen + ", piece in her panel " + smith.DebugHasItem);
+                    menu.DebugShowGearPopup(piece);
+                    await Wait(0.3f);
+                    menu.popup.buttons[0].onClick.Invoke();
+                    await Wait(0.3f);
+                    Log("Nâng cấp: popup open " + menu.popup.IsOpen + ", piece in her panel " + smith.DebugHasItem);
+                    smith.Close();
+                    await Wait(0.8f);
+                    menu.DemoSmith(modes[i]);
+                    await Wait(0.6f);
+                }
                 smith.PutItem(piece);
                 smith.PutStone(Stone(kinds[i]));
                 if (i == 3) smith.DebugLine(1);
@@ -1622,6 +1671,7 @@ namespace BattleBall.Net
             if (scenario == "dungeon") { await DungeonRun(menu, training, village, client); return; }
             if (scenario == "dungeonape") { await DungeonApeRun(menu, training, village, client); return; }
             if (scenario == "dungeonlevels") { await DungeonLevelsRun(menu, training, village); return; }
+            if (scenario == "dungeonrejoin") { await DungeonRejoinRun(menu, training, village); return; }
             if (scenario == "dungeonfight") { await DungeonFightRun(menu, training, village, client); return; }
             if (scenario == "dungeonfusion") { await DungeonFusionRun(menu, training, village, client); return; }
             if (scenario == "trainswitch") { await TrainSwitchRun(menu, training, village); return; }

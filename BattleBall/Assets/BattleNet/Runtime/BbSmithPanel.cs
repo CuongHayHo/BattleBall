@@ -63,6 +63,10 @@ namespace BattleBall.Net
         public bool IsOpen { get { return _open; } }
         public float VisibleWidth { get { return Mathf.Clamp(PanelWidth + _x, 0f, PanelWidth); } }
         public Mode CurrentMode { get { return _mode; } }
+        public bool DebugHasItem { get { return _itemId != 0; } }
+
+        /// <summary>The name of what the panel does now ("Nâng cấp", "Đổi GEN", ...): the button of the popup of a piece.</summary>
+        public string ModeName { get { return ModeTitle(_mode); } }
 
         void Wire()
         {
