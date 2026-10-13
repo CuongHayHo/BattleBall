@@ -25,6 +25,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
+import io.netty.util.AttributeKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +43,8 @@ import java.util.concurrent.TimeUnit;
 public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelope> {
     private static final Logger LOG = LoggerFactory.getLogger(ConnectionHandler.class);
     private static final int MAX_VIOLATIONS = 3;
+    /** Why a connection is closing, read by the handler of that connection for the logout log line. */
+    private static final AttributeKey<String> CLOSE_REASON = AttributeKey.valueOf("bb.closeReason");
     private static final int ASSET_CHUNK_DEFAULT = 128 * 1024;
     private static final int ASSET_CHUNK_MAX = 256 * 1024;
 
@@ -62,6 +65,8 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
     private int violations;
     private long accountId;
     private String ip = "?";
+    private String username = "";
+    private long loginAtMs;
     private ScheduledFuture<?> helloTimer;
 
     public ConnectionHandler(ServerConfig config, AuthService auth, SessionRegistry sessions, ExecutorService dbExecutor, ConnectionLimiter limiter,
@@ -102,6 +107,9 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
         }
         if (accountId != 0) {
             sessions.unregister(accountId, ctx.channel());
+            String why = ctx.channel().attr(CLOSE_REASON).get();
+            LOG.info("LOGOUT user={} id={} ip={} reason={} online_for={} online={}", username, accountId, ip, why == null ? "connection lost" : why,
+                    formatDuration(System.currentTimeMillis() - loginAtMs), sessions.size());
             matches.onDisconnect(accountId, ctx.channel());     // a running match pauses and waits for the player to come back
         }
         if (counted) {
@@ -120,7 +128,10 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
                     Pong.newBuilder().setClientTimeMs(msg.getPing().getClientTimeMs()).setServerTimeMs(System.currentTimeMillis())).build());
             case REGISTER_REQUEST -> onRegister(ctx, rid, msg.getRegisterRequest());
             case LOGIN_REQUEST -> onLogin(ctx, rid, msg.getLoginRequest());
-            case LOGOUT_REQUEST -> ctx.close();
+            case LOGOUT_REQUEST -> {
+                ctx.channel().attr(CLOSE_REASON).setIfAbsent("logout");
+                ctx.close();
+            }
             case ASSET_MANIFEST_REQUEST -> onAssetManifest(ctx, rid);
             case ASSET_CHUNK_REQUEST -> onAssetChunk(ctx, rid, msg.getAssetChunkRequest());
             case CHANGE_PASSWORD_REQUEST -> {
@@ -165,6 +176,16 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
                     matches.switchControl(accountId, msg.getSwitchControlRequest().getEntityId());
                 }
             }
+            case FUSE_REQUEST -> {
+                if (state == State.AUTHENTICATED) {
+                    matches.fuse(accountId, msg.getRequestId(), msg.getFuseRequest().getMainCharacterId(), msg.getFuseRequest().getPartnerCharacterId());
+                }
+            }
+            case SPLIT_FUSION_REQUEST -> {
+                if (state == State.AUTHENTICATED) {
+                    matches.splitFusion(accountId, msg.getRequestId());
+                }
+            }
             case MATCH_READY -> {
                 if (state == State.AUTHENTICATED) {
                     matches.ready(accountId);
@@ -188,7 +209,9 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
                     if (account != 0) {
                         state = State.AUTHENTICATED;
                         accountId = account;
-                        Channel previous = sessions.register(accountId, ctx.channel());
+                        username = sessions.nameOf(accountId);
+                        loginAtMs = System.currentTimeMillis();
+                        Channel previous = sessions.register(accountId, username, ip, ctx.channel());
                         if (previous != null && previous != ctx.channel()) {
                             kick(previous);
                         }
@@ -312,10 +335,16 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
                 if (outcome.ok()) {
                     state = State.AUTHENTICATED;
                     accountId = outcome.accountId();
-                    Channel previous = sessions.register(accountId, ctx.channel());
+                    username = outcome.result().getUsername();
+                    loginAtMs = System.currentTimeMillis();
+                    Channel previous = sessions.register(accountId, username, ip, ctx.channel());
                     if (previous != null && previous != ctx.channel()) {
                         kick(previous);
                     }
+                    LOG.info("LOGIN user={} id={} ip={} via={} online={}", username, accountId, ip,
+                            req.getCredentialCase() == LoginRequest.CredentialCase.REFRESH_TOKEN ? "token" : "password", sessions.size());
+                } else {
+                    LOG.info("LOGIN FAILED user={} ip={} error={}", req.getUsername().isEmpty() ? "(token)" : printable(req.getUsername()), ip, outcome.result().getError());
                 }
                 ctx.writeAndFlush(Envelope.newBuilder().setRequestId(rid).setLoginResult(outcome.result()).build());
                 if (outcome.ok()) {
@@ -344,6 +373,7 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
 
     /** Sent to the older connection of an account that logged in again: LOGGED_IN_ELSEWHERE (CONFIRMED rule). */
     private static void kick(Channel old) {
+        old.attr(CLOSE_REASON).setIfAbsent("logged in elsewhere");
         old.eventLoop().execute(() -> old.writeAndFlush(Envelope.newBuilder().setDisconnectNotice(DisconnectNotice.newBuilder()
                 .setReason(DisconnectReason.LOGGED_IN_ELSEWHERE).setMessage("logged in elsewhere")).build()).addListener(ChannelFutureListener.CLOSE));
     }
@@ -379,7 +409,20 @@ public final class ConnectionHandler extends SimpleChannelInboundHandler<Envelop
             ctx.close();
             return;
         }
+        ctx.channel().attr(CLOSE_REASON).setIfAbsent(reason.name().toLowerCase().replace('_', ' ') + " (" + message + ")");
         ctx.writeAndFlush(Envelope.newBuilder().setDisconnectNotice(DisconnectNotice.newBuilder().setReason(reason).setMessage(message)).build())
                 .addListener(ChannelFutureListener.CLOSE);
+    }
+
+    /** A name typed by an unknown client: no control characters (a fake log line) and no more than 30 chars. */
+    private static String printable(String text) {
+        String t = text.length() > 30 ? text.substring(0, 30) : text;
+        return t.replaceAll("\\p{Cntrl}", "?");
+    }
+
+    /** 3725000 ms -> "1h02m05s". */
+    public static String formatDuration(long ms) {
+        long s = Math.max(0, ms) / 1000;
+        return s >= 3600 ? String.format("%dh%02dm%02ds", s / 3600, s % 3600 / 60, s % 60) : String.format("%dm%02ds", s / 60, s % 60);
     }
 }

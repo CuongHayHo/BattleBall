@@ -379,6 +379,29 @@ namespace BattleBall.Net
             Shoot("attend_again");
         }
 
+        /// <summary>The earring (owner remark 2026-10-13: 100 shards could not be used): the slot of the bag with the shards, the button that makes the earring, the earring slot afterwards.</summary>
+        async Task EarringRun(BbMenuUi menu, BbClient client)
+        {
+            menu.SetPanelOpen(true, true);
+            var r = await client.MailActionAsync(0, MailAction.MailClaimAll);
+            await Wait(1.0f);
+            var p = client.Snapshot.Potara;
+            Log("claimed the gifts: " + r.Ok + "; shards " + p.Fragments + "/" + p.ShardsNeeded + ", earring owned " + p.Owned);
+            menu.DebugTapEarring();
+            await Wait(0.6f);
+            Log("tap on the slot: popup open " + menu.popup.IsOpen + ", button " + (menu.popup.buttons.Length > 0 && menu.popup.buttons[0].gameObject.activeInHierarchy));
+            Shoot("earring_shards");
+            if (menu.popup.buttons.Length > 0) menu.popup.buttons[0].onClick.Invoke();
+            await WaitFor(() => client.Snapshot.Potara.Owned, 8f);
+            await Wait(0.8f);
+            p = client.Snapshot.Potara;
+            Log("after Ghép Bông tai: earring owned " + p.Owned + ", shards left " + p.Fragments);
+            menu.DebugTapEarring();
+            await Wait(0.6f);
+            Log("tap on the earring: popup open " + menu.popup.IsOpen);
+            Shoot("earring_owned");
+        }
+
         /// <summary>The gift mail of 2026-10-12 (docs 15.35): the mail is claimed (99 skill cards and an EXP bag), the bag is used on the Earth character and takes it to level 100.</summary>
         async Task GiftRun(BbMenuUi menu, BbClient client)
         {
@@ -706,6 +729,56 @@ namespace BattleBall.Net
             Log("back: " + menu2.DebugDungeon());
         }
 
+        /// <summary>
+        /// The earring taken off inside a dungeon (docs 15.40): a fused team enters, the player takes over the other character and back to the fusion (as before), then taps the
+        /// earring and "Tách": the fused fighter becomes the main character and its partner, who can then be taken over by its own tab.
+        /// </summary>
+        async Task DungeonSplitRun(BbMenuUi menu, BbTraining training, BbVillageView village, BbClient client)
+        {
+            client.Send(new Envelope { PlayerDataRequest = new PlayerDataRequest() });          // the run script raised the levels and gave the earring after the login: the client needs the new snapshot
+            await Wait(1.5f);
+            menu.DemoSelect(0);
+            await Wait(1.0f);
+            menu.DemoFuse(0, 1);                                        // Trái Đất (chủ) + Xayda, Namếc stays an AI
+            await Wait(0.5f);
+            menu.DebugOpenDungeonList();
+            await Wait(0.5f);
+            menu.dungeonPicker.DemoSelect(12);
+            menu.dungeonPicker.DemoEnter();
+            bool arena = await WaitFor(() => village.InArena && training.InDungeon && !menu.transport.IsPlaying, 25f);
+            if (!arena) { Log("FAILED: no arena"); return; }
+            await Wait(2.0f);
+            Log("fused in the dungeon: party " + village.PartyCount + "; " + menu.DebugPage() + "; " + Party(training, village));
+            menu.DebugSelectRace(2);                                    // the AI outside the fusion is taken over
+            await Wait(0.8f);
+            menu.DebugSelectRace(0);                                    // and back to the fusion
+            await Wait(0.8f);
+            Log("back to the fusion: " + menu.DebugPage() + "; " + training.DebugControl());
+            Shoot("split_before");
+            menu.DemoEarring();
+            await Wait(0.4f);
+            Log("the earring popup is open: " + menu.popup.IsOpen);
+            if (!menu.popup.IsOpen) return;
+            Log("popup buttons: " + menu.popup.buttons.Length + ", first active " + menu.popup.buttons[0].gameObject.activeInHierarchy + " interactable " + menu.popup.buttons[0].interactable);
+            menu.popup.buttons[0].onClick.Invoke();                     // Tách
+            Log("after the press: popup open " + menu.popup.IsOpen);
+            await Wait(2.0f);
+            Log("after the split: party " + village.PartyCount + "; " + menu.DebugPage() + "; " + training.DebugControl() + "; " + Party(training, village));
+            Shoot("split_after");
+            menu.DebugSelectRace(1);                                    // the partner is a character of its own now: its tab takes it over
+            await Wait(1.0f);
+            Log("the partner taken over: " + menu.DebugPage() + "; " + training.DebugControl() + "; " + Party(training, village));
+            menu.DebugFuseInDungeon(0, 1);                              // the earring fuses them again, inside the dungeon (docs 15.41): Trái Đất (chủ) + Xayda
+            await Wait(2.0f);
+            Log("fused again: party " + village.PartyCount + "; " + menu.DebugPage() + "; " + training.DebugControl() + "; " + Party(training, village));
+            Shoot("fuse_after");
+            menu.DebugLeaveDungeon();
+            await WaitFor(() => menu.popup.IsOpen, 10f);
+            menu.popup.buttons[0].onClick.Invoke();
+            await WaitFor(() => !menu.InDungeon, 15f);
+            Log("back: " + menu.DebugDungeon());
+        }
+
         /// <summary>The same in the village: the training session goes on (same match token) when the player takes over another character through the tabs.</summary>
         async Task TrainSwitchRun(BbMenuUi menu, BbTraining training, BbVillageView village)
         {
@@ -991,6 +1064,12 @@ namespace BattleBall.Net
             menu.SetPanelOpen(false, true, false);                                                  // the menu is folded away: its button must be there after the dungeon
             menu.DebugOpenDungeonList();
             await Wait(0.5f);
+            foreach (uint shownId in new uint[] { 3, 11, 6 })
+            {
+                menu.dungeonPicker.DemoSelect(shownId);
+                await Wait(0.3f);
+                Shoot("dungeon_list_" + shownId);
+            }
             menu.dungeonPicker.DemoSelect(12);
             await Wait(0.3f);
             Shoot("levels_default");
@@ -1706,6 +1785,7 @@ namespace BattleBall.Net
             if (scenario == "gen") { await GenRun(menu, village, client); return; }
             if (scenario == "smith") { await SmithRun(menu, village, client); return; }
             if (scenario == "attend") { await AttendRun(menu, village, client); return; }
+            if (scenario == "earring") { await EarringRun(menu, client); return; }
             if (scenario == "gift") { await GiftRun(menu, client); return; }
             if (scenario == "quest") { await QuestRun(menu, training, village, client); return; }
             if (scenario == "smithstar") { await SmithStarRun(menu, village, client); return; }
@@ -1713,6 +1793,7 @@ namespace BattleBall.Net
             if (scenario == "dungeon") { await DungeonRun(menu, training, village, client); return; }
             if (scenario == "dungeonape") { await DungeonApeRun(menu, training, village, client); return; }
             if (scenario == "dungeonlevels") { await DungeonLevelsRun(menu, training, village); return; }
+            if (scenario == "dungeonsplit") { await DungeonSplitRun(menu, training, village, client); return; }
             if (scenario == "dungeonrejoin") { await DungeonRejoinRun(menu, training, village); return; }
             if (scenario == "dungeonfight") { await DungeonFightRun(menu, training, village, client); return; }
             if (scenario == "dungeonfusion") { await DungeonFusionRun(menu, training, village, client); return; }

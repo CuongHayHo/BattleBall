@@ -132,6 +132,29 @@ namespace BattleBall.Net
             return seconds % 60 == 0 ? (seconds / 60) + " phút" : (seconds / 60) + " phút " + (seconds % 60) + " giây";
         }
 
+        /// <summary>
+        /// What the list says about a dungeon (docs 15.38): the title, the bosses that can come (only some come in one match) and the last one, the small monsters of the waves and what
+        /// can drop. The server builds the lists from its own data, so they always match what the dungeon holds.
+        /// </summary>
+        static string Describe(DungeonInfo d)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append(d.Name).Append(" (").Append(TierName(d.Tier)).Append("), cấp đề nghị ").Append(d.RecommendedLevel).Append(". Mỗi trận gặp ").Append(d.BossCount).Append(" boss");
+            if (d.TimeLimitS > 0) sb.Append(", giới hạn ").Append(Minutes(d.TimeLimitS));
+            sb.Append('.');
+            if (d.BossNames.Count > 0 || d.FinalBoss.Length > 0)
+            {
+                sb.Append("\nBoss: ");
+                const int shown = 6;
+                for (int i = 0; i < d.BossNames.Count && i < shown; i++) sb.Append(i > 0 ? ", " : "").Append(d.BossNames[i]);
+                if (d.BossNames.Count > shown) sb.Append(" và ").Append(d.BossNames.Count - shown).Append(" boss khác");
+                if (d.FinalBoss.Length > 0) sb.Append(d.BossNames.Count > 0 ? ". Boss cuối: " : "").Append(d.FinalBoss);
+            }
+            if (d.MinionNames.Count > 0) sb.Append("\nQuái nhỏ: ").Append(string.Join(", ", d.MinionNames));
+            if (d.Drops.Count > 0) sb.Append("\nRơi: ").Append(string.Join(", ", d.Drops));
+            return sb.ToString();
+        }
+
         void Refresh()
         {
             int pages = Mathf.Max(1, (_list.Count + PerPage - 1) / PerPage);
@@ -163,9 +186,7 @@ namespace BattleBall.Net
             }
             else
             {
-                var d = _list[_selected];
-                detailText.text = d.Name + " (" + TierName(d.Tier) + ")\nCấp đề nghị " + d.RecommendedLevel + ". Gặp " + d.BossCount + " boss, mỗi boss có các đợt quái nhỏ đi trước."
-                                  + (d.TimeLimitS > 0 ? "\nGiới hạn thời gian: " + Minutes(d.TimeLimitS) + "." : "");
+                detailText.text = Describe(_list[_selected]);
             }
             RefreshDifficulty();
             enter.interactable = _selected >= 0 && _canEnter;

@@ -13,8 +13,8 @@ function cfg(string $key, $default = null)
             'db_name' => getenv('BB_DB_NAME') ?: 'battleball',
             'db_user' => getenv('BB_DB_USER') ?: 'root',
             'db_pass' => getenv('BB_DB_PASS') !== false ? getenv('BB_DB_PASS') : '',
-            // The page is reachable only from these addresses (comma separated in BB_ADMIN_IPS). Default: this machine.
-            'allowed_ips' => array_filter(array_map('trim', explode(',', getenv('BB_ADMIN_IPS') ?: '127.0.0.1,::1'))),
+            // Optional: the page answers only to these addresses (comma separated in BB_ADMIN_IPS). Default: empty = every address (owner choice 2026-10-13).
+            'allowed_ips' => array_filter(array_map('trim', explode(',', getenv('BB_ADMIN_IPS') ?: ''))),
         ];
         $file = __DIR__ . '/config.php';
         if (is_file($file)) {
@@ -45,7 +45,8 @@ function h($s): string
 
 function boot(): void
 {
-    if (!in_array($_SERVER['REMOTE_ADDR'] ?? '', cfg('allowed_ips'), true)) {
+    $allowed = cfg('allowed_ips');
+    if ($allowed && !in_array($_SERVER['REMOTE_ADDR'] ?? '', $allowed, true)) {   // an empty list = reachable from anywhere (the login and its limit are the door)
         http_response_code(403);
         exit('Forbidden');
     }
@@ -424,33 +425,4 @@ function stat_rows_form(PDO $pdo, string $table, string $idCol, $id): void
         echo '<option value="' . h($t['stat_key']) . '">' . h($t['name_vi'] . ($t['enabled'] ? '' : ' (đang tắt)')) . '</option>';
     }
     echo '</select></td><td><input class="num" type="text" name="new_stat_value" placeholder="giá trị"></td><td></td></tr></tbody></table>';
-}
-
-function layout_start(string $title, string $active = ''): void
-{
-    $menu = [
-        'home' => 'Tổng quan', 'stats' => 'Chỉ số', 'skins' => 'Skin', 'kinds' => 'Loại skin', 'rarity' => 'Độ hiếm', 'groups' => 'Giá theo nhóm',
-        'supports' => 'Đồ hỗ trợ', 'bookpool' => 'Sách tuyệt kỹ', 'dungeons' => 'Phó bản', 'monsters' => 'Quái phó bản', 'monsterstats' => 'Chỉ số quái', 'bossmult' => 'Hệ số boss', 'droprules' => 'Bảng rơi đồ', 'gemrewards' => 'Nguồn đá quý', 'dropmult' => 'Hệ số rơi phó bản', 'dungeonbosses' => 'Boss phó bản', 'bossgroups' => 'Nhóm boss', 'recipes' => 'Công thức ghép', 'recipeinputs' => 'Nguyên liệu ghép', 'achievements' => 'Thành tích', 'defaultskins' => 'Avatar mặc định',
-        'mail' => 'Hòm thư', 'welcome' => 'Quà tân thủ', 'notices' => 'Thông báo', 'balance' => 'Cân bằng', 'boss_group_picker.html' => 'Nhóm boss phó bản', 'drop_picker.html' => 'Chọn boss rơi', 'runs' => 'Các trận', 'anomalies' => 'Bất thường', 'audit' => 'Nhật ký',
-    ];
-    echo '<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        . '<title>' . h($title) . ' · BattleBall Admin</title><link rel="stylesheet" href="style.css"></head><body>';
-    if (admin_name() !== null) {
-        echo '<nav>';
-        foreach ($menu as $k => $lab) {
-            echo '<a href="' . (substr($k, -5) === '.html' ? h($k) : '?p=' . $k) . '"' . ($k === $active ? ' class="on"' : '') . '>' . h($lab) . '</a>';
-        }
-        echo '<span class="sp"></span><span class="muted">' . h(admin_name()) . '</span>'
-            . '<form method="post" action="?p=logout" class="inline">' . csrf_field() . '<button type="submit" class="link">Đăng xuất</button></form></nav>';
-    }
-    echo '<main>';
-    foreach (($_SESSION['flash'] ?? []) as [$kind, $msg]) {
-        echo '<div class="flash ' . h($kind) . '">' . h($msg) . '</div>';
-    }
-    unset($_SESSION['flash']);
-}
-
-function layout_end(): void
-{
-    echo '</main></body></html>';
 }

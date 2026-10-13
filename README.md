@@ -24,9 +24,9 @@ Game hack & slash chơi đơn cho Android: đội 3 nhân vật (1 người chơ
 - Hợp thể bằng Bông tai Potara; tài nguyên game gửi qua chính kết nối game (không dùng HTTP).
 - Trận đấu có thẩm quyền ở server, tick 20 Hz, có phần thưởng, nhật ký trận và cho phép vào lại khi mất kết nối. 13 phó bản, mỗi phó bản có các đợt quái nhỏ trước từng boss; boss có bộ chiêu theo hành tinh (có vùng cảnh báo đỏ) và không có Tự phát nổ; phó bản 3 là boss khỉ tiến hóa qua 7 dạng. Mỗi phó bản chạy ở ba độ khó (Dễ, Khó, Địa ngục) nhân HP và sát thương quái và phần thưởng; vào phó bản thì mọi kỹ năng sẵn sàng. Đổi nhân vật điều khiển giữa trận không mất trạng thái. Kỹ năng khống chế tác dụng lên boss với thời gian rút ngắn; AI chỉ dùng kỹ năng khống chế đơn mục tiêu và chỉ lên boss.
 - Phiên huấn luyện với mộc nhân trong làng.
-- Có 122 kiểm thử tự động. Các kiểm thử cần DB chỉ chạy khi đặt `BB_TEST_DB_URL`.
+- Có 130 kiểm thử tự động. Các kiểm thử cần DB chỉ chạy khi đặt `BB_TEST_DB_URL`.
 
-**Cơ sở dữ liệu** (`BattleBallServer/db/migrations/`): các migration đánh số `V001` đến `V048`, tự áp dụng khi server khởi động. Đã kiểm chứng trên MariaDB 10.4; chưa thử trên 10.6 trở lên.
+**Cơ sở dữ liệu** (`BattleBallServer/db/migrations/`): các migration đánh số `V001` đến `V055`, tự áp dụng khi server khởi động. Đã kiểm chứng trên MariaDB 10.4; chưa thử trên 10.6 trở lên.
 
 **Web** (`BattleBallServer/web/`, `admin/`): trang đăng ký bằng PHP (có captcha) và trang quản trị chỉnh dữ liệu tĩnh. Sao chép `config.sample.php` thành `config.php` rồi điền cấu hình riêng.
 

@@ -165,10 +165,6 @@ public final class StaticDataLoader {
         }
         List<StaticData.GemRule> gems = rows(c, "SELECT reward_type, dungeon_id, gems, daily_cap, enabled FROM gem_reward_rule",
                 rs -> new StaticData.GemRule(rs.getString(1), (Integer) nullableInt(rs, 2), rs.getInt(3), (Integer) nullableInt(rs, 4), rs.getBoolean(5)));
-        List<StaticData.Achievement> achievements = rows(c, "SELECT achievement_id, name_vi, race, condition_type, threshold, reward_costume_id, reward_gems "
-                        + "FROM achievement_template WHERE enabled = 1",
-                rs -> new StaticData.Achievement(rs.getInt(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getInt(5), (Integer) nullableInt(rs, 6),
-                        (Integer) nullableInt(rs, 7)));
 
         Map<String, List<Integer>> defaults = new HashMap<>();
         Map<String, Integer> equipped = new HashMap<>();
@@ -207,7 +203,7 @@ public final class StaticDataLoader {
 
         return new StaticData(versions, Map.copyOf(balance), Map.copyOf(stats), Map.copyOf(kinds), Map.copyOf(skins), Map.copyOf(skills), Map.copyOf(items),
                 Map.copyOf(materials), Map.copyOf(support), List.copyOf(pool), recipes, List.copyOf(drops), Map.copyOf(mult), List.copyOf(gems),
-                List.copyOf(achievements), Map.copyOf(defaults), Map.copyOf(equipped), Map.copyOf(dungeons), Map.copyOf(bosses), Map.copyOf(monsters));
+                Map.copyOf(defaults), Map.copyOf(equipped), Map.copyOf(dungeons), Map.copyOf(bosses), Map.copyOf(monsters));
     }
 
     private static <T> List<T> rows(Connection c, String sql, RowMapper<T> mapper) throws SQLException {

@@ -167,12 +167,12 @@ public final class Entities {
         public final String race;
         public final int level;
         public boolean controlled;                       // changes when the player takes over another character (MatchEngine.switchControl)
-        public final boolean fusion;
-        public final long partnerCharacterId;
+        public boolean fusion;                           // false after the earring splits the fusion in a dungeon (MatchEngine.splitFusion)
+        public long partnerCharacterId;
         public final Map<Integer, StaticData.Skill> skillBySlot = new HashMap<>();
         public final Map<Integer, Integer> skillLevelBySlot = new HashMap<>();
         public final Map<Integer, Long> cooldownUntil = new HashMap<>();
-        public final int costumeId;
+        public int costumeId;
         public Cast cast;
         public Channel channel;
         /** One skill at a time: until this moment the fighter is still doing the last skill (its animation) and starts no other (the Nro client refuses while the paint plays). */

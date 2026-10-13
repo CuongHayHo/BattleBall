@@ -399,6 +399,9 @@ class MatchIntegrationTest {
             }
             double goldRatio = (double) ended[1].getGold() / ended[0].getGold();
             double expRatio = (double) ended[1].getCharacters(0).getExpGained() / ended[0].getCharacters(0).getExpGained();
+            // the achievements that gave avatars are gone (docs 15.39): two won matches of level 30 characters granted no skin and recorded nothing
+            assertEquals(0, scalar("SELECT COUNT(*) FROM owned_skin WHERE account_id = ? AND source = 'REWARD'", p.accountId()), "no avatar comes from a match");
+            assertEquals(0, scalar("SELECT COUNT(*) FROM character_achievement WHERE character_id IN (?, ?, ?)", p.characters()[0], p.characters()[1], p.characters()[2]));
             assertTrue(goldRatio > 1.3 && goldRatio < 1.9, "hard pays about 1.6 times the gold of easy: " + goldRatio);
             assertTrue(expRatio > 1.3 && expRatio < 1.9, "...and the EXP: " + expRatio);
         }
@@ -469,6 +472,40 @@ class MatchIntegrationTest {
             var fused = started.getEntitiesList().stream().filter(e -> e.getControlled()).findFirst().orElseThrow();
             assertEquals(mainHp + partnerHp, fused.getHpMax(), "fusion adds the stats of both characters");
             assertTrue(fused.getName().contains("hợp thể"));
+            // the earring taken off in the dungeon (docs 15.40): ActionResult ok, then the partner is a fighter of its own and the main character has its own figures
+            c.send(Envelope.newBuilder().setRequestId(30).setSplitFusionRequest(com.battleball.proto.SplitFusionRequest.getDefaultInstance()).build());
+            Envelope answer = c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000);
+            assertEquals(30, answer.getRequestId());
+            assertTrue(answer.getActionResult().getOk(), "the fused fighter splits");
+            boolean sawSplit = false;
+            boolean sawPartner = false;
+            for (int i = 0; i < 100 && !(sawSplit && sawPartner); i++) {
+                Envelope e = c.next(2000);
+                if (e != null && e.hasMatchFrame()) {
+                    sawSplit |= e.getMatchFrame().getEffectsList().stream().anyMatch(x -> x.getEffect() == com.battleball.proto.Effect.FUSION_SPLIT);
+                    sawPartner |= e.getMatchFrame().getSpawnsList().stream().anyMatch(x -> x.getCharacterId() == p.characters()[1]);
+                }
+            }
+            assertTrue(sawSplit && sawPartner, "the frames tell the split and show the partner");
+            c.send(Envelope.newBuilder().setRequestId(31).setSplitFusionRequest(com.battleball.proto.SplitFusionRequest.getDefaultInstance()).build());
+            assertFalse(c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getOk(), "a second split is refused: nothing is fused");
+            // and the earring fuses them again in the dungeon (docs 15.41): a partner that does not exist is refused, the real pair is merged and the frames say so
+            c.send(Envelope.newBuilder().setRequestId(32).setFuseRequest(com.battleball.proto.FuseRequest.newBuilder().setMainCharacterId(p.characters()[0]).setPartnerCharacterId(987654321L)).build());
+            assertEquals(ActionError.NOT_FOUND, c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000).getActionResult().getError(), "no such partner");
+            c.send(Envelope.newBuilder().setRequestId(33).setFuseRequest(com.battleball.proto.FuseRequest.newBuilder().setMainCharacterId(p.characters()[0]).setPartnerCharacterId(p.characters()[1])).build());
+            Envelope fuseAnswer = c.expectCase(Envelope.PayloadCase.ACTION_RESULT, 5000);
+            assertEquals(33, fuseAnswer.getRequestId());
+            assertTrue(fuseAnswer.getActionResult().getOk(), "the two characters fuse in the dungeon");
+            boolean sawMerge = false;
+            boolean sawGone = false;
+            for (int i = 0; i < 100 && !(sawMerge && sawGone); i++) {
+                Envelope e = c.next(2000);
+                if (e != null && e.hasMatchFrame()) {
+                    sawMerge |= e.getMatchFrame().getEffectsList().stream().anyMatch(x -> x.getEffect() == com.battleball.proto.Effect.FUSION_MERGE);
+                    sawGone |= e.getMatchFrame().getDespawnsCount() > 0;
+                }
+            }
+            assertTrue(sawMerge && sawGone, "the frames tell the merge and the partner that is gone");
             c.send(Envelope.newBuilder().setLeaveMatchRequest(LeaveMatchRequest.getDefaultInstance()).build());
             assertEquals(MatchResult.ABANDONED, c.expectCase(Envelope.PayloadCase.MATCH_ENDED, 8000).getMatchEnded().getResult());
             // the partner gets its own EXP row only when a result with EXP exists; an abandoned match with no kills pays nothing

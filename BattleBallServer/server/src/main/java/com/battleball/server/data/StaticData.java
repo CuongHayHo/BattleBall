@@ -22,7 +22,6 @@ public record StaticData(
         List<DropRule> dropRules,
         Map<String, Double> dungeonDropMult,
         List<GemRule> gemRules,
-        List<Achievement> achievements,
         Map<String, List<Integer>> defaultSkinsByRace,
         Map<String, Integer> equippedDefaultSkinByRace,
         Map<Integer, Dungeon> dungeons,
@@ -83,9 +82,6 @@ public record StaticData(
     }
 
     public record GemRule(String type, Integer dungeonId, int gems, Integer dailyCap, boolean enabled) {
-    }
-
-    public record Achievement(int id, String name, String race, String condition, int threshold, Integer rewardCostumeId, Integer rewardGems) {
     }
 
     public record DungeonBoss(int bossId, String role, String mobTier, int sortOrder) {

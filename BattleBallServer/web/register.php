@@ -3,6 +3,7 @@
 // It writes straight into the game database, with the same rows as the in-game registration.
 declare(strict_types=1);
 require __DIR__ . '/lib.php';
+require __DIR__ . '/layout.php';
 start_session();
 
 $message = null;
@@ -50,15 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message = 'Hệ thống đang bận, hãy thử lại sau.';
     }
 }
-?><!doctype html>
-<html lang="vi">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Đăng ký BattleBall</title>
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
+web_header('Đăng ký BattleBall', 'register');
+?>
 <main>
   <h1>Đăng ký BattleBall</h1>
   <p class="muted">Không cần email. Mỗi tài khoản có sẵn 3 nhân vật (Trái Đất, Namếc, Xayda).</p>
@@ -83,7 +77,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="hp" aria-hidden="true"><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
     <button type="submit">Tạo tài khoản</button>
   </form>
+  <?php else: ?>
+  <p><a class="btn ghost" href="index.php#tai-game">Tải game</a></p>
   <?php endif; ?>
 </main>
-</body>
-</html>
+<?php web_footer();

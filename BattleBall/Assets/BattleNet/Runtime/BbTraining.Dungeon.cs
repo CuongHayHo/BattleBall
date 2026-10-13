@@ -337,6 +337,35 @@ namespace BattleBall.Net
                     if (!_dummyKey.ContainsKey(ef.SourceId)) return false;
                     OnEnemyCast(ef);                                  // a boss uses a skill of the Xayda: the charge to evolve, Trói, Huýt sáo, Tái tạo năng lượng
                     return true;
+                case Effect.FusionMerge:
+                {
+                    // the earring fused two characters: the partner's fighter is gone (its despawn comes in this frame), the main character's one is the fusion
+                    ulong mainCharacter, partnerCharacter;
+                    if (!_characterOf.TryGetValue(ef.SourceId, out mainCharacter) || !_characterOf.TryGetValue(ef.TargetId, out partnerCharacter)) return true;
+                    if (_myCharacter == partnerCharacter) RequestControl(mainCharacter);          // the server gave the control to the fusion: the buttons are the skills of the main character
+                    _sessionPartner = partnerCharacter;
+                    _fusedSession = true;
+                    if (menu != null) menu.OnDungeonMerge(mainCharacter, partnerCharacter);
+                    _characterOf.Remove(ef.TargetId);
+                    _entityOf.Remove(partnerCharacter);
+                    _states.Remove(ef.TargetId);
+                    BuildHuds();
+                    BbSfx.Play(BbSfx.Revive, 0.5f);
+                    return true;
+                }
+                case Effect.FusionSplit:
+                {
+                    // the earring was taken off: the fused fighter is the main character alone and its partner stands beside it (the spawn of the partner came first in this frame)
+                    ulong partner;
+                    if (!_characterOf.TryGetValue(ef.TargetId, out partner)) return true;
+                    _sessionPartner = 0;
+                    _fusedSession = false;
+                    if (menu != null) menu.OnDungeonSplit(partner);
+                    village.SnapParty(partner, new Vector2(ef.X, ef.Y) * _arenaScale);
+                    BuildHuds();                                                      // a frame of HP and Ki for the partner too
+                    BbSfx.Play(BbSfx.Revive, 0.5f);
+                    return true;
+                }
                 case Effect.BossEvolve:
                 {
                     string ekey;

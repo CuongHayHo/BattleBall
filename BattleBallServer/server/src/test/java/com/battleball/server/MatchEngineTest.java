@@ -1445,7 +1445,7 @@ class MatchEngineTest {
         assertTrue(lv7[0] > lv1[0] * 1.2, "a higher level hits harder: " + lv1[0] + " then " + lv7[0]);
         double cap = (11 + 6) * lv7[1] * 1.06;                                         // level 7: 11 x attack plus at most 6 x attack of the HP part, 5% spread
         assertTrue(lv7[0] <= cap, "the bomb stays under " + cap + " (it was " + lv7[0] + "; the boss has " + lv7[2] + " HP, a tenth of it is " + lv7[2] / 10 + ")");
-        assertTrue(lv7[0] < lv7[2] / 10, "it is far from a tenth of the HP of the boss");
+        assertTrue(lv7[0] < lv7[2], "it is under a tenth of the HP a boss has by the table (the bosses have a tenth of that now, docs 15.36)");
     }
 
     @Test
@@ -1501,5 +1501,186 @@ class MatchEngineTest {
             assertEquals(MatchResult.WON, out.result(), "seed " + seed + ": " + out.bossesDefeated() + " bosses");
             assertEquals(5, out.bossesDefeated());
         }
+    }
+
+    @Test
+    void everyBossHasATenthOfTheHpAndHitsHarderButTheSmallMonstersAreNotScaled() {
+        // balance_config boss_scale (docs 15.36): HP x0.1 and damage x3 for the bosses only
+        Map<String, Object> scale = d.balanceObj("boss_scale");
+        assertEquals(0.1, (Double) scale.get("hp"), 1e-9);
+        assertTrue((Double) scale.get("atk") > 1, "the bosses hit harder than the table says");
+        Entities.Monster boss = null;
+        Entities.Monster minion = null;
+        MatchEngine withBoss = engineBare(12, 1, List.of(member(1, "EARTH", 100, true, EARTH_SKILLS, 1, 1000)), 5);
+        MatchEngine withWaves = engine(12, 1, List.of(member(1, "EARTH", 100, true, EARTH_SKILLS, 1, 1000)), 5);
+        for (int i = 0; i < 20 * 8; i++) {
+            withBoss.step();
+            withBoss.buildFrame();
+            withWaves.step();
+            withWaves.buildFrame();
+        }
+        for (var x : withBoss.entities()) {
+            if (x instanceof Entities.Monster m && m.kind == Entities.MonsterKind.BOSS) {
+                boss = m;
+            }
+        }
+        for (var x : withWaves.entities()) {
+            if (x instanceof Entities.Monster m && m.kind != Entities.MonsterKind.BOSS) {
+                minion = m;
+                break;
+            }
+        }
+        assertNotNull(boss);
+        assertNotNull(minion);
+        StaticData.MonsterStat bossStat = d.monsterStat(boss.classKey, d.dungeons().get(12).tier());
+        assertEquals(Math.round(bossStat.hp() * boss.boss.hpMult() * 0.1), boss.hpMax, "a boss has a tenth of the HP of the table");
+        double most = bossStat.atkMax() / 100.0 * d.balanceNum("max_atk_total", 500_000) * boss.boss.atkMult();
+        assertTrue(boss.atkPerHit > most, "...and hits harder than the strongest hit of the table: " + boss.atkPerHit + " against " + most);
+        StaticData.MonsterStat minionStat = d.monsterStat(minion.classKey, d.dungeons().get(12).tier());
+        assertEquals(Math.round(minionStat.hp() * minion.boss.hpMult()), minion.hpMax, "a small monster keeps the HP of the table");
+        assertTrue(minion.atkPerHit <= minionStat.atkMax() / 100.0 * d.balanceNum("max_atk_total", 500_000) * minion.boss.atkMult() + 1e-6, "...and its damage");
+    }
+
+    @Test
+    void aChuongInADungeonOnlyHitsWhatItTouches() {
+        // owner report 2026-10-13: the Kamejoko (and the other chuong) killed monsters that the dart did not touch: its hit band was 220 px wide, the dart is drawn a few dozen px wide
+        MatchEngine e = engine(12, 1, List.of(member(1, "EARTH", 100, true, EARTH_SKILLS, 1, 1000)), 5);
+        java.util.List<Entities.Monster> small = new java.util.ArrayList<>();
+        for (int i = 0; i < 20 * 20 && small.size() < 2; i++) {
+            e.step();
+            e.buildFrame();
+            small.clear();
+            for (var x : e.entities()) {
+                if (x instanceof Entities.Monster m && m.kind != Entities.MonsterKind.BOSS) {
+                    small.add(m);
+                }
+            }
+        }
+        assertTrue(small.size() >= 2, "a wave has come");
+        Entities.Fighter me = e.controlledFighter();
+        Entities.Monster onTheLine = small.get(0);
+        Entities.Monster beside = small.get(1);
+        for (var m : small) {
+            m.hpMax = m.hp = 1_000_000_000_000L;
+            m.stunUntil = e.nowMs() + 60_000;
+        }
+        onTheLine.x = me.x + 220;
+        onTheLine.y = me.y + 12;
+        beside.x = me.x + 220;
+        beside.y = me.y + 90;                                                    // inside the old band (110 px), far from the dart
+        me.dirX = 1;
+        me.dirY = 0;
+        e.submit(() -> e.useSkill(1, slotOf(1), 0, 1, 0));
+        java.util.Set<Integer> hit = new java.util.HashSet<>();
+        for (int i = 0; i < 20 * 3; i++) {
+            e.step();
+            for (var dm : e.buildFrame().getDamagesList()) {
+                if (dm.getSkillId() == 1 && dm.getAmount() > 0) {
+                    hit.add(dm.getTargetId());
+                }
+            }
+        }
+        assertTrue(hit.contains(onTheLine.id), "what the dart touches is hit");
+        assertFalse(hit.contains(beside.id), "a monster 90 px beside the line is not");
+    }
+
+    /** A fusion of Trai Dat (main) and Xayda as the server makes it: the summed figures in one fighter, and the two characters alone to split into. */
+    private static MatchSetup.SquadMember fusedMember(boolean controlled) {
+        MatchSetup.SquadMember earth = member(1, "EARTH", 100, controlled, EARTH_SKILLS);
+        MatchSetup.SquadMember xayda = member(3, "XAYDA", 100, false, XAYDA_SKILLS);
+        StatCalculator.CharacterStats a = earth.stats();
+        StatCalculator.CharacterStats b = xayda.stats();
+        StatCalculator.CharacterStats sum = new StatCalculator.CharacterStats(a.hpMax() + b.hpMax(), a.kiMax() + b.kiMax(), a.atk() + b.atk(), a.armor() + b.armor(),
+                Math.min(100.0, a.critRatePct() + b.critRatePct()), a.critDmgPct() + b.critDmgPct(), a.dodgePct() + b.dodgePct(), a.hpRegenPctPerSec(), a.kiRegenPctPerSec(), a.other());
+        return new MatchSetup.SquadMember(earth.characterId(), "Trái Đất (hợp thể)", "EARTH", 100, controlled, true, xayda.characterId(), sum, earth.skills(), 0, null, List.of(earth, xayda));
+    }
+
+    @Test
+    void theEarringSplitsAFusionInADungeonWithoutResettingAnything() {
+        MatchSetup setup = new MatchSetup(1, d, d.dungeons().get(12), List.of(fusedMember(true), member(2, "NAMEC", 100, false, NAMEC_SKILLS)), encounters(12, 1), List.of(), 10_000_000, new Random(3));
+        MatchEngine e = new MatchEngine(setup);
+        for (int i = 0; i < 40; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Fighter fused = e.controlledFighter();
+        assertTrue(fused.fusion && fused.partnerCharacterId == 3);
+        assertEquals(2, e.squad().size());
+        long hpMaxFused = fused.hpMax;
+        long kiMaxFused = Math.round(fused.kiMax);
+        fused.hp = fused.hpMax / 2;
+        fused.cooldownUntil.put(slotOf(1), e.nowMs() + 30_000);
+        int mainEntity = fused.id;
+        fused.actionUntil = e.nowMs() + 500;                                         // the pause between two skills does not stop it: the fighters fight all the time
+        fused.alive = false;
+        assertFalse(e.splitFusion(), "a dead fighter cannot be split");
+        fused.alive = true;
+        assertTrue(e.splitFusion());
+        var frame = e.buildFrame();
+        assertEquals(3, e.squad().size(), "the partner is a fighter of its own now");
+        assertSame(fused, e.controlledFighter(), "the player keeps the control of the main character, which keeps its fighter");
+        assertEquals(mainEntity, fused.id);
+        assertFalse(fused.fusion);
+        assertEquals(0, fused.partnerCharacterId);
+        assertTrue(fused.hpMax < hpMaxFused && fused.hpMax == member(1, "EARTH", 100, true, EARTH_SKILLS).stats().hpMax(), "the figures of the main character alone");
+        assertEquals(0.5, (double) fused.hp / fused.hpMax, 0.01, "it keeps its share of the maximum HP");
+        assertTrue(e.cooldownLeftMs(fused, slotOf(1)) > 0, "the cooldowns stay");
+        Entities.Fighter partner = e.squad().stream().filter(x -> x.characterId == 3).findFirst().orElseThrow();
+        assertFalse(partner.controlled);
+        assertEquals(0.5, (double) partner.hp / partner.hpMax, 0.01, "the partner has the same share");
+        assertEquals(member(3, "XAYDA", 100, false, XAYDA_SKILLS).stats().hpMax(), partner.hpMax);
+        assertTrue(partner.skillBySlot.containsKey(slotOf(5)), "the partner has its own skills");
+        assertTrue(kiMaxFused > Math.round(fused.kiMax));
+        assertTrue(frame.getEffectsList().stream().anyMatch(x -> x.getEffect() == com.battleball.proto.Effect.FUSION_SPLIT && x.getSourceId() == mainEntity && x.getTargetId() == partner.id), "the client is told");
+        assertTrue(frame.getSpawnsList().stream().anyMatch(x -> x.getEntityId() == partner.id && x.getCharacterId() == 3), "and sees the partner");
+        assertTrue(frame.getSpawnsList().stream().anyMatch(x -> x.getEntityId() == mainEntity && x.getPartnerCharacterId() == 0), "and the main character without a partner");
+        assertFalse(e.splitFusion(), "nothing is fused any more");
+        for (int i = 0; i < 200; i++) {                                                // both fight on
+            e.step();
+            e.buildFrame();
+        }
+        assertTrue(partner.alive || partner.hp == 0);
+    }
+
+    @Test
+    void theEarringFusesTwoCharactersInADungeonAndCanSplitThemAgain() {
+        MatchSetup setup = new MatchSetup(1, d, d.dungeons().get(12), List.of(member(1, "EARTH", 100, true, EARTH_SKILLS), member(2, "NAMEC", 100, false, NAMEC_SKILLS),
+                member(3, "XAYDA", 100, false, XAYDA_SKILLS)), encounters(12, 1), List.of(), 10_000_000, new Random(3));
+        MatchEngine e = new MatchEngine(setup);
+        for (int i = 0; i < 40; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        Entities.Fighter earth = e.controlledFighter();
+        Entities.Fighter xayda = e.squad().stream().filter(x -> x.characterId == 3).findFirst().orElseThrow();
+        long earthAlone = earth.hpMax;
+        long xaydaAlone = xayda.hpMax;
+        earth.hp = earth.hpMax / 2;
+        xayda.hp = xayda.hpMax / 4;
+        long hpBefore = earth.hp + xayda.hp;
+        int xaydaEntity = xayda.id;
+        xayda.alive = false;
+        assertFalse(e.fuse(fusedMember(true)), "refused while one of them is dead");
+        xayda.alive = true;
+        xayda.actionUntil = e.nowMs() + 500;                                         // the pause between two skills does not stop it
+        assertTrue(e.fuse(fusedMember(true)));
+        var frame = e.buildFrame();
+        assertEquals(2, e.squad().size(), "the partner is merged: one fighter less");
+        assertSame(earth, e.controlledFighter(), "the player controls the fusion");
+        assertTrue(earth.fusion && earth.partnerCharacterId == 3);
+        assertEquals(earthAlone + xaydaAlone, earth.hpMax, "the figures of both are added");
+        assertEquals(hpBefore, earth.hp, "the HP is the sum of what both had");
+        assertTrue(e.entities().stream().noneMatch(x -> x.id == xaydaEntity), "the partner's fighter is gone");
+        assertTrue(frame.getEffectsList().stream().anyMatch(x -> x.getEffect() == com.battleball.proto.Effect.FUSION_MERGE && x.getSourceId() == earth.id && x.getTargetId() == xaydaEntity));
+        assertTrue(frame.getDespawnsList().contains(xaydaEntity), "the client is told that the partner is gone");
+        assertFalse(e.fuse(fusedMember(true)), "already fused");
+        for (int i = 0; i < 100; i++) {
+            e.step();
+            e.buildFrame();
+        }
+        assertTrue(e.splitFusion(), "a fusion made in the match can be split again");
+        assertEquals(3, e.squad().size());
+        assertFalse(earth.fusion);
+        assertEquals(earthAlone, earth.hpMax);
     }
 }

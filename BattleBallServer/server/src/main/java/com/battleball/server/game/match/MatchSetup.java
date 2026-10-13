@@ -54,7 +54,13 @@ public record MatchSetup(
 
     /** One member of the squad. In a fusion the main character carries the summed stats and the partner is not a separate fighter. */
     public record SquadMember(long characterId, String name, String race, int level, boolean controlled, boolean fusedMain, long partnerCharacterId,
-                              StatCalculator.CharacterStats stats, Map<Integer, Integer> skills, int costumeId, StaticData.PetEffect pet) {
+                              StatCalculator.CharacterStats stats, Map<Integer, Integer> skills, int costumeId, StaticData.PetEffect pet,
+                              List<SquadMember> split) {
+        /** Not a fusion, or one that cannot be split: nothing to split into. */
+        public SquadMember(long characterId, String name, String race, int level, boolean controlled, boolean fusedMain, long partnerCharacterId,
+                           StatCalculator.CharacterStats stats, Map<Integer, Integer> skills, int costumeId, StaticData.PetEffect pet) {
+            this(characterId, name, race, level, controlled, fusedMain, partnerCharacterId, stats, skills, costumeId, pet, null);
+        }
     }
 
     public record Encounter(StaticData.Boss boss, String role, String mobTier, List<StaticData.Boss> forms) {

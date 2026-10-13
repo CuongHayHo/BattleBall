@@ -625,7 +625,7 @@ namespace BattleBall.EditorTools
         /// <summary>The list of dungeons of the NPC Cui: a box in the middle of the screen with six rows, a pager, the details of the chosen dungeon and Vào / Đóng.</summary>
         static BbDungeonPicker BuildDungeonPicker(Transform canvasRoot)
         {
-            const float BoxW = 640f, BoxH = 640f;
+            const float BoxW = 640f, BoxH = 690f;
             var dimRect = Stretched("DungeonPicker", canvasRoot);
             var dim = dimRect.gameObject.AddComponent<Image>();
             dim.sprite = Sprite("white");
@@ -677,10 +677,10 @@ namespace BattleBall.EditorTools
                 picker.difficultyLabels[i] = PlacedText("Name", lv.transform, "", 22, Color.white, 0, 0, levelW, 44, TextAnchor.MiddleCenter);
                 AddOutline(picker.difficultyLabels[i].gameObject, 1f);
             }
-            picker.detailText = PlacedText("Detail", box.transform, "", 19, Dark, 24, 462, BoxW - 48, 90, TextAnchor.UpperCenter, false);
+            picker.detailText = PlacedText("Detail", box.transform, "", 17, Dark, 24, 460, BoxW - 48, 138, TextAnchor.UpperLeft, false);        // the bosses, the monsters and the drops of the dungeon (docs 15.38)
             picker.detailText.resizeTextForBestFit = true;
-            picker.detailText.resizeTextMinSize = 14;
-            picker.detailText.resizeTextMaxSize = 19;
+            picker.detailText.resizeTextMinSize = 13;
+            picker.detailText.resizeTextMaxSize = 17;
             picker.detailText.verticalOverflow = VerticalWrapMode.Truncate;
             picker.enter = NroButton("Enter", box.transform, BoxW * 0.5f - 230, BoxH - 84, 210, 64, "Vào", 26, true);
             picker.close = NroButton("Close", box.transform, BoxW * 0.5f + 20, BoxH - 84, 210, 64, "Đóng", 26, false);

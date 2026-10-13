@@ -7,4 +7,5 @@ return [
     'db_name' => 'battleball',
     'db_user' => 'battleball_web',
     'db_pass' => 'CHANGE_ME',
+    'download_url' => '',   // link to download the game (APK or store page); also BB_DOWNLOAD_URL
 ];

@@ -47,6 +47,7 @@ public final class Main {
         MatchManager matches = new MatchManager(db, staticData, actions, dbExecutor, Math.max(2, Runtime.getRuntime().availableProcessors()), MatchManager.defaultRandom());
         GameServer server = new GameServer(config, ssl, auth, dbExecutor, actions, matches);
         server.start();
+        startConsole(server);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             LOG.info("shutting down");
             matches.close();
@@ -61,5 +62,35 @@ public final class Main {
             db.close();
         }, "shutdown"));
         Thread.currentThread().join();
+    }
+
+    /** Commands typed in the server window: "who" lists the players online, "help" lists the commands. Ends quietly when there is no console (stdin closed). */
+    private static void startConsole(GameServer server) {
+        Thread t = new Thread(() -> {
+            try (var in = new java.io.BufferedReader(new java.io.InputStreamReader(System.in, java.nio.charset.StandardCharsets.UTF_8))) {
+                for (String line; (line = in.readLine()) != null; ) {
+                    switch (line.trim().toLowerCase()) {
+                        case "who", "online" -> {
+                            var list = server.online();
+                            long now = System.currentTimeMillis();
+                            StringBuilder sb = new StringBuilder("Online: ").append(list.size());
+                            for (var o : list) {
+                                sb.append(String.format("%n  %-20s id=%-6d ip=%-15s since %s (%s)", o.username(), o.accountId(), o.ip(),
+                                        java.time.LocalTime.ofInstant(java.time.Instant.ofEpochMilli(o.loginAtMs()), java.time.ZoneId.systemDefault()).withNano(0),
+                                        com.battleball.server.net.ConnectionHandler.formatDuration(now - o.loginAtMs())));
+                            }
+                            System.out.println(sb);
+                        }
+                        case "help", "?" -> System.out.println("Commands: who (players online now), help");
+                        case "" -> { }
+                        default -> System.out.println("Unknown command. Type help.");
+                    }
+                }
+            } catch (java.io.IOException e) {
+                LOG.debug("console closed: {}", e.toString());
+            }
+        }, "console");
+        t.setDaemon(true);
+        t.start();
     }
 }

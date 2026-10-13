@@ -193,6 +193,27 @@ namespace BattleBall.Net
             return a.ActionResult;
         }
 
+        /// <summary>Makes the Potara earring out of the shards of the account (100; one earring per account); the answer is followed by a fresh snapshot.</summary>
+        /// <summary>In a dungeon the earring fuses two characters of the squad (docs 15.41). ActionResult not ok: NOT_OWNED, LEVEL_TOO_LOW, NOT_FOUND (checked as for a match) or INVALID_ARGUMENT (dead, busy, already fused); the merge comes in the frames.</summary>
+        public async Task<ActionResult> FuseAsync(ulong mainCharacter, ulong partnerCharacter)
+        {
+            var a = await Ask(new Envelope { FuseRequest = new FuseRequest { MainCharacterId = mainCharacter, PartnerCharacterId = partnerCharacter } }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        /// <summary>In a dungeon the earring is taken off: the fused fighter splits into its two characters (docs 15.40). ActionResult not ok when nothing is fused or the fighter is busy; the new fighter comes in the frames.</summary>
+        public async Task<ActionResult> SplitFusionAsync()
+        {
+            var a = await Ask(new Envelope { SplitFusionRequest = new SplitFusionRequest() }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
+        public async Task<ActionResult> AssemblePotaraAsync()
+        {
+            var a = await Ask(new Envelope { AssemblePotaraRequest = new AssemblePotaraRequest() }, Envelope.PayloadOneofCase.ActionResult);
+            return a.ActionResult;
+        }
+
         /// <summary>Uses one EXP bag on a character (it gets the experience of the bag; ActionResult MAXED at level 100); the answer is followed by a fresh snapshot.</summary>
         public async Task<ActionResult> UseExpBagAsync(ulong characterId)
         {

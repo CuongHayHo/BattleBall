@@ -52,6 +52,11 @@ public final class GameServer implements AutoCloseable {
         this.limiter = new ConnectionLimiter(config.maxConnections());
     }
 
+    /** The players online now (for the console command "who"). */
+    public java.util.List<SessionRegistry.Online> online() {
+        return sessions.online();
+    }
+
     /** Binds the port (0 = any free port) and returns the port actually used. */
     public int start() throws InterruptedException {
         com.battleball.server.PlatformFixes.apply();

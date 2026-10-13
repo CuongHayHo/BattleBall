@@ -165,6 +165,95 @@ namespace BattleBall.Net
             return -1;
         }
 
+        /// <summary>The pair is chosen: in the village the characters fuse at once, in a dungeon the server does it in the match (docs 15.41) and the answer comes in the frames.</summary>
+        void ChooseFusion(int main, int sub)
+        {
+            if (InDungeon) FuseInDungeon(main, sub); else Fuse(main, sub, true);
+        }
+
+        async void FuseInDungeon(int main, int sub)
+        {
+            if (!BbSession.IsActive) return;
+            var a = CharacterOf(Races[main]);
+            var b = CharacterOf(Races[sub]);
+            if (a == null || b == null) return;
+            try
+            {
+                var result = await BbSession.Client.FuseAsync(a.CharacterId, b.CharacterId);
+                if (!result.Ok)
+                    Toast(result.Error == ActionError.NotOwned ? "Chưa có Bông tai Potara" : result.Error == ActionError.LevelTooLow ? "Cả hai cần đạt cấp " + FusionMinLevel() + " để hợp thể"
+                          : result.Error == ActionError.InvalidArgument ? "Chưa hợp thể được, có người đã ngã hoặc đang dùng kỹ năng: thử lại" : ActionText(result));
+            }
+            catch (Exception e) { Toast("Không gửi được lệnh: " + e.Message); }
+        }
+
+        /// <summary>For the play scenario: the fusion of two characters inside the dungeon, as the chooser of the earring ends.</summary>
+        public void DebugFuseInDungeon(int main, int sub) { FuseInDungeon(main, sub); }
+
+        /// <summary>
+        /// The server merged two fighters (Effect FUSION_MERGE, docs 15.41): the tabs get the tab of the fusion form (the fusion skin is worn by the main character), the party of the arena
+        /// has the fused form and the remaining character, the one under control stays under control (the fusion when it was one of the two).
+        /// </summary>
+        public void OnDungeonMerge(ulong mainCharacter, ulong partnerCharacter)
+        {
+            if (_fusionMain >= 0 || village == null || !village.InArena || training == null || _snapshot == null) return;
+            int mainRace = RaceIndexOf(mainCharacter), subRace = RaceIndexOf(partnerCharacter);
+            if (mainRace < 0 || subRace < 0) return;
+            ulong controlled = training.MyCharacter;
+            if (controlled == partnerCharacter) controlled = mainCharacter;
+            Fuse(mainRace, subRace, true);
+            var cast = new System.Collections.Generic.List<BbVillageView.ActorSpec>();
+            for (int pass = 0; pass < 2; pass++)
+            {
+                for (int i = 0; i < Races.Length; i++)
+                {
+                    var ch = CharacterOf(Races[i]);
+                    if (ch == null || i == subRace || (ch.CharacterId == controlled) != (pass == 0)) continue;
+                    bool fusion = i == mainRace;
+                    cast.Add(new BbVillageView.ActorSpec { Id = ch.CharacterId, Name = fusion ? "Hợp thể" : Titles[i], CostumeId = DisplayCostume(ch, fusion), Main = pass == 0 });
+                }
+            }
+            village.SetCast(cast);
+            if (Application.isPlaying) FusionFx.SetFused(mainCharacter);
+            ShowControlledPage(controlled);
+        }
+
+        /// <summary>The player took the earring off in the dungeon: the server splits the fused fighter; the change is shown when its answer comes in the frames (<see cref="OnDungeonSplit"/>).</summary>
+        async void SplitFusionInDungeon()
+        {
+            if (!BbSession.IsActive) return;
+            try
+            {
+                var result = await BbSession.Client.SplitFusionAsync();
+                if (!result.Ok) Toast("Chưa tách được, đang dùng kỹ năng: thử lại");
+            }
+            catch (Exception e) { Toast("Không gửi được lệnh: " + e.Message); }
+        }
+
+        /// <summary>
+        /// The server split the fused fighter (Effect FUSION_SPLIT, docs 15.40): the tabs go back to three characters (the fusion skin goes to the bag), the party of the arena has
+        /// the two characters again, each with its own look, and the character under control stays under control.
+        /// </summary>
+        public void OnDungeonSplit(ulong partnerCharacter)
+        {
+            if (_fusionMain < 0 || village == null || !village.InArena || training == null) return;
+            ulong controlled = training.MyCharacter;
+            if (Application.isPlaying) FusionFx.SetFused(0);
+            SplitFusion();
+            var cast = new System.Collections.Generic.List<BbVillageView.ActorSpec>();
+            for (int pass = 0; pass < 2; pass++)
+            {
+                for (int i = 0; i < Races.Length; i++)
+                {
+                    var ch = CharacterOf(Races[i]);
+                    if (ch == null || (ch.CharacterId == controlled) != (pass == 0)) continue;
+                    cast.Add(new BbVillageView.ActorSpec { Id = ch.CharacterId, Name = Titles[i], CostumeId = DisplayCostume(ch, false), Main = pass == 0 });
+                }
+            }
+            village.SetCast(cast);
+            ShowControlledPage(controlled);
+        }
+
         /// <summary>The tab of the character under control lights up (the fusion form's tab for a fused main character), without taking over anything.</summary>
         void ShowControlledPage(ulong character)
         {

@@ -1330,8 +1330,8 @@ namespace BattleBall.Net
         void OnEarring()
         {
             var potara = _snapshot != null ? _snapshot.Potara : null;
+            if (potara != null && !potara.Owned) { ShowShards(potara); return; }                        // no earring yet: the shards, and the button that makes it (owner remark 2026-10-13)
             if (potara == null || !potara.Owned) { Toast("Chưa có Bông tai Potara"); return; }
-            if (InDungeon) { Toast("Không thể hợp thể hay tách khi đang ở phó bản"); return; }          // the squad of a match is fixed when it starts (docs 15.26)
             var resolver = NroSpriteResolver.Instance;
             Sprite icon = resolver != null && potara.IconId > 0 ? resolver.ResolveSprite((int)potara.IconId, BbAssetCache.Scale) : null;
             var specs = new List<BbPopup.ButtonSpec>();
@@ -1360,13 +1360,45 @@ namespace BattleBall.Net
             popup.Show(icon, "Bông tai Potara", lines, desc, null, null, specs, i =>
             {
                 popup.Hide();
-                if (fused) { SplitFusion(); return; }
+                if (fused) { if (InDungeon) SplitFusionInDungeon(); else SplitFusion(); return; }
                 int main = mains[i];
                 var others = new List<int>();
                 for (int r = 0; r < Races.Length; r++) if (r != main) others.Add(r);
                 OpenChooser(main, others);
             });
         }
+
+        /// <summary>
+        /// The popup of the shards of the earring (the first slot of the bag before the earring exists): how many there are, and "Ghép Bông tai" once there are enough. Until 2026-10-13 the client
+        /// had no way to assemble the earring at all (the server's AssemblePotaraRequest was never sent): 100 shards could not be used.
+        /// </summary>
+        void ShowShards(PotaraInfo potara)
+        {
+            int needed = potara.ShardsNeeded > 0 ? (int)potara.ShardsNeeded : DefaultPotaraShards;
+            bool enough = potara.Fragments >= needed;
+            var resolver = NroSpriteResolver.Instance;
+            Sprite icon = resolver != null && potara.ShardIconId > 0 ? resolver.ResolveSprite((int)potara.ShardIconId, BbAssetCache.Scale) : null;
+            var specs = new List<BbPopup.ButtonSpec>();
+            if (enough) specs.Add(new BbPopup.ButtonSpec("Ghép\nBông tai", true, true));
+            popup.Show(icon, "Mảnh Bông tai Potara", "<color=#1E5AB4>" + potara.Fragments + " / " + needed + " mảnh</color>",
+                enough ? "Đủ mảnh rồi! Ghép thành Bông tai Potara để hợp thể hai nhân vật (mỗi tài khoản chỉ có một Bông tai)."
+                       : "Gom đủ " + needed + " mảnh (mua ở Bunma hoặc rơi từ boss) để ghép thành Bông tai Potara.",
+                null, null, specs, i => { popup.Hide(); AssembleEarring(); });
+        }
+
+        async void AssembleEarring()
+        {
+            if (_demo || !BbSession.IsActive) { Toast("Cần kết nối máy chủ"); return; }
+            try
+            {
+                var result = await BbSession.Client.AssemblePotaraAsync();
+                Toast(result.Ok ? "Đã ghép Bông tai Potara!" : result.Error == ActionError.AlreadyOwned ? "Đã có Bông tai rồi" : result.Error == ActionError.NotEnoughMaterial ? "Chưa đủ mảnh" : ActionText(result));
+            }
+            catch (Exception e) { Toast("Không gửi được lệnh: " + e.Message); }
+        }
+
+        /// <summary>For the scripted run: the tap on the earring slot.</summary>
+        public void DebugTapEarring() { OnEarring(); }
 
         readonly List<int> _choices = new List<int>();
         int _chooserMain;
@@ -1393,7 +1425,7 @@ namespace BattleBall.Net
                        null, null, specs, i =>
                        {
                            popup.Hide();
-                           if (i < _choices.Count) Fuse(_chooserMain, _choices[i], true);
+                           if (i < _choices.Count) ChooseFusion(_chooserMain, _choices[i]);
                        });
         }
 
@@ -1401,7 +1433,7 @@ namespace BattleBall.Net
         void OnChoose(int slot)
         {
             chooserRoot.SetActive(false);
-            if (slot < _choices.Count) Fuse(_chooserMain, _choices[slot], true);
+            if (slot < _choices.Count) ChooseFusion(_chooserMain, _choices[slot]);
         }
 
         /// <summary>The two characters become one tab; the main one is the character whose tab was open.</summary>

@@ -308,6 +308,68 @@ public final class MatchManager implements AutoCloseable {
         }
     }
 
+    /** In a dungeon the earring fuses two characters of the squad (docs 15.41): checked like a match that starts fused, then done by the engine; answers with ActionResult. */
+    public void fuse(long accountId, int requestId, long mainId, long partnerId) {
+        Running r = byAccount.get(accountId);
+        if (r == null || r.training()) {
+            Channel ch = r == null ? null : r.channel;
+            if (ch != null) {
+                reply(ch, requestId, ActionError.INVALID_ARGUMENT, "no dungeon is running");
+            }
+            return;
+        }
+        dbExecutor.execute(() -> {
+            try {
+                MatchSetup.SquadMember member = starter.fusedMemberFor(accountId, mainId, partnerId);
+                r.engine.submit(() -> {
+                    boolean ok = r.engine.fuse(member);
+                    Channel ch = r.channel;
+                    if (ch != null && ch.isActive()) {
+                        if (ok) {
+                            ch.writeAndFlush(Envelope.newBuilder().setRequestId(requestId).setActionResult(ActionResult.newBuilder().setOk(true)).build());
+                        } else {
+                            reply(ch, requestId, ActionError.INVALID_ARGUMENT, "a character is dead, busy with a skill or already fused");
+                        }
+                    }
+                });
+            } catch (MatchStarter.StartException e) {
+                Channel ch = r.channel;
+                if (ch != null) {
+                    reply(ch, requestId, e.error, e.getMessage());
+                }
+            } catch (SQLException | RuntimeException e) {
+                LOG.error("cannot fuse in a dungeon", e);
+                Channel ch = r.channel;
+                if (ch != null) {
+                    reply(ch, requestId, ActionError.ACTION_INTERNAL, "server error");
+                }
+            }
+        });
+    }
+
+    /** In a dungeon the earring is taken off (docs 15.40): answers the request with ActionResult, ok when the fused fighter split. */
+    public void splitFusion(long accountId, int requestId) {
+        Running r = byAccount.get(accountId);
+        if (r == null || r.training()) {
+            Channel ch = r == null ? null : r.channel;
+            if (ch != null) {
+                reply(ch, requestId, ActionError.INVALID_ARGUMENT, "no dungeon is running");
+            }
+            return;
+        }
+        r.engine.submit(() -> {
+            boolean ok = r.engine.splitFusion();
+            Channel ch = r.channel;
+            if (ch != null && ch.isActive()) {
+                if (ok) {
+                    ch.writeAndFlush(Envelope.newBuilder().setRequestId(requestId).setActionResult(ActionResult.newBuilder().setOk(true)).build());
+                } else {
+                    reply(ch, requestId, ActionError.INVALID_ARGUMENT, "nothing is fused, or the fighter is busy with a skill");
+                }
+            }
+        });
+    }
+
     public void revive(long accountId) {
         Running r = byAccount.get(accountId);
         if (r != null) {

@@ -13,6 +13,8 @@ function cfg(string $key, $default = null)
             'db_name' => getenv('BB_DB_NAME') ?: 'battleball',
             'db_user' => getenv('BB_DB_USER') ?: 'root',
             'db_pass' => getenv('BB_DB_PASS') !== false ? getenv('BB_DB_PASS') : '',
+            'admin_url' => getenv('BB_ADMIN_URL') ?: 'admin/',   // where an admin goes after the login (a relative or an absolute web link)
+            'download_url' => getenv('BB_DOWNLOAD_URL') ?: '',   // the link of the game (APK or store page); empty = the page says "coming soon"
         ];
         $file = __DIR__ . '/config.php';
         if (is_file($file)) {
@@ -46,6 +48,11 @@ function start_session(): void
     session_name('bbweb');
     session_set_cookie_params(['httponly' => true, 'samesite' => 'Strict', 'path' => '/']);
     session_start();
+    send_security_headers();
+}
+
+function send_security_headers(): void
+{
     header('X-Frame-Options: DENY');
     header('Referrer-Policy: no-referrer');
     header("Content-Security-Policy: default-src 'self'; img-src 'self'; style-src 'self'");
@@ -142,6 +149,43 @@ function rate_limited(PDO $pdo, string $ip): bool
 function record_attempt(PDO $pdo, string $ip, bool $success): void
 {
     $pdo->prepare('INSERT INTO web_register_attempt (ip, success) VALUES (?, ?)')->execute([$ip, $success ? 1 : 0]);
+}
+
+// ---- login (table web_login_attempt, migration V053): failed tries are counted per IP and per user name ----
+function login_limited(PDO $pdo, string $ip, string $username): bool
+{
+    $st = $pdo->prepare('SELECT COUNT(*) FROM web_login_attempt WHERE ip = ? AND created_at > (NOW() - INTERVAL 1 HOUR)');
+    $st->execute([$ip]);
+    if ((int)$st->fetchColumn() >= 10) {
+        return true;
+    }
+    $st = $pdo->prepare('SELECT COUNT(*) FROM web_login_attempt WHERE username = ? AND created_at > (NOW() - INTERVAL 1 HOUR)');
+    $st->execute([$username]);
+    return (int)$st->fetchColumn() >= 30;   // more than the IP limit: a stranger cannot lock the real admin out with a few tries
+}
+
+function record_login_failure(PDO $pdo, string $ip, string $username): void
+{
+    $pdo->prepare('INSERT INTO web_login_attempt (ip, username) VALUES (?, ?)')->execute([$ip, substr($username, 0, 64)]);
+    if (random_int(1, 50) === 1) {
+        $pdo->exec('DELETE FROM web_login_attempt WHERE created_at < (NOW() - INTERVAL 2 DAY)');
+    }
+}
+
+/**
+ * Makes the visitor the admin: the session of the admin page ("bbadmin", same cookie settings as admin/lib.php boot()) gets the user name, then
+ * the browser is sent to the admin page. Both pages share the cookie because both live on the same site (path "/").
+ */
+function start_admin_session(string $username): void
+{
+    session_write_close();                        // the web session (CSRF of the login form) ends here
+    session_name('bbadmin');
+    session_set_cookie_params(['httponly' => true, 'samesite' => 'Strict', 'path' => '/', 'secure' => !empty($_SERVER['HTTPS'])]);
+    $old = $_COOKIE['bbadmin'] ?? '';
+    session_id(preg_match('/^[A-Za-z0-9,-]{22,128}$/', $old) ? $old : session_create_id());
+    session_start();
+    session_regenerate_id(true);
+    $_SESSION['admin'] = $username;
 }
 
 /**

@@ -167,6 +167,24 @@ public final class MatchStarter {
         return new Started(runId, token, engine, setup, accountId, d);
     }
 
+    /**
+     * The fusion of two characters of the account as a squad member (docs 15.41): checked as for a match (earring owned, both at the fusion level, both exist), the figures of both added
+     * and the two characters alone to split into. Blocking (database): call it from the DB executor.
+     */
+    public MatchSetup.SquadMember fusedMemberFor(long accountId, long mainId, long partnerId) throws SQLException, StartException {
+        StaticData d = data.get();
+        PlayerRepository.PlayerData player;
+        try (Connection c = db.connection()) {
+            player = PlayerRepository.load(c, accountId);
+        }
+        PlayerRepository.CharacterData main = player.character(mainId);
+        PlayerRepository.CharacterData partner = checkPair(d, player, main, partnerId);
+        if (partner == null) {
+            throw new StartException(ActionError.NOT_FOUND, "fusion partner not given");
+        }
+        return member(d, main, partner, false, 0);
+    }
+
     /** The controlled character and its fusion partner (null when none), checked as for a match. */
     private static PlayerRepository.CharacterData checkPair(StaticData d, PlayerRepository.PlayerData player, PlayerRepository.CharacterData main, long partnerId)
             throws StartException {
@@ -365,8 +383,10 @@ public final class MatchStarter {
                 }
             }
         }
+        // what the earring gives back in a dungeon (docs 15.40): the main character alone and its partner alone, each with its own figures, skills and look
+        List<MatchSetup.SquadMember> split = fused ? List.of(member(d, ch, null, controlled, unlearnedLevel), member(d, partner, null, false, unlearnedLevel)) : null;
         return new MatchSetup.SquadMember(ch.id(), fused ? name + " (hợp thể)" : name, ch.race(), ch.level(), controlled, fused, fused ? partner.id() : 0,
-                s, skills, costume, pet);
+                s, skills, costume, pet, split);
     }
 
     static String sha256(String s) {

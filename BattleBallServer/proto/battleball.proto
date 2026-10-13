@@ -83,6 +83,8 @@ message Envelope {
     ClaimAttendanceRequest claim_attendance_request = 82;   // checks in for today: ActionResult (ALREADY_OWNED when it was done), then a fresh AttendanceInfo and PlayerDataSnapshot
     // ---- the quests of Ong Gohan (docs 15.32): the list comes inside every PlayerDataSnapshot (PlayerDataSnapshot.quests) ----
     UseExpBagRequest use_exp_bag_request = 85;           // uses one EXP bag (material 207) on a character: ActionResult (MAXED at level 100), then a fresh PlayerDataSnapshot (docs 15.35)
+    FuseRequest fuse_request = 87;                       // in a dungeon: the earring fuses two characters of the squad (docs 15.41); ActionResult, then the frames carry Effect FUSION_MERGE
+    SplitFusionRequest split_fusion_request = 86;       // in a dungeon: the earring splits the fused fighter into its two characters (docs 15.40); ActionResult, then the frames carry the new fighter and Effect FUSION_SPLIT
     MatchReady match_ready = 84;                         // the client shows the dungeon now: a match started with StartMatchRequest.wait_for_ready begins to run (docs 15.34)
     ClaimQuestRequest claim_quest_request = 83;          // the reward of a finished quest (an empty id = every finished one); ActionResult, then a fresh PlayerDataSnapshot
     // ---- GEN (docs 15.21) ----
@@ -441,6 +443,10 @@ message DungeonInfo {
   uint32 recommended_level = 4;     // the reference level of the tier (match_rules.tier_level)
   uint32 boss_count = 5;            // bosses met in one match
   uint32 time_limit_s = 6;          // 0 = none
+  repeated string boss_names = 7;   // the bosses (and mini-bosses) that can appear in a match of this dungeon (docs 15.38): only some of them come in one match
+  string final_boss = 8;            // the last boss of every match, empty when the dungeon has none marked
+  repeated string minion_names = 9; // the small monsters of the waves
+  repeated string drops = 10;       // what can drop here, one display line each (pieces by set, stones, book materials), with "(xN)" where the dungeon raises the chance
 }
 
 // One difficulty of a dungeon (balance_config dungeon_difficulty): what it does to the monsters and to the reward.
@@ -630,6 +636,19 @@ message StartMatchRequest {
   bool wait_for_ready = 5;              // true: the match does not run until the client sends MatchReady (it flies on a ship first), at most match_rules.ready_wait_max_s seconds; false: it runs at once (docs 15.34)
 }
 
+// In a dungeon the player uses the Potara earring (owner request 2026-10-13: "cannot fuse in a dungeon"): the two characters become one fighter, the main one with the figures of both
+// added together (as when a match starts fused), its HP and Ki the sum of what both had (up to the new maximum). The earring must be owned and both characters at the fusion level
+// (ActionResult NOT_OWNED, LEVEL_TOO_LOW, NOT_FOUND as in StartMatchRequest); refused (INVALID_ARGUMENT) when one is dead, busy with a skill or already fused.
+message FuseRequest {
+  uint64 main_character_id = 1;     // the character that keeps its skills and its fighter
+  uint64 partner_character_id = 2;  // the one merged into it
+}
+
+// In a dungeon the player takes the Potara earring off (owner request 2026-10-13): the fused fighter becomes the main character and its partner again, side by side, each with its own
+// figures; the HP and the Ki keep their share of the maximum. Refused (ActionResult INVALID_ARGUMENT) when nothing is fused or the fighter is busy with a skill.
+message SplitFusionRequest {
+}
+
 // The client has finished the ship flight and shows the arena: the server starts the clock of a match that waits for it (StartMatchRequest.wait_for_ready).
 message MatchReady {
 }
@@ -732,6 +751,8 @@ enum Effect {
   WAVE = 17;                        // dungeon: a wave of small monsters comes (skill_id = number of the wave, length = number of waves of the stage, width = monsters in it)
   BOSS_COMING = 18;                 // dungeon: the last monster of the stage fell, the boss comes (target_id = the boss, x, y = where it stands)
   SUMMON = 19;                      // dungeon: a boss calls a small monster (source_id = the boss, target_id = the monster, x, y)
+  FUSION_MERGE = 23;                // dungeon: two fighters fused (source_id = the fighter of the main character, which keeps its id and becomes the fused form, target_id = the fighter of the partner, which is gone: it comes in the despawns of the same frame; x, y = where the fusion stands)
+  FUSION_SPLIT = 22;                // dungeon: the fused fighter split (source_id = the main character's fighter, which keeps its id, target_id = the new fighter of the partner, which comes as an EntitySpawn in the same frame; x, y = where they stand)
   BOSS_EVOLVE = 21;                 // dungeon: a boss turned into its next form (target_id = the boss, skill_id = the form now, 1 based, length = how many forms; the new look comes as an EntitySpawn of the same id)
   DIED = 20;                        // an entity died (target_id = who, source_id = what killed it, x, y = where; dir = the way the blow came)
 }
@@ -886,7 +907,7 @@ message MatchEnded {
   uint32 gems = 7;
   repeated CharacterReward characters = 8;
   repeated DropResult drops = 9;
-  repeated uint32 achievements = 10; // achievement ids completed now
+  reserved 10;                       // was "achievements": the achievements that gave avatars were removed (docs 15.39)
   bool first_clear = 11;
   bool timed_clear = 12;
   uint32 revive_gold_spent = 13;

@@ -7,5 +7,5 @@ return [
     'db_name' => 'battleball',
     'db_user' => 'battleball_admin',
     'db_pass' => 'CHANGE_ME',
-    'allowed_ips' => ['127.0.0.1', '::1'],   // the admin page answers only to these addresses
+    'allowed_ips' => [],   // empty = the admin page answers to every address; list addresses to restrict it
 ];

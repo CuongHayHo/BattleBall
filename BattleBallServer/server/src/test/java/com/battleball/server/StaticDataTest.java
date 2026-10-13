@@ -77,7 +77,7 @@ class StaticDataTest {
             assertEquals(30, d.supportItems().get(1224).pet().durationS() * 3);
             assertEquals(10, d.dungeons().get(3).bosses().size(), "seven bosses and the three Halloween small monsters of V040");
             assertTrue(d.dungeons().values().stream().allMatch(dg -> dg.bosses().stream().anyMatch(b -> b.role().equals("MINION"))), "every dungeon has small monsters");
-            assertEquals("Phó bản 6", d.dungeons().get(6).name());
+            assertEquals("Xên – Xên con", d.dungeons().get(6).name());
             assertFalse(store.refreshIfChanged(), "nothing changed yet");
 
             try (Connection c = db.connection(); Statement st = c.createStatement()) {
@@ -88,6 +88,41 @@ class StaticDataTest {
             assertEquals(1_234_567L, store.get().monsterStat("BOSS", "early").hp());
             assertFalse(store.refreshIfChanged());
             assertEquals(6_042_094L, d.monsterStat("BOSS", "early").hp(), "the old snapshot is not modified");
+        }
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "BB_TEST_DB_URL", matches = ".+")
+    void theDungeonsAreNamedAndDescribeTheirBossesMonstersAndDrops() throws Exception {
+        try (TestDb t = TestDb.create(); Database db = new Database(t.url, t.user, t.password, 2)) {
+            StaticData d = new StaticDataLoader(db).load();
+            for (StaticData.Dungeon dg : d.dungeons().values()) {
+                if (!dg.enabled()) {
+                    continue;
+                }
+                var what = com.battleball.server.game.DungeonSummary.of(d, dg);
+                String where = "dungeon " + dg.id() + " " + dg.name();
+                assertFalse(dg.name().startsWith("Phó bản"), where + " has a name of what is in it, not a number");
+                assertFalse(what.finalBoss().isEmpty(), where + " has a final boss");
+                assertFalse(what.minions().isEmpty(), where + " has small monsters");
+                assertFalse(what.drops().isEmpty(), where + " drops something");
+                for (String n : what.bosses()) {
+                    assertFalse(n.contains("code"), "a boss name has no note of the source data: " + n);
+                }
+                assertFalse(what.finalBoss().contains("code"), where + " final boss " + what.finalBoss());
+            }
+            var early = com.battleball.server.game.DungeonSummary.of(d, d.dungeons().get(1));
+            assertFalse(early.drops().stream().anyMatch(x -> x.contains("Hủy Diệt") || x.contains("Thiên Sứ")), "an early dungeon drops the first set only: " + early.drops());
+            assertTrue(early.drops().stream().anyMatch(x -> x.contains("Thần Linh")));
+            var mid = com.battleball.server.game.DungeonSummary.of(d, d.dungeons().get(4));
+            assertTrue(mid.drops().stream().anyMatch(x -> x.contains("Hủy Diệt")) && mid.drops().stream().noneMatch(x -> x.contains("Thiên Sứ")), "a middle dungeon adds the Hủy Diệt pieces: " + mid.drops());
+            var late = com.battleball.server.game.DungeonSummary.of(d, d.dungeons().get(7));
+            assertTrue(late.drops().stream().anyMatch(x -> x.contains("Thiên Sứ")), "a late dungeon adds the Thiên Sứ pieces: " + late.drops());
+            var apes = com.battleball.server.game.DungeonSummary.of(d, d.dungeons().get(3));
+            assertTrue(apes.drops().stream().anyMatch(x -> x.contains("Nguyên liệu sách") && x.contains("(x3)")), "the ape dungeon raises the book materials three times: " + apes.drops());
+            var earring = com.battleball.server.game.DungeonSummary.of(d, d.dungeons().get(11));
+            assertTrue(earring.drops().stream().anyMatch(x -> x.contains("bông tai")), "dungeon 11 drops earring shards: " + earring.drops());
+            assertEquals("Kid Bư", earring.finalBoss());
         }
     }
 }

@@ -423,9 +423,11 @@ public final class PlayerRepository {
             if (real == 0) {
                 return;
             }
+            DungeonSummary.Info what = DungeonSummary.of(d, dg);
             b.addDungeons(com.battleball.proto.DungeonInfo.newBuilder().setDungeonId(dg.id()).setName(dg.name()).setTier(dg.tier())
                     .setRecommendedLevel((int) Json.num(tierLevels, dg.tier(), 30)).setBossCount((int) Math.min(Math.max(1, dg.bossesPerMatch()), real))
-                    .setTimeLimitS(dg.timeLimitS() == null ? 0 : dg.timeLimitS()));
+                    .setTimeLimitS(dg.timeLimitS() == null ? 0 : dg.timeLimitS()).addAllBossNames(what.bosses()).setFinalBoss(what.finalBoss())
+                    .addAllMinionNames(what.minions()).addAllDrops(what.drops()));
         });
         for (com.battleball.server.game.match.Difficulty df : com.battleball.server.game.match.Difficulty.all(d)) {                    // the difficulties of a dungeon (docs 15.33)
             b.addDifficulties(com.battleball.proto.DifficultyInfo.newBuilder().setKey(df.key()).setName(df.name()).setHpMult(df.hpMult()).setAtkMult(df.atkMult())

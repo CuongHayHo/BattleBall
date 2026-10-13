@@ -239,6 +239,7 @@ namespace BattleBall.EditorTools
             Canvas.ForceUpdateCanvases();
             BbLoginSceneCapture.Shoot(cam, 1280, 720, "Logs/menu_training_blast_b.png");
             ui.training.Leave();
+            ui.training.DemoFlash(5f);                // the white of the blast is over (Leave does not hide it until the next frame)
             ui.village.DemoPlaceMain("moc_nhan", -330f);
             { Vector2 fa; int da; ulong ma; ui.village.PartyMember(0, out ma, out fa, out da); ui.training.DemoApe(ma, 3); }
             Canvas.ForceUpdateCanvases();

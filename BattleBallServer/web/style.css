@@ -1,17 +1,80 @@
-:root{--bg:#f6f7f9;--fg:#1c2330;--muted:#66708a;--card:#fff;--line:#d9dde6;--accent:#2f6fed;--ok:#17653a;--err:#b3261e}
-@media (prefers-color-scheme:dark){:root{--bg:#12151c;--fg:#e6e9f0;--muted:#98a2b8;--card:#1b2030;--line:#2e3650;--accent:#6c9bff;--ok:#7bd69e;--err:#ff8a80}}
+/* BattleBall web: milk white + orange, same tokens as admin\style.css. No inline style is allowed by the CSP, everything is here. */
+:root{--bg:#fbf6ee;--card:#fffdf9;--fg:#3b2a1a;--muted:#86705b;--line:#ecdfcc;--line-strong:#dcc9ae;--accent:#c85a08;--accent-hover:#a94a04;--accent-fg:#fff;--accent-soft:#fde8d0;--accent-2:#f29a38;--ok:#3f7d4e;--err:#b3342a;--shadow:0 1px 2px rgba(90,55,20,.08),0 6px 18px rgba(90,55,20,.07)}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1611;--card:#262019;--fg:#f3e8da;--muted:#b7a28b;--line:#382d22;--line-strong:#4b3c2c;--accent:#f59a3e;--accent-hover:#ffb25f;--accent-fg:#2a1706;--accent-soft:#3b2815;--accent-2:#f59a3e;--ok:#8fd5a0;--err:#ff9d8f;--shadow:0 1px 2px rgba(0,0,0,.4)}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:grid;place-items:start center;min-height:100vh;padding:24px 16px}
-main{width:100%;max-width:420px}
-h1{font-size:1.5rem;margin:.2em 0 .1em}
+html{scroll-behavior:smooth}
+body{margin:0;background:radial-gradient(900px 480px at 50% -80px,var(--accent-soft),var(--bg) 70%) no-repeat,var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+a{color:var(--accent)}
+header.site{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 20px;max-width:1040px;width:100%;margin:0 auto}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:1.15rem;color:var(--fg);text-decoration:none}
+.brand b,h1 b{color:var(--accent)}
+.ball{width:18px;height:18px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffd29a,var(--accent-2) 45%,var(--accent));box-shadow:0 0 0 3px var(--accent-soft)}
+header.site nav{display:flex;gap:4px}
+header.site nav a{color:var(--fg);text-decoration:none;padding:6px 12px;border-radius:999px;font-weight:600;font-size:.95rem}
+header.site nav a:hover{background:var(--accent-soft)}
+header.site nav a.on{background:var(--accent);color:var(--accent-fg)}
+main{width:100%;max-width:440px;margin:0 auto;padding:12px 20px 40px;flex:1}
+main.wide{max-width:1040px}
+h1{font-size:1.7rem;margin:.2em 0 .1em;letter-spacing:-.01em}
+h2{font-size:1.15rem;margin:0 0 .35em}
 .muted{color:var(--muted);font-size:.9em}
-form{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;display:grid;gap:14px;margin-top:14px}
-label{display:grid;gap:4px;font-weight:600}
+form{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;display:grid;gap:15px;margin-top:16px;box-shadow:var(--shadow)}
+label{display:grid;gap:5px;font-weight:600}
 label small{font-weight:400;color:var(--muted)}
-input[type=text],input[type=password]{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;width:100%}
-button{font:inherit;font-weight:600;color:#fff;background:var(--accent);border:0;border-radius:8px;padding:12px;cursor:pointer}
-.msg{padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card)}
-.msg.ok{color:var(--ok)}.msg.err{color:var(--err)}
+input[type=text],input[type=password]{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line-strong);border-radius:10px;padding:11px 13px;width:100%}
+input:focus{outline:2px solid var(--accent-2);outline-offset:1px;border-color:var(--accent-2)}
+button,.btn{font:inherit;font-weight:700;color:var(--accent-fg);background:var(--accent);border:0;border-radius:10px;padding:12px 22px;cursor:pointer;text-decoration:none;display:inline-block;text-align:center;transition:background .12s}
+button:hover,.btn:hover{background:var(--accent-hover)}
+.btn.ghost{background:transparent;color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
+.btn.ghost:hover{background:var(--accent-soft)}
+.msg{padding:11px 14px;border-radius:10px;border:1px solid var(--line);border-left:4px solid var(--ok);background:var(--card);margin-top:12px}
+.msg.ok{color:var(--ok)}.msg.err{color:var(--err);border-left-color:var(--err)}
 .captcha{display:flex;gap:10px;align-items:center}
-.captcha img{border:1px solid var(--line);border-radius:8px;background:#fff;height:56px}
+.captcha img{border:1px solid var(--line);border-radius:10px;background:#fff;height:56px}
 .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+
+/* home page */
+.hero{text-align:center;padding:44px 0 34px}
+.hero h1{font-size:clamp(2.4rem,7vw,3.8rem);margin:.1em 0}
+.eyebrow{color:var(--accent);font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:.8rem;margin:0}
+.lead{max-width:560px;margin:.4em auto 1.3em;font-size:1.12rem;color:var(--muted)}
+.actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:8px 0 36px}
+.feature{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow);border-top:4px solid var(--accent-2)}
+.feature p{margin:0;color:var(--muted)}
+.steps{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px 24px;box-shadow:var(--shadow)}
+.steps ol{list-style:none;counter-reset:s;margin:12px 0 0;padding:0;display:grid;gap:14px}
+.steps li{counter-increment:s;display:grid;grid-template-columns:40px 1fr;column-gap:12px}
+.steps li::before{content:counter(s);grid-row:span 2;width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font-weight:700}
+.steps li span{color:var(--muted)}
+footer.site{text-align:center;color:var(--muted);font-size:.85em;padding:18px 16px 26px}
+@media (max-width:520px){header.site{flex-direction:column}}
+
+/* animated logo: logo_run.png = 5 frames of 268x378 px side by side (tools/build_logo.py), shown at half size; the frames switch without blending */
+.runner{display:inline-block;width:134px;height:189px;flex:none;background:url(logo_run.png) 0 0/500% 100% no-repeat;image-rendering:pixelated;animation:run .55s step-end infinite}
+.runner.sm{width:28px;height:40px}
+@keyframes run{0%{background-position-x:0}20%{background-position-x:25%}40%{background-position-x:50%}60%{background-position-x:75%}80%{background-position-x:100%}}
+.logo{display:flex;align-items:center;justify-content:center;gap:6px}
+.logo h1{margin:0}
+@media (max-width:520px){.logo{flex-direction:column}}
+@media (prefers-reduced-motion:reduce){.runner{animation:none}}
+
+/* running line: two identical copies side by side, the track slides left by exactly one copy and starts again (no script, so no CSP problem) */
+.ticker{overflow:hidden;background:var(--accent-soft);border-block:1px solid var(--line);color:var(--fg);font-size:.92rem;font-weight:600;white-space:nowrap}
+.ticker .track{display:flex;width:max-content;animation:ticker 45s linear infinite}
+.ticker:hover .track{animation-play-state:paused}
+.ticker .copy{display:flex;flex:none;min-width:100vw}
+.ticker .item{padding:8px 0;display:flex;align-items:center}
+.ticker .item::before{content:"";width:8px;height:8px;margin:0 22px;border-radius:50%;background:var(--accent-2);flex:none}
+@keyframes ticker{to{transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){.ticker .track{animation:none;width:auto;flex-wrap:wrap}.ticker .copy[aria-hidden]{display:none}.ticker{white-space:normal}}
+
+/* the title of the home page: each letter hops in turn (delays by position; inline styles are not allowed by the CSP) */
+.logo h1 .ch{display:inline-block;animation:hop 2.6s ease-in-out infinite}
+.logo h1 .ch.b{color:var(--accent)}
+.logo h1 .ch:nth-child(1){animation-delay:0s}.logo h1 .ch:nth-child(2){animation-delay:.1s}.logo h1 .ch:nth-child(3){animation-delay:.2s}
+.logo h1 .ch:nth-child(4){animation-delay:.3s}.logo h1 .ch:nth-child(5){animation-delay:.4s}.logo h1 .ch:nth-child(6){animation-delay:.5s}
+.logo h1 .ch:nth-child(7){animation-delay:.6s}.logo h1 .ch:nth-child(8){animation-delay:.7s}.logo h1 .ch:nth-child(9){animation-delay:.8s}
+.logo h1 .ch:nth-child(10){animation-delay:.9s}
+@keyframes hop{0%,38%,100%{transform:translateY(0)}12%{transform:translateY(-14px)}24%{transform:translateY(0)}30%{transform:translateY(-4px)}}
+@media (prefers-reduced-motion:reduce){.logo h1 .ch{animation:none}}

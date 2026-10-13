@@ -293,3 +293,7 @@ function page_welcome(PDO $pdo): void
     echo '<p class="muted">Mã nguyên liệu: 201 Đá nâng cấp, 202 Đá chỉ số, 203 Đá pha lê, 204 Đá GEN, 205 Đá mở ô GEN. Lần lưu cuối: ' . h($set['updated_at']) . ' bởi ' . h($set['updated_by']) . '.</p>';
     layout_end();
 }
+
+register_page('mail', 'Hòm thư', 'comm', 'page_mail', 10);
+register_page('welcome', 'Quà tân thủ', 'comm', 'page_welcome', 20);
+register_page('notices', 'Thông báo', 'comm', 'page_notices', 30);

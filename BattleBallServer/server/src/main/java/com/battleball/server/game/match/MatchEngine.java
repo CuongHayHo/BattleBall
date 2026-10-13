@@ -241,6 +241,120 @@ public final class MatchEngine {
         return null;
     }
 
+    /**
+     * In a dungeon the earring is taken off (owner request 2026-10-13, docs 15.40): the fused fighter becomes the main character alone, with its own figures, and its partner joins
+     * it as a new fighter (an AI), a little behind it. Nothing else is reset: the fighters keep their share of the maximum HP and Ki, the cooldowns and the buffs of the main character
+     * (only the difference between the figures of the fusion and of the character is applied), and the player keeps the control of whoever he had. Refused when nothing is fused,
+     * when the fused fighter is dead or is charging or channelling a skill (the fighters fight all the time, so a pause between two skills or a dart in the air must not stop it).
+     */
+    public boolean splitFusion() {
+        lastInputAt = now;
+        if (finished || training != null) {
+            return false;
+        }
+        Fighter f = null;
+        for (Fighter x : squad) {
+            if (x.fusion && x.partnerCharacterId != 0) {
+                f = x;
+                break;
+            }
+        }
+        if (f == null) {
+            return false;
+        }
+        if (!f.alive || f.cast != null || f.channel != null) {                       // a skill that is charging or channelling is not cut; the pause between two skills and the darts in the air do not matter
+            return false;
+        }
+        List<MatchSetup.SquadMember> halves = fusedHalves.get(f.characterId);                 // a fusion made in this match, else the one the match started with
+        if (halves == null) {
+            for (MatchSetup.SquadMember m : setup.squad()) {
+                if (m.characterId() == f.characterId && m.split() != null) {
+                    halves = m.split();
+                }
+            }
+        }
+        if (halves == null || halves.size() < 2) {
+            return false;
+        }
+        fusedHalves.remove(f.characterId);
+        MatchSetup.SquadMember mainAlone = halves.get(0);
+        MatchSetup.SquadMember partnerAlone = halves.get(1);
+        double hpShare = (double) f.hp / Math.max(1, f.hpMax);
+        double kiShare = f.ki / Math.max(1.0, f.kiMax);
+        applyStats(Map.of(f.characterId, mainAlone.stats()));
+        f.hp = Math.max(1, Math.round(f.hpMax * hpShare));
+        f.ki = f.kiMax * kiShare;
+        f.fusion = false;
+        f.partnerCharacterId = 0;
+        f.costumeId = mainAlone.costumeId();
+        f.name = mainAlone.name();
+        spawnBuf.add(spawnProto(f));                                                 // the client learns the look and the figures of the main character alone
+        double side = f.dirX >= 0 ? -1 : 1;
+        Fighter partner = spawnFighter(partnerAlone, clamp(f.x + side * 70, 20, arenaW - 20), clamp(f.y + 40, 20, arenaH - 20));
+        partner.hp = Math.max(1, Math.round(partner.hpMax * hpShare));
+        partner.ki = partner.kiMax * kiShare;
+        partner.dirX = f.dirX;
+        partner.dirY = f.dirY;
+        squad.add(partner);
+        expRaw.putIfAbsent(partnerAlone.characterId(), 0.0);
+        effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.FUSION_SPLIT).setSourceId(f.id).setTargetId(partner.id).setX((float) f.x).setY((float) f.y).build());
+        return true;
+    }
+
+    /** The two characters of a fusion made in this match, to split it back (the ones of a fusion the match started with are in the setup). */
+    private final Map<Long, List<MatchSetup.SquadMember>> fusedHalves = new java.util.HashMap<>();
+
+    /**
+     * In a dungeon the earring fuses two characters of the squad (owner request 2026-10-13, docs 15.41), the reverse of {@link #splitFusion}. {@code fused} is the member as the server
+     * builds it for a match that starts fused (the figures of both added, the look of the fusion, {@code split} = the two characters alone). The main character keeps its fighter (the
+     * difference of the figures is applied, so the buffs it has stay) and takes the sum of the HP and of the Ki of both (up to the new maximum); the partner's fighter is gone, and the
+     * player controls the fusion when he controlled either of the two. Refused when a fighter is missing, dead, already fused, or busy with a skill.
+     */
+    public boolean fuse(MatchSetup.SquadMember fused) {
+        lastInputAt = now;
+        if (finished || training != null || fused.partnerCharacterId() == 0 || fused.split() == null) {
+            return false;
+        }
+        Fighter a = null;
+        Fighter b = null;
+        for (Fighter x : squad) {
+            if (x.characterId == fused.characterId()) {
+                a = x;
+            } else if (x.characterId == fused.partnerCharacterId()) {
+                b = x;
+            }
+        }
+        if (a == null || b == null) {
+            return false;
+        }
+        for (Fighter x : List.of(a, b)) {
+            if (!x.alive || x.fusion || x.cast != null || x.channel != null) {
+                return false;
+            }
+        }
+        long hp = a.hp + b.hp;
+        double ki = a.ki + b.ki;
+        applyStats(Map.of(a.characterId, fused.stats()));
+        a.hp = Math.min(a.hpMax, hp);
+        a.ki = Math.min(a.kiMax, ki);
+        a.fusion = true;
+        a.partnerCharacterId = b.characterId;
+        a.costumeId = fused.costumeId();
+        a.name = fused.name();
+        fusedHalves.put(a.characterId, fused.split());
+        if (b.controlled) {
+            b.controlled = false;
+            a.controlled = true;
+            controlled = a;
+        }
+        squad.remove(b);
+        entities.remove(b);
+        despawnBuf.add(b.id);
+        spawnBuf.add(spawnProto(a));                                                // the look and the figures of the fusion
+        effectBuf.add(EffectEvent.newBuilder().setEffect(Effect.FUSION_MERGE).setSourceId(a.id).setTargetId(b.id).setX((float) a.x).setY((float) a.y).build());
+        return true;
+    }
+
     public int bossesDefeated() {
         return bossesDefeated;
     }
@@ -762,6 +876,10 @@ public final class MatchEngine {
                     range = Math.max(range, distanceToViewEdge(f.x, f.y, f.dirX, f.dirY) + 40);        // in a dungeon the chuong flies on through everything to the edge of the screen (owner request 2026-10-11)
                 }
                 double radius = L.widthPx() == null ? 40 : L.widthPx() / 2.0;
+                if (dungeon) {
+                    // the data says 160 to 220 px of width, many times the dart that is drawn: monsters far from the dart died too (owner report 2026-10-13); in a dungeon what the dart touches is hit
+                    radius = Math.min(radius, rule("dg_chuong_radius_px", 28));
+                }
                 projectiles.add(new Projectile(nextProjectileId++, f, f.x, f.y, f.dirX, f.dirY, speed, range, radius, f.atk * pct(L) / 100.0, id, false, false));
                 return true;
             }
@@ -1977,9 +2095,13 @@ public final class MatchEngine {
         }
         Difficulty level = setup.difficulty();                  // docs 15.33: the difficulty of the run scales every monster and boss
         String tier = setup.dungeon() == null ? "" : setup.dungeon().tier();
-        m.hpMax = m.hp = Math.max(1, Math.round(ms.hp() * boss.hpMult() * level.hpMult(tier)));
+        // balance_config boss_scale: what every boss (not the small monsters) has more or less than the table says, on top of the difficulty (owner request 2026-10-13: boss HP / 10, more damage)
+        Map<String, Object> bossScale = m.kind == MonsterKind.BOSS ? d.balanceObj("boss_scale") : Map.of();
+        double bossHp = Json.num(bossScale, "hp", 1);
+        double bossAtk = Json.num(bossScale, "atk", 1);
+        m.hpMax = m.hp = Math.max(1, Math.round(ms.hp() * boss.hpMult() * level.hpMult(tier) * bossHp));
         double atkPct = ms.atkMin() + rng.nextDouble() * (ms.atkMax() - ms.atkMin());
-        m.atkPerHit = atkPct / 100.0 * d.balanceNum("max_atk_total", 500_000) * boss.atkMult() * level.atkMult(tier);
+        m.atkPerHit = atkPct / 100.0 * d.balanceNum("max_atk_total", 500_000) * boss.atkMult() * level.atkMult(tier) * bossAtk;
         m.atk = m.atkPerHit;
         m.armorReduction = (ms.armorMin() + ms.armorMax()) / 2.0 / 100.0;
         m.critRatePct = 0;
@@ -2632,6 +2754,9 @@ public final class MatchEngine {
         damageBuf.clear();
         effectBuf.clear();
         spawnBuf.clear();
+        for (int gone : despawnBuf) {
+            b.addDespawns(gone);                                                   // a fighter that was fused into another
+        }
         despawnBuf.clear();
         return b.build();
     }

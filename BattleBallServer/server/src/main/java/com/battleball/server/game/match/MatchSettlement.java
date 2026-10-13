@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.random.RandomGenerator;
 
 /**
- * Pays a finished match in one transaction: gold, EXP and level-ups, drops, gems (first clear, timed clear), achievements, training armor points,
+ * Pays a finished match in one transaction: gold, EXP and level-ups, drops, gems (first clear, timed clear), training armor points,
  * the match record and the anomaly log. The flag match_run.reward_applied makes a second call a no-op (nothing is paid twice).
  * Rules: docs/database/BattleBall.md 4.1, 10.28 to 10.31, 10.33.
  */
@@ -67,10 +67,8 @@ public final class MatchSettlement {
 
                 // ---- EXP and levels (the three characters, a fusion partner included; each gets the whole amount, CONFIRMED)
                 double winBonus = won ? 1 + Json.num(d.balanceObj("exp_rules"), "win_bonus", 0.2) : 1.0;
-                Map<Long, int[]> levelsAfter = new LinkedHashMap<>();
                 for (Map.Entry<Long, Double> e : out.expRaw().entrySet()) {
                     int[] lv = applyExp(c, d, e.getKey(), Math.round(e.getValue() * winBonus * rewardMult));
-                    levelsAfter.put(e.getKey(), lv);
                     end.addCharacters(CharacterReward.newBuilder().setCharacterId(e.getKey()).setExpGained(Math.round(e.getValue() * winBonus * rewardMult))
                             .setLevelBefore(lv[0]).setLevelAfter(lv[1]));
                     try (PreparedStatement ps = c.prepareStatement("INSERT INTO match_run_character (run_id, character_id, exp_gained, level_before, level_after) VALUES (?,?,?,?,?) "
@@ -125,12 +123,6 @@ public final class MatchSettlement {
                     adjustWallet(c, s.accountId(), mainId, "gems", gems, "MATCH_GEMS", "run:" + s.runId());
                 }
                 end.setGems(gems);
-
-                // ---- achievements
-                long wins = won ? countWins(c, s.accountId()) : 0;
-                for (int id : achievements(c, d, s, out, levelsAfter, won, wins)) {
-                    end.addAchievements(id);
-                }
 
                 trainArmor(c, d, s, mainMember);
                 anomalies(c, d, s, out, won);
@@ -339,69 +331,6 @@ public final class MatchSettlement {
             }
         }
         return global;
-    }
-
-    private long countWins(Connection c, long accountId) throws SQLException {
-        try (PreparedStatement ps = c.prepareStatement("SELECT COUNT(*) FROM match_run WHERE account_id = ? AND status = 'WON'")) {
-            ps.setLong(1, accountId);
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getLong(1);
-            }
-        }
-    }
-
-    private List<Integer> achievements(Connection c, StaticData d, MatchStarter.Started s, MatchOutcome out, Map<Long, int[]> levelsAfter, boolean won, long wins) throws SQLException {
-        List<Integer> done = new ArrayList<>();
-        for (StaticData.Achievement a : d.achievements()) {
-            for (Map.Entry<Long, int[]> e : levelsAfter.entrySet()) {
-                long characterId = e.getKey();
-                String race = raceOf(c, characterId);
-                if (!a.race().equals("ANY") && !a.race().equals(race)) {
-                    continue;
-                }
-                boolean reached = switch (a.condition()) {
-                    case "LEVEL_REACH" -> e.getValue()[1] >= a.threshold();
-                    case "WINS_TOTAL" -> won && characterId == s.setup().squad().get(0).characterId() && wins >= a.threshold();
-                    case "FIRST_CLEAR_BOSS" -> out.kills().stream().anyMatch(k -> k.realBoss() && k.bossId() == a.threshold());
-                    default -> false;
-                };
-                if (!reached) {
-                    continue;
-                }
-                try (PreparedStatement ps = c.prepareStatement("INSERT IGNORE INTO character_achievement (character_id, achievement_id) VALUES (?,?)")) {
-                    ps.setLong(1, characterId);
-                    ps.setInt(2, a.id());
-                    if (ps.executeUpdate() == 0) {
-                        continue;
-                    }
-                }
-                if (a.rewardCostumeId() != null) {
-                    try (PreparedStatement ps = c.prepareStatement("INSERT IGNORE INTO owned_skin (account_id, costume_id, source) VALUES (?,?,'REWARD')")) {
-                        ps.setLong(1, s.accountId());
-                        ps.setInt(2, a.rewardCostumeId());
-                        ps.executeUpdate();
-                    }
-                }
-                if (a.rewardGems() != null && a.rewardGems() > 0) {
-                    adjustWallet(c, s.accountId(), characterId, "gems", a.rewardGems(), "ACHIEVEMENT", "achievement:" + a.id());
-                }
-                if (!done.contains(a.id())) {
-                    done.add(a.id());
-                }
-            }
-        }
-        return done;
-    }
-
-    private static String raceOf(Connection c, long characterId) throws SQLException {
-        try (PreparedStatement ps = c.prepareStatement("SELECT race FROM game_character WHERE character_id = ?")) {
-            ps.setLong(1, characterId);
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getString(1);
-            }
-        }
     }
 
     /** Training armor (docs 10.21): worn = it gains points each match; not worn = one stored point is used up for the +ATK that match. */
